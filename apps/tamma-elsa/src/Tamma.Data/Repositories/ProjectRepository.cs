@@ -67,7 +67,7 @@ public class ProjectRepository(
         return project;
     }
 
-    public async Task<ProjectEntity?> UpdateAsync(ProjectEntity project)
+    public async Task<ProjectEntity?> UpdateAsync(ProjectEntity project, int? expectedVersion = null)
     {
         ArgumentNullException.ThrowIfNull(project);
         ValidateVocabulary(project);
@@ -88,11 +88,12 @@ public class ProjectRepository(
         existing.ArchivedAt = project.ArchivedAt;
         existing.UpdatedAt = DateTime.UtcNow;
         existing.Version += 1;
-        await db.SaveChangesAsync();
+        PinExpectedVersion(db, existing, expectedVersion);
+        await SaveGuardingVersionAsync(db, project.Id);
         return existing;
     }
 
-    public async Task<bool> DeleteAsync(Guid id)
+    public async Task<bool> DeleteAsync(Guid id, int? expectedVersion = null)
     {
         var tid = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(tid);
@@ -100,10 +101,51 @@ public class ProjectRepository(
         if (row is null)
             return false;
         db.Projects.Remove(row);
+        PinExpectedVersion(db, row, expectedVersion);
         // A non-empty project trips the work_items FK RESTRICT here — the
-        // caller (44-2) maps the constraint violation to a 409.
-        await db.SaveChangesAsync();
+        // caller (44-2) maps SqlState 23503 to the documented 409.
+        await SaveGuardingVersionAsync(db, id);
         return true;
+    }
+
+    /// <summary>
+    /// Make the caller's <c>If-Match</c> precondition ATOMIC with the write
+    /// (44-2 adversarial review, 2026-07-29). Without this the service checks
+    /// the version against ITS read and the repository then re-reads in a fresh
+    /// context, so the interleaving
+    /// <c>W2.read(v1) → W1 completes(v2) → W2.repo-read(v2) → W2 writes v3</c>
+    /// passes the service check and never trips the EF token. Pinning the
+    /// concurrency token's ORIGINAL value to the version the caller asserted
+    /// puts <c>WHERE "Version" = @expected</c> in the UPDATE/DELETE itself:
+    /// rowcount 0 → DbUpdateConcurrencyException → the typed conflict.
+    /// </summary>
+    private static void PinExpectedVersion(TenantDbContext db, ProjectEntity row, int? expectedVersion)
+    {
+        if (expectedVersion is int expected)
+            db.Entry(row).Property(p => p.Version).OriginalValue = expected;
+    }
+
+    private static async Task SaveGuardingVersionAsync(TenantDbContext db, Guid projectId)
+    {
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new TammaError(
+                "TRACKER.CONCURRENCY_CONFLICT",
+                $"Project '{projectId}' was modified by another writer while this update "
+                + "was in flight (optimistic-concurrency Version mismatch). Re-read the project "
+                + "and retry the operation against its current state.",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = projectId,
+                    ["conflictEntries"] = ex.Entries.Count,
+                },
+                retryable: true,
+                severity: TammaErrorSeverity.Medium);
+        }
     }
 
     private static void ValidateVocabulary(ProjectEntity project)

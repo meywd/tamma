@@ -19,6 +19,7 @@ using Tamma.Api.Services.Provisioning.V2;
 using Tamma.Core.Interfaces;
 using Tamma.Api.Services.PlatformTasks;
 using Tamma.Api.Services.Webhooks;
+using Tamma.Core.Actions;
 using Tamma.Data;
 using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
@@ -27,6 +28,22 @@ using Tamma.Platforms.GitHub;
 using Tamma.Platforms.GitLab;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Story 42-10 (AC3, D4) — compose the shell execution PROFILE before any catalog
+// access. The catalog freezes the shell/process.spawn shipped level (80
+// unsandboxed / 40 sandboxed) at first touch, so this MUST precede Validate()
+// below; ActionCatalogStartupValidator re-checks the frozen level against config
+// and refuses to boot on a mismatch (a wrong ordering is fail-loud, not silent).
+Tamma.Core.Actions.ShellExecutionProfile.Initialize(
+    builder.Configuration.GetValue("Tools:Shell:Sandboxed", false));
+
+// Story 42-10 (AC2, D3) — verify the shell SANDBOX guarantees at composition when
+// the profile is declared: with Tools:Shell:Sandboxed=true, refuse to boot unless
+// the egress mechanism is attested and (when a probe host is configured)
+// unreachable, and the workspace root is set. A no-op when unsandboxed. Inline
+// (like ActionCatalog.Validate above) rather than a hosted service, so it is not
+// itself a catalogued BackgroundActor.
+Tamma.Api.Services.Tools.ShellSandboxStartupValidator.VerifyOrThrow(builder.Configuration);
 
 // Story 43-2 AC13 — validate the Action Catalog at boot so a catalog
 // violation (missing descriptor, broken group partition, bad key) fails
@@ -373,6 +390,16 @@ builder.Services.AddScoped<Tamma.Api.Services.AcceptanceRules.AcceptanceRulesSer
 builder.Services.AddScoped<Tamma.Core.Documents.Policy.IAcceptanceRulesResolver>(
     sp => sp.GetRequiredService<Tamma.Api.Services.AcceptanceRules.AcceptanceRulesService>());
 builder.Services.AddScoped<Tamma.Api.Services.AcceptanceRules.GetAcceptanceRulesToolFactory>();
+// Story 44-2 — the native tracker's application service + assignee picker.
+// The repositories (IProjectRepository / IWorkItemRepository /
+// IIterationRepository / ITrackerPreferenceRepository) were registered by
+// Story 44-1 in Tamma.Data/DependencyInjection.cs; these two are the API layer
+// on top. TrackerAssigneeResolver is registered concretely (not behind an
+// interface) for the AcceptanceRules/GetAcceptanceRulesToolFactory reason — it
+// has exactly one implementation and no seam to fake at the DI boundary; its
+// tests construct it directly.
+builder.Services.AddScoped<Tamma.Api.Services.Tracker.ITrackerService, Tamma.Api.Services.Tracker.TrackerService>();
+builder.Services.AddScoped<Tamma.Api.Services.Tracker.TrackerAssigneeResolver>();
 // Story 39-8 — the escalation disposition surface (appends ESCALATION.RESOLVED, FAIL-LOUD).
 builder.Services.AddScoped<Tamma.Api.Services.Documents.EscalationDispositionService>();
 // Story 39-8 / 39-18 (D7) — the shared document-decision submission path. BOTH the
@@ -652,6 +679,11 @@ builder.Services.AddSingleton<Tamma.Api.Services.Git.IGitHubClientFactory,
     Tamma.Api.Services.Git.GitHubClientFactory>();
 builder.Services.AddScoped<Tamma.Api.Services.Git.IGitMediationService,
     Tamma.Api.Services.Git.GitMediationService>();
+// Story 43-12 — the merge route's per-request key selector (multi-binding: it picks
+// git.merge.dev|qa|main from the PR base branch, failing closed to git.merge.main).
+// Registered as itself; the enforcement seam resolves it by the type the route's
+// IActionKeySelectorMetadata names.
+builder.Services.AddScoped<Tamma.Api.Services.Git.MergeTargetActionKeySelector>();
 
 // ── Story 38 (Phase 1) — CI / JIRA / email step mediation ──
 // CI (GitHub Actions) reuses the git guard + token resolver (CI runs on the same
@@ -1650,6 +1682,37 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("actions:manage"));
         });
+        // Story 44-2 (AC4) — the native tracker, TWO policies with different
+        // reach. TrackerView (tracker:view = member+) gates reads AND the
+        // RECOVERABLE work-item writes (create / patch / status / assign): a
+        // member must be able to file and move work or the tracker is not a
+        // tracker. TrackerManage (tracker:manage = admin+owner) gates
+        // project/iteration STRUCTURE, the tenant-wide tracker_preferences row,
+        // AND the work-item DELETE. As with AcceptanceRulesManage, neither
+        // reuses SettingsManage — that policy is owner-only and would 403 every
+        // tenant_admin.
+        //
+        // THERE IS NO OWNERSHIP PLANE (adversarial review, 2026-07-29). Neither
+        // TrackerService nor the repositories carry any creator/assignee check:
+        // every tenant member can READ and EDIT every work item in the tenant
+        // today, and AC7's honest degradation means every member also SEES every
+        // item. The word "their own work" in AC4's justification described an
+        // ownership model that was never implemented. The recoverable writes
+        // stay at TrackerView (AC4's normative clause, and a bad patch is
+        // repairable); the HARD DELETE is admin-gated because 44-2 emits no
+        // events at all (44-5 owns emission), so a member-triggered delete would
+        // be both unrecoverable and unaudited. Revisit when an ownership plane
+        // (39-20's resolver) or the 44-5 audit trail lands.
+        options.AddPolicy("TrackerView", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("tracker:view"));
+        });
+        options.AddPolicy("TrackerManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("tracker:manage"));
+        });
         options.AddPolicy("WorkflowsView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -1752,7 +1815,13 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "AcceptanceRulesManage", "ScheduleManage", "ActionsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "AcceptanceRulesManage", "ScheduleManage", "ActionsManage",
+            // Story 44-2 — the tracker pair. THIS array is the third of the
+            // three RBAC places (Permissions.Matrix, the AddAuthorization block,
+            // and here); it is the one that gets forgotten, and a policy missing
+            // from it throws at Development startup rather than 403ing quietly.
+            "TrackerView", "TrackerManage",
+            "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny", "EngineServiceOnly", "OrchestratorChannel" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -2183,15 +2252,17 @@ admin.MapDelete("/tenant-databases/{databaseId:guid}",
 // only). The sweeper migrates each tenant THROUGH its pooled NpgsqlDataSource
 // (a re-parsed connection string cannot authenticate — Npgsql strips the
 // password from NpgsqlDataSource.ConnectionString; see the 44-1 plan).
+//
+// 2026-07-30 sweep-hygiene follow-up (see AdminTenantMigrationEndpoints for
+// the full rationale): the default flipped from apply to DRY RUN (breaking);
+// applying needs ?apply=true + the X-Admin-Confirm header and returns 202 +
+// a status URL instead of blocking the request for the whole fleet; a second
+// concurrent apply gets 409 off a cluster-wide advisory lock.
 admin.MapPost("/tenants/migrate",
-        async (bool? dryRun, int? maxConcurrency,
-               Tamma.Data.Abstractions.ITenantMigrationSweeper sweeper,
-               CancellationToken ct) =>
-            Results.Ok(await sweeper.SweepAsync(
-                dryRun ?? false,
-                maxConcurrency
-                    ?? Tamma.Data.Abstractions.TenantMigrationSweep.DefaultMaxConcurrency,
-                ct)))
+        Tamma.Api.Endpoints.Admin.AdminTenantMigrationEndpoints.Migrate)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/tenants/migrate/{runId:guid}",
+        Tamma.Api.Endpoints.Admin.AdminTenantMigrationEndpoints.GetRun)
     .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 41-30 (D8) — the tenant-aware scheduled-trigger seam's admin surface.
@@ -2549,8 +2620,16 @@ app.MapGet("/api/v1/tenants/{tenantId:guid}/status",
 // caller with the token can exchange it exactly once, and the rate
 // limit on SecretReveal (10/min/user or anon) frustrates brute-force
 // guessing attempts without needing a login.
+// Story 42-10 (AC5, D6) — an LLM reading a secret value into context is
+// effect:secret.read at level 90. The reveal route is deliberately anonymous
+// (the token IS the auth), and 43-13's CallerKindResolver grades anonymous as
+// LLM (fail-closed): a tool-loop curl of the reveal URL is gated at 90, while an
+// authenticated dashboard exchange resolves as Human and passes ungated. So the
+// gate binds here without a second route.
 app.MapGet("/api/v1/secrets/reveal/{token}", SecretEndpoints.RevealSecret)
-    .RequireRateLimiting("SecretReveal");
+    .RequireRateLimiting("SecretReveal")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.SecretRead.ToWire()))
+    .EnforcesGovernance();
 
 // Story 29-6 (audit gap #2) — platform-scope trigger of the AUDITED
 // rotate-secret SAGA workflow. Mints a fresh correlation id, takes the
@@ -2873,6 +2952,9 @@ var actionsPolicy = app.MapGroup("/api/actions").RequireAuthorization("Authentic
 actionsPolicy.MapGet("/dial", ActionPolicyEndpoints.GetDial);
 actionsPolicy.MapGet("/catalog", ActionPolicyEndpoints.GetCatalog);
 actionsPolicy.MapGet("/policy", ActionPolicyEndpoints.GetPolicy);
+// Story 43-15 (AC5) — the detent diff preview. A GET (out of the coverage
+// sweep's scope, D5); registered before the parameterized /policy/* siblings.
+actionsPolicy.MapGet("/policy/diff", ActionPolicyEndpoints.GetPolicyDiff);
 actionsPolicy.MapPost("/policy/reset", ActionPolicyEndpoints.ResetPolicy).RequireAuthorization("ActionsManage");
 actionsPolicy.MapPut("/policy/groups/{group}/threshold", ActionPolicyEndpoints.PutGroupThreshold).RequireAuthorization("ActionsManage");
 actionsPolicy.MapDelete("/policy/groups/{group}", ActionPolicyEndpoints.DeleteGroup).RequireAuthorization("ActionsManage");
@@ -2882,6 +2964,24 @@ actionsPolicy.MapPut("/policy/actions/{ns}/{key}/enabled", ActionPolicyEndpoints
 actionsPolicy.MapPut("/policy/actions/{ns}/{key}/roles", ActionPolicyEndpoints.PutActionRoles).RequireAuthorization("ActionsManage");
 actionsPolicy.MapDelete("/policy/actions/{ns}/{key}", ActionPolicyEndpoints.DeleteAction).RequireAuthorization("ActionsManage");
 
+// ── Story 43-9 AC13 — the AUTHORIZATION LEDGER's human surface ──
+// A live enforcing gate that can answer "a person must decide" with no way for a
+// person to decide would be a hang, not a gate: these two routes are what make
+// Seam C's 409 and Seam E's RequiresHuman actionable, which is why they ship in
+// the SAME change as the enforcement opt-in.
+// ROUTE ORDERING: the literal /authorizations segment is registered here, after
+// the /policy/... literals and their parameterized siblings, and its own
+// parameterized child carries a :guid constraint. `authorizations` can never be
+// swallowed by /policy/actions/{ns}/{key} — different first segment — and the
+// ordering is explicit rather than constraint-dependent (the /api/acceptance-rules
+// /defaults trap).
+// RBAC: the LIST is AuthenticatedAny (inherited from the group — everyone needs to
+// see what is waiting on them); the DECIDE takes ActionsManage, because granting
+// an authorization IS exercising the autonomy policy.
+actionsPolicy.MapGet("/authorizations", ActionAuthorizationEndpoints.ListAuthorizations);
+actionsPolicy.MapPost("/authorizations/{id:guid}/decide", ActionAuthorizationEndpoints.Decide)
+    .RequireAuthorization("ActionsManage");
+
 // The PLATFORM CEILING — platform-owner only (epic 43 README OQ4: the
 // ceiling is the load-bearing protection; a tenant admin can never lower a
 // platform gate because the evaluator composes it with max()).
@@ -2890,6 +2990,79 @@ actionsCeiling.MapPut("/actions/{ns}/{key}/threshold", ActionPolicyEndpoints.Put
 actionsCeiling.MapDelete("/actions/{ns}/{key}", ActionPolicyEndpoints.DeleteCeilingAction);
 actionsCeiling.MapPut("/groups/{group}/threshold", ActionPolicyEndpoints.PutCeilingGroupThreshold);
 actionsCeiling.MapDelete("/groups/{group}", ActionPolicyEndpoints.DeleteCeilingGroup);
+
+// ── Story 44-2 — the native tracker (projects, work items, preferences) ──
+// ONE group, three nouns (plan D1) so the literal-before-parameterized ordering
+// is got right in one place rather than three; 44-4's iterations join here.
+//
+// RBAC (AC4), three-place lockstep with Permissions.Matrix and the
+// AddAuthorization block above:
+//   * TrackerView  (tracker:view  = member/admin/owner) — reads AND the
+//     RECOVERABLE work-item writes: create, patch, status, assign. A member
+//     must be able to file a bug and move a card.
+//   * TrackerManage (tracker:manage = admin/owner)      — project STRUCTURE
+//     (create/patch/delete), the tracker_preferences row (tenant-wide
+//     configuration in SaaS), AND the work-item DELETE.
+// Neither reuses SettingsManage (owner-only; would 403 every tenant_admin).
+//
+// NO OWNERSHIP PLANE EXISTS (adversarial review, 2026-07-29). TrackerService
+// performs no creator/assignee check on any route, so every tenant member can
+// see and edit EVERY work item in the tenant — there is no "their own card" to
+// scope to. The recoverable writes stay at TrackerView per AC4's normative
+// clause. DELETE /work-items/{id} is a HARD delete this story's own catalog
+// descriptor grades Destructive/reversible:false, and 44-2 emits no events
+// (44-5 owns emission), so a member delete would be unrecoverable AND
+// unaudited: it is admin-gated until an ownership plane or the audit trail
+// lands. This is a deliberate TIGHTENING of AC4 — recorded in the story
+// amendment dated 2026-07-29.
+//
+// ROUTE ORDERING: /work-items/assignable and /work-items/by-key/{key} are
+// LITERAL and are mapped BEFORE /work-items/{id:guid}. The :guid constraint
+// would in fact reject "assignable", but relying on a constraint for
+// disambiguation is exactly the trap the acceptance-rules /defaults comment
+// warns about — the ordering is explicit and TrackerRouteOrderTests pins it.
+//
+// NOT /api/tasks*: that path belongs to Story 39-19's decision inbox and the two
+// must stay distinguishable in a route table (story technical notes).
+var tracker = app.MapGroup("/api")
+    .RequireAuthorization("AuthenticatedAny")
+    .RequireRateLimiting("ConfigRead");
+
+// Projects — structure is TrackerManage.
+tracker.MapGet("/projects", TrackerEndpoints.ListProjects).RequireAuthorization("TrackerView");
+tracker.MapGet("/projects/{projectId:guid}", TrackerEndpoints.GetProject).RequireAuthorization("TrackerView");
+tracker.MapPost("/projects", TrackerEndpoints.CreateProject)
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
+tracker.MapPatch("/projects/{projectId:guid}", TrackerEndpoints.PatchProject)
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
+tracker.MapDelete("/projects/{projectId:guid}", TrackerEndpoints.DeleteProject)
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
+
+// Work items — literal segments FIRST, then the parameterized ones.
+tracker.MapGet("/work-items/assignable", TrackerEndpoints.ListAssignable).RequireAuthorization("TrackerView");
+tracker.MapGet("/work-items/by-key/{key}", TrackerEndpoints.GetWorkItemByKey).RequireAuthorization("TrackerView");
+tracker.MapGet("/work-items", TrackerEndpoints.ListWorkItems).RequireAuthorization("TrackerView");
+tracker.MapGet("/work-items/{id:guid}", TrackerEndpoints.GetWorkItem).RequireAuthorization("TrackerView");
+tracker.MapPost("/work-items", TrackerEndpoints.CreateWorkItem)
+    .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
+tracker.MapPatch("/work-items/{id:guid}", TrackerEndpoints.PatchWorkItem)
+    .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
+// The ONE destructive work-item route — TrackerManage, not TrackerView (see the
+// no-ownership-plane note above).
+tracker.MapDelete("/work-items/{id:guid}", TrackerEndpoints.DeleteWorkItem)
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
+tracker.MapPost("/work-items/{id:guid}/assign", TrackerEndpoints.AssignWorkItem)
+    .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
+tracker.MapPost("/work-items/{id:guid}/status", TrackerEndpoints.SetWorkItemStatus)
+    .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
+
+// Preferences — per-principal configuration; the ONE mode-branching handler set
+// and the ONE surviving PUT (the body genuinely IS the whole resource).
+tracker.MapGet("/tracker/preferences", TrackerEndpoints.GetPreferences).RequireAuthorization("TrackerView");
+tracker.MapPut("/tracker/preferences", TrackerEndpoints.PutPreferences)
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
+tracker.MapDelete("/tracker/preferences", TrackerEndpoints.DeletePreferences)
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
 
 // ── Settings / Config ──
 // Rate limit (finding 020): ConfigRead default for the group; ConfigWrite
@@ -2957,7 +3130,12 @@ providers.MapGet("/providers/sessions", ProviderEndpoints.ListSessions);
 
 // ── Engine ──
 var engine = app.MapGroup("/api/engine").RequireAuthorization("WorkflowsView");
-engine.MapPost("/command", EngineEndpoints.SendCommand).RequireAuthorization("WorkflowsManage");
+// Story 43-12 — DELETED: POST /api/engine/command (EngineEndpoints.SendCommand).
+// It answered 200 "Command accepted" and performed nothing — a false affordance,
+// an audit hole (a 200 with no event row), and a standing invitation to grow
+// ungoverned behaviour. Cataloguing a no-op would pin governance vocabulary to a
+// lie; the honest fix is to remove the route. A real engine-command surface, if
+// ever built, arrives with its own catalog key and enforcement in the same PR.
 engine.MapGet("/state", EngineEndpoints.GetState);
 engine.MapGet("/stats", EngineEndpoints.GetStats);
 engine.MapGet("/plan", EngineEndpoints.GetPlan);
@@ -2980,10 +3158,23 @@ engine.MapPost("/query-context", EngineEndpoints.QueryContext);
 engine.MapGet("/repo-config", EngineEndpoints.GetRepoConfig);
 engine.MapGet("/issues", EngineEndpoints.GetIssues);
 engine.MapGet("/security-alerts", EngineEndpoints.GetSecurityAlerts);
-engine.MapPost("/issue-comment", EngineEndpoints.PostIssueComment).RequireAuthorization("WorkflowsManage");
-engine.MapPost("/issue-labels", EngineEndpoints.PostIssueLabels).RequireAuthorization("WorkflowsManage");
-engine.MapDelete("/issue-labels/{repo}/{issueNumber}/{label}", EngineEndpoints.DeleteIssueLabel).RequireAuthorization("WorkflowsManage");
-engine.MapPost("/create-issue", EngineEndpoints.CreateIssue).RequireAuthorization("WorkflowsManage");
+// Story 31-13 — the four formerly-ungoverned issue callbacks gain catalog keys
+// + enforcement (D9, D15). Auth is UNCHANGED (WorkflowsManage) — governance keys
+// on the action, not the caller's badge. Behaviour-preserving at the shipped dial
+// (level 35 < 70 ⇒ automated); their KnownUngovernedEndpoints baseline entries are
+// deleted in the same commit, so the ungoverned baseline SHRINKS by 4.
+engine.MapPost("/issue-comment", EngineEndpoints.PostIssueComment).RequireAuthorization("WorkflowsManage")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssueComment.ToWire()))
+    .EnforcesGovernance();
+engine.MapPost("/issue-labels", EngineEndpoints.PostIssueLabels).RequireAuthorization("WorkflowsManage")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssueLabelsSet.ToWire()))
+    .EnforcesGovernance();
+engine.MapDelete("/issue-labels/{repo}/{issueNumber}/{label}", EngineEndpoints.DeleteIssueLabel).RequireAuthorization("WorkflowsManage")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssueLabelsRemove.ToWire()))
+    .EnforcesGovernance();
+engine.MapPost("/create-issue", EngineEndpoints.CreateIssue).RequireAuthorization("WorkflowsManage")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssueCreate.ToWire()))
+    .EnforcesGovernance();
 engine.MapPost("/trigger-ci", EngineEndpoints.TriggerCi).RequireAuthorization("WorkflowsManage");
 engine.MapPost("/execute-task", EngineEndpoints.ExecuteTask).RequireAuthorization("WorkflowsManage");
 engine.MapPost("/cycle-result", EngineEndpoints.PostCycleResult).RequireAuthorization("WorkflowsManage");
@@ -2993,12 +3184,35 @@ engine.MapGet("/cycle-results", EngineEndpoints.GetCycleResults);
 // the events were written to a write-only transient list nothing drained).
 // Gated to EngineServiceOnly (service principal) — NOT WorkflowsManage, which
 // every tenant owner/admin holds and would let them forge audit events (I4).
-engine.MapPost("/events", EngineEndpoints.AppendEvents).RequireAuthorization("EngineServiceOnly");
+// Story 43-8 AC1 step 3 (carve-out §A1 #2, closed 2026-07-30): `.Governs(key)`
+// binds this route to its catalog member. STILL METADATA ONLY.
+// The bound member's descriptor SiteKey must equal "{METHOD} {RawText}" of this
+// very route (GovernedEndpointBindingSweepTests) — bind a route to its OWN member.
+//
+// STORY 43-9 DECISION D15 — the SECOND line, `.EnforcesGovernance()`, is what
+// makes a bound route actually gate. 43-8 planned for 43-9 to attach the filter
+// INSIDE Governs() "so annotating and enforcing stay one call"; that design was
+// OVERTURNED, for three reasons recorded on IGovernanceEnforcementMetadata:
+// (1) one line inside Governs() would have flipped 17 routes into live 409 gates
+// at once with no per-route review; (2) `POST /api/v1/llm/call` (Seam A) must be
+// incapable of blocking in EVERY version, and the cleanest way to guarantee that
+// is that it never writes the second line — a structural fact rather than a
+// carve-out keyed on an action name inside a filter; (3) the four
+// `[Governs]`-bound MentorshipController actions never pass through
+// GovernsExtensions at all, so a filter added there would have enforced 17 routes
+// and silently skipped 4 while reading as "all bindings are enforced".
+// The opted-in set is pinned EXACTLY by GovernedEndpointEnforcementSweepTests, so
+// both an accidental addition and an accidental omission fail the build.
+engine.MapPost("/events", EngineEndpoints.AppendEvents).RequireAuthorization("EngineServiceOnly")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineEventsAppend.ToWire()))
+    .EnforcesGovernance();
 // Engine→platform_events callback: cross-tenant lifecycle / analytics events that the
 // engine drains from its in-process list and POSTs here for durable control-plane
 // persistence + in-process fan-out. Gated EngineServiceOnly (same rationale as /events).
 engine.MapPost("/platform-events", EngineEndpoints.AppendPlatformEvents)
-    .RequireAuthorization("EngineServiceOnly");
+    .RequireAuthorization("EngineServiceOnly")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EnginePlatformEventsAppend.ToWire()))
+    .EnforcesGovernance();
 // Audit finding 002 — `agent-available` is a GET liveness probe (no body),
 // not a POST registration call. The previous wiring as POST silently drifted
 // from the TS contract.
@@ -3009,9 +3223,13 @@ engine.MapGet("/agent-available", EngineEndpoints.AgentAvailable);
 // documents through this fail-loud HTTP hop (mirrors /events). Gated
 // EngineServiceOnly (same rationale as /events): the service principal only.
 engine.MapPost("/documents", DocumentEndpoints.PersistFromEngine)
-    .RequireAuthorization("EngineServiceOnly");
+    .RequireAuthorization("EngineServiceOnly")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineDocumentPersist.ToWire()))
+    .EnforcesGovernance();
 engine.MapPost("/documents/{documentId:guid}/status", DocumentEndpoints.SetStatusFromEngine)
-    .RequireAuthorization("EngineServiceOnly");
+    .RequireAuthorization("EngineServiceOnly")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineDocumentSetStatus.ToWire()))
+    .EnforcesGovernance();
 
 // ── Story 39-18: engine→API channel enqueue seam (D2) ──
 // The lifecycle engine publishes AcceptanceRequest / escalation / guidance messages
@@ -3019,7 +3237,9 @@ engine.MapPost("/documents/{documentId:guid}/status", DocumentEndpoints.SetStatu
 // Gated EngineServiceOnly (same rationale as /events): the service principal only, so
 // a user JWT can never forge a channel message into another tenant's stream.
 engine.MapPost("/channel/outbox", ChannelEndpoints.EnqueueFromEngine)
-    .RequireAuthorization("EngineServiceOnly");
+    .RequireAuthorization("EngineServiceOnly")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineChannelOutboxEnqueue.ToWire()))
+    .EnforcesGovernance();
 
 // ── User dashboard: Repos & Workflow Runs (Story 21-4) ──
 // Tenant-facing read surface behind the SPA's /repos + /runs destinations.
@@ -3181,9 +3401,32 @@ app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
 // handler. The handler delegates to IManagedAgent.RunAsync and maps via
 // ToHttpResult under the §2.4 status discipline (200 / 200 success:false
 // +httpStatusCode / 400 / 403; NEVER a raw 5xx).
+// SEAM A — BOUND, DELIBERATELY NOT ENFORCED (Story 43-9 AC3 / epic D2 / D15).
+// `.Governs(...)` names what this route performs, for the drift harnesses and the
+// admin UI. There is NO `.EnforcesGovernance()` here and there must never be one:
+// a RequiresHuman returned at this route reaches a DispatchWorkflow whose CALLING
+// workflow has no human route in 44 of 45 cases (it would suspend with nobody able
+// to resume it), and blocking here AND at Seam E would double-gate deploy, since
+// the deployment pipeline reaches the model through this very route while Seam E
+// gates the prod-approval decision. Agent-action enforcement lives ONLY at Seam E.
+// The handler still OBSERVES (evaluate → audit → always proceed).
+// Pinned both ways: LlmCallSeam_NeverBlocks_EvenUnderEnforce (behaviour) and
+// LlmCallRoute_IsBound_ButNotEnforced (wiring).
 app.MapPost("/api/v1/llm/call", LlmCallEndpoints.CallLlm)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("CallLlm");
+    .WithName("CallLlm")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.LlmCall.ToWire()));
+
+// ── Story 43-9 Seam E (AC10, D9) — the engine's gate-evaluation mediation route ──
+// Tamma.ElsaServer registers no repository and mediates everything through
+// TammaApiClient, so CheckActionGateActivity cannot inject IAutonomyGate; it asks
+// here instead. THE ROUTE CANNOT GATE ITSELF: it mints no ExternalEffect member
+// (it is a read), carries no .Governs binding by design, and is baselined in
+// KnownUngovernedEndpoints with the justification
+// `gate-evaluation-endpoint-cannot-gate-itself`. Anything else is circular.
+app.MapPost("/api/v1/governance/evaluate", GovernanceEvaluateEndpoints.Evaluate)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("EvaluateGovernance");
 
 // ── Story 32-23 — the streaming run tap (human SSE plane) ──
 // GET /api/v1/llm/runs/{correlationId}/stream — a live, READ-ONLY view of a
@@ -3205,19 +3448,34 @@ app.MapGet("/api/v1/llm/runs/{correlationId}/stream", LlmRunStreamEndpoints.Stre
 // as two segments (an owner/name full name carries a slash).
 app.MapPost("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.CreateBranch)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitCreateBranch");
+    .WithName("GitCreateBranch")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitBranchCreate.ToWire()))
+    .EnforcesGovernance();
 app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests", GitEndpoints.CreatePullRequest)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitCreatePullRequest");
+    .WithName("GitCreatePullRequest")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestCreate.ToWire()))
+    .EnforcesGovernance();
 app.MapPut("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge", GitEndpoints.MergePullRequest)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitMergePullRequest");
+    .WithName("GitMergePullRequest")
+    // Story 43-12 — the coarse effect:git.pull-request.merge is retired; the merge
+    // splits by PR base branch. The route binds all three per-target keys and a
+    // per-request selector (MergeTargetActionKeySelector) picks the one the gate
+    // evaluates, failing closed to git.merge.main.
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitMergeDev.ToWire()))
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitMergeQa.ToWire()))
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitMergeMain.ToWire()))
+    .SelectsGovernanceKeyWith<Tamma.Api.Services.Git.MergeTargetActionKeySelector>()
+    .EnforcesGovernance();
 app.MapGet("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments", GitEndpoints.GetPullRequestComments)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitGetPullRequestComments");
 app.MapPatch("/api/v1/git/{owner}/{repo}/issues/{n:int}", GitEndpoints.UpdateIssue)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitUpdateIssue");
+    .WithName("GitUpdateIssue")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssuePatch.ToWire()))
+    .EnforcesGovernance();
 
 // ── Story 38 (Phase 1) — GitHub "extra ops" (commits + file-changes reads,
 // standalone branch delete) the engine's context/debug/integration activities call
@@ -3232,20 +3490,67 @@ app.MapGet("/api/v1/git/{owner}/{repo}/file-changes", GitEndpoints.GetFileChange
     .WithName("GitGetFileChanges");
 app.MapDelete("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.DeleteBranch)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitDeleteBranch");
+    .WithName("GitDeleteBranch")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitBranchDelete.ToWire()))
+    .EnforcesGovernance();
 
 // ── Epic 38 follow-up #21 — deployment-pipeline release step. Create a GitHub
 // release/tag for the shipped version. Same engine-only plane + guard→token→
 // platform→one-event mediation as the git-platform ops above.
 app.MapPost("/api/v1/git/{owner}/{repo}/releases", GitEndpoints.CreateRelease)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitCreateRelease");
+    .WithName("GitCreateRelease")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitReleaseCreate.ToWire()))
+    .EnforcesGovernance();
+
+// ── Story 31-13 — the 7 PR-lifecycle verbs (close/reopen/comment/review-comment/
+// reviewers/labels/draft). Same engine-only plane + guard→token→platform→one-event
+// mediation as the git-platform ops above; each opts into enforcement (D15) at its
+// 43-11 zone level (35, review-comment 40 — review OUTPUT). Behaviour-preserving at
+// the shipped dial (70): 35/40 < 70 ⇒ automated.
+app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/close", GitEndpoints.ClosePullRequest)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitClosePullRequest")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestClose.ToWire()))
+    .EnforcesGovernance();
+app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reopen", GitEndpoints.ReopenPullRequest)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitReopenPullRequest")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestReopen.ToWire()))
+    .EnforcesGovernance();
+app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments", GitEndpoints.PostPullRequestComment)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitPostPullRequestComment")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestComment.ToWire()))
+    .EnforcesGovernance();
+app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/review-comments", GitEndpoints.PostPullRequestReviewComment)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitPostPullRequestReviewComment")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestReviewComment.ToWire()))
+    .EnforcesGovernance();
+app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reviewers", GitEndpoints.RequestReviewers)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitRequestReviewers")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestRequestReviewers.ToWire()))
+    .EnforcesGovernance();
+app.MapPut("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/labels", GitEndpoints.SetPullRequestLabels)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitSetPullRequestLabels")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestLabel.ToWire()))
+    .EnforcesGovernance();
+app.MapPut("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/draft", GitEndpoints.SetPullRequestDraft)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitSetPullRequestDraft")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestSetDraft.ToWire()))
+    .EnforcesGovernance();
 
 // ── Story 38 (Phase 1) — CI (GitHub Actions) step mediation ──
 // Same engine-only plane + guard→token→platform→one-event mediation as git.
 app.MapPost("/api/v1/ci/{owner}/{repo}/test-runs", CiEndpoints.TriggerTests)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("CiTriggerTests");
+    .WithName("CiTriggerTests")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.CiTestsTrigger.ToWire()))
+    .EnforcesGovernance();
 app.MapGet("/api/v1/ci/{owner}/{repo}/build-status", CiEndpoints.GetBuildStatus)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("CiGetBuildStatus");
@@ -3258,7 +3563,9 @@ app.MapGet("/api/v1/jira/tickets/{ticketId}", JiraEndpoints.GetTicket)
     .WithName("JiraGetTicket");
 app.MapPatch("/api/v1/jira/tickets/{ticketId}", JiraEndpoints.UpdateTicket)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("JiraUpdateTicket");
+    .WithName("JiraUpdateTicket")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.JiraTicketPatch.ToWire()))
+    .EnforcesGovernance();
 
 // ── Story 38-2 (Epic 38) — agent-dispatch step mediation (Class C) ──
 // Same engine-only plane as /api/v1/git and /api/v1/llm/call: the engine's thin
@@ -3270,7 +3577,9 @@ app.MapPatch("/api/v1/jira/tickets/{ticketId}", JiraEndpoints.UpdateTicket)
 // {owner}/{repo} is bound as two segments.
 app.MapPost("/api/v1/agent-dispatch/{owner}/{repo}/runs", AgentDispatchEndpoints.TriggerRun)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("DispatchAgentRun");
+    .WithName("DispatchAgentRun")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.AgentDispatchRun.ToWire()))
+    .EnforcesGovernance();
 app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/runs", AgentDispatchEndpoints.DiscoverRun)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("DiscoverAgentRun");
@@ -3293,7 +3602,9 @@ app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/installation", AgentDispatchEn
 // the transport, and audits to platform_events. NO Slack token ever reaches here.
 app.MapPost("/api/v1/notifications/slack", NotificationEndpoints.QueueSlack)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("QueueSlackNotification");
+    .WithName("QueueSlackNotification")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.NotifySlackQueue.ToWire()))
+    .EnforcesGovernance();
 
 // ── Story 38 (Phase 1) — email step mediation ──
 // Same engine-only plane as the Slack notification: the engine posts an
@@ -3302,7 +3613,9 @@ app.MapPost("/api/v1/notifications/slack", NotificationEndpoints.QueueSlack)
 // tenant scopes the message. NO SMTP/Resend credential ever reaches the engine.
 app.MapPost("/api/v1/notifications/email", EmailEndpoints.SendEmail)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("SendEmailNotification");
+    .WithName("SendEmailNotification")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.NotifyEmailSend.ToWire()))
+    .EnforcesGovernance();
 app.MapPost("/api/v1/workflows/{id}/status", SaaSEndpoints.UpdateWorkflowStatus).RequireAuthorization();
 app.MapPost("/api/v1/workflows/{id}/result", SaaSEndpoints.PostWorkflowResult).RequireAuthorization();
 app.MapPost("/api/v1/installations/{id}/rotate-key", SaaSEndpoints.RotateInstallationKey).RequireAuthorization();

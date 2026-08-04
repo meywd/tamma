@@ -1,6 +1,6 @@
 # Story 43-4: Tool-Vocabulary Reconciliation + Fail-Loud Startup Validator
 
-Status: done — conformance-reviewed 2026-07-29; `ToolNameAliases`, the fail-loud `ActionCatalogStartupValidator` and the `GitSubcommand` consumption all ship, plus the Seam B tool-loop gate (an undeclared deliverable — see the 2026-07-29 addendum); vocabulary (c) `ResolveToolsActivity` is NOT deleted (43-0 has not landed), so the third vocabulary is still alive and unvalidated
+Status: done — conformance-reviewed 2026-07-29; `ToolNameAliases`, the fail-loud `ActionCatalogStartupValidator` and the `GitSubcommand` consumption all ship, plus the Seam B tool-loop gate (an undeclared deliverable — see the 2026-07-29 addendum). *[Superseded 2026-07-29 — Story 43-0 landed: `ResolveToolsActivity.cs` is deleted, so vocabulary (c) no longer exists and "three vocabularies reconciled" is now two vocabularies, both validated. The earlier clause "vocabulary (c) is NOT deleted (43-0 has not landed), so the third vocabulary is still alive and unvalidated" is kept in the table row + amendment note below as the historical record.]*
 
 ## MANDATORY: Before You Code
 
@@ -33,7 +33,7 @@ P0 — Blocks Story 5 (the resolver must be able to answer "what does the emitte
 |---|---|---|---|
 | (a) | Executor registry — what can actually run | `file_read`, `file_write`, `search_code`, `shell_execute`, `git_operations`, `run_tests`, `get_acceptance_rules` | 7 classes implementing `IToolExecutor`; 6 DI-registered at `apps/tamma-elsa/src/Tamma.Api/Program.cs:723-734`, registry at `:735-736` |
 | (b) | Per-role agent config — what is **advertised to the model** | `Read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob` (Claude-Code names) | `apps/tamma-elsa/src/Tamma.Api/Services/Agents/DefaultAgentConfig.cs:53,70,85,102,118,149,165` |
-| (c) | Dead built-in map | `search_code`, `read_file`, `run_tests` | `apps/tamma-elsa/src/Tamma.Activities/LlmCall/ResolveToolsActivity.cs` — **zero code callers** (one doc-comment mention in `GetAcceptanceRulesTool.cs`); **to be** deleted by Story 43-0 |
+| (c) | Dead built-in map | `search_code`, `read_file`, `run_tests` | ~~`apps/tamma-elsa/src/Tamma.Activities/LlmCall/ResolveToolsActivity.cs`~~ — **DELETED 2026-07-29 by Story 43-0**. Had zero code callers and one doc-comment mention in `GetAcceptanceRulesTool.cs` (rewritten in the same change). `ResolvedTool` (`LlmCall/Models/LlmCallModels.cs`) was deliberately kept — it has three live consumers. |
 
 *[Amended 2026-07-29 — vocabulary (c) is still alive.]* Row (c) previously read "deleted by Story 43-0".
 That is not true of the tree: `ResolveToolsActivity.cs` still exists (zero code callers) and **Story 43-0
@@ -43,6 +43,29 @@ first; ignoring it leaves a third vocabulary alive"), and that is the branch rea
 vocabulary remains present and **unvalidated** by `ActionCatalogStartupValidator`. Nothing here is broken
 by it — it has no callers — but the "three vocabularies reconciled" claim holds for (a) and (b) only until
 43-0 deletes (c).
+
+*[Superseded 2026-07-29 (later the same day) — vocabulary (c) is gone.]* Story 43-0 landed and deleted
+`ResolveToolsActivity.cs`. Zero code callers was re-verified across `src/`, `tests/` and the docs tree
+before the delete (the only remaining `"Resolve Tools"` hits are an unrelated `SetVariable` step name in
+`Tamma.ElsaServer/Workflows/LlmCallWorkflow.cs` and historical wiki/story prose). Consequences for THIS
+story, all verified:
+
+- **Nothing in this story's code referenced it.** `ActionCatalogStartupValidator`, `ToolNameAliases` and
+  `ToolCatalogAllowlists` never named `ResolveToolsActivity` or any of its built-in names (`read_file` was
+  never an alias-map key), so no allowlist shrank or grew and no validator branch changed. `dotnet build`
+  and `Tamma.Activities.Tests` (which own `ActionCatalogStartupValidatorTests`, `ToolNameAliasesTests`,
+  `ToolCatalogAllowlistTests`) are green after the delete.
+- **The reconciliation claim is now literally true for the whole tree:** two vocabularies remain — (a) the
+  executor registry and (b) the per-role agent config — and both are validated at boot.
+- **No activity-count pin needed updating.** The deleted type was an Elsa `[Activity]`, but nothing asserts
+  a registered-activity count (`WorkflowStructureTests.SingleIssueCycleWorkflow_ActivityCountIsReasonable`
+  counts a workflow's own nodes, not the assembly's activity set), and nothing referenced it by
+  `DefinitionId` or type.
+- **The `get_acceptance_rules` allowlist entry is untouched.** `GetAcceptanceRulesTool` remains
+  deliberately un-DI-registered (39-5 D6 — the factory mints principal-bound instances per tenant-agent
+  session, so a singleton registration would BE the bug); `ToolCatalogAllowlists.NotDiRegisteredTools`
+  keeps its single entry. 43-0 only rewrote the tool's doc comment, which had been the file's one dangling
+  reference to the deleted activity.
 
 The advertised list reaches the model verbatim and is never checked against the registry:
 `ManagedAgent.ToResolvedTools` (`apps/tamma-elsa/src/Tamma.Api/Services/Agents/ManagedAgent.cs:923-937`) does
@@ -182,6 +205,8 @@ applies that posture to tools, which has never been done.
 - **Story 43-0 (Prerequisite fixes)** — deletes `Tamma.Activities/LlmCall/ResolveToolsActivity.cs`
   (vocabulary (c), zero callers). Not strictly blocking, but if it has not landed the validator must either
   ignore that file or Story 43-0 must land first; ignoring it leaves a third vocabulary alive.
+  *[Resolved 2026-07-29 — 43-0 landed and deleted the file; the validator needed no change because it never
+  referenced it. See the superseding note under the vocabulary table.]*
 - **Existing, verified:** `IToolExecutorRegistry` / `ToolExecutorRegistry`
   (`Tamma.Activities/LlmCall/Tools/`), the six DI registrations (`Tamma.Api/Program.cs:723-734`),
   `GetAcceptanceRulesToolFactory` (`Program.cs:422`), `ToolCallValidator`
@@ -199,6 +224,43 @@ applies that posture to tools, which has never been done.
 - **A protected-path selector for `file_write`.** `PathValidator` enforces workspace-root containment only;
   a `file_write.protected` member would be a row that can never be selected, so it is not shipped.
 - **MCP tool granularity.** MCP stays one coarse catalog member with no drift signal.
+  *[Amended 2026-07-30 — GRANULARITY is still out of scope, but the coarse member's THRESHOLD and
+  its alias resolution changed.]* `ToolNameAliases.TryResolve` now recognises the
+  `mcp__<server>__<tool>` **prefix family** and resolves it to `effect:mcp.tool.invoke` — the one
+  alias that leaves the `tool:` plane — and that member now ships `AutonomyDial.AlwaysHuman` instead
+  of `AutonomyDial.Min`. Rationale (epic README → "MCP: the one family where the CI half cannot
+  exist"): epic D2 permits an unclassified action at runtime *because* the harnesses make it
+  unmergeable in CI, and no harness in this tree can enumerate a remote MCP server's tools, so for
+  MCP the CI half never fires. Left uncatalogued, an `mcp__*` name sailed through the Seam B gate
+  as `uncatalogued` forever.
+  **Still true of this story's other commitments:** the map remains RESOLUTION-ONLY (AC1/AC2 —
+  advertised names are byte-identical, `AdvertisedToolNamesUnchangedTests` unchanged and green); the
+  prefix family is deliberately NOT in `ToolNameAliases.All`, because it is unbounded and `All` is
+  what the validator iterates for the two FINITE vocabularies; and no capability was added or
+  removed — no MCP `IToolExecutor` is registered, so such a call already came back "Unknown tool"
+  from `ToolExecutorRegistry`. Only the rejection's provenance changed.
+
+  **Absence from `All` was not, by itself, enough — corrected 2026-07-31 (review LOW-5).** Two of
+  the startup validator's four checks ask "does this name resolve?" by calling `TryResolve` and were
+  written before the prefix rule existed. Checks 1, 2 and 4 also require `key.Ns == ActionNamespace.Tool`;
+  **check 3 (the advertised `DefaultAgentConfig` names) and the `KnownShellToolNames` check did
+  not.** Once every `mcp__*` name resolved — to a real catalog member — those two checks silently
+  stopped firing for the whole family: `("developer", "mcp__evil__anything")` produced no
+  `ACTION.CATALOG.UNRESOLVABLE_TOOL_ALIAS` violation where before the prefix rule it refused startup.
+  Both now require the `tool:` namespace, restoring the strictness. The distinction being enforced:
+  an `mcp__*` name arriving at the GATE at runtime is the design and is governed there; an `mcp__*`
+  name baked into a shipped agent config or the shell-tool defensive list is **drift**, and CI is the
+  half of D2's bargain that has to catch it. Pinned by `Boot_Throws_WhenAnAdvertisedNameIsAnMcpName`,
+  `Boot_Throws_WhenAShellToolNameIsAnMcpName`, and `TheLiveVocabularies_StillProduceNoViolations` as
+  the control.
+
+  **Whitespace, same family (review LOW-6, fixed 2026-07-31).** `IsMcpToolName` is a `StartsWith`
+  and `CatalogDefaultToolLoopAutonomyGate.TryResolveKey` guarded `IsNullOrWhiteSpace` without ever
+  TRIMMING, so `" mcp__server__tool"` resolved to nothing and came back Allowed/uncatalogued while
+  `"mcp__server__tool"` was Denied. Nothing was reachable through it — still no MCP executor — but a
+  governance pin one leading space walks around is not a pin. The gate now trims before resolving;
+  pinned by `AnMcpToolName_IsStillDenied_WhenTheModelPadsItWithWhitespace` and
+  `APaddedRegistryName_StillResolvesToItsCatalogMember`.
 - **Registering `GetAcceptanceRulesTool` in DI.** Deliberately excluded (39-5 D6); it is an allowlist entry,
   not a bug.
 - **Anything in `Tamma.ElsaServer`'s tool surface.** There is none.
@@ -259,3 +321,5 @@ follow-ups below already presume it. Recording it here so the story's own text a
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
 | 2026-07-29 | 1.0.1   | Review follow-ups closed: git-grading hole recorded in catalog; non-enforceable + parallel-path gate tests added; null-threshold denial message fixed | Claude |
+| 2026-07-31 | 1.0.3   | Adversarial-review fixes to the MCP prefix rule. **LOW-5** — the prefix rule had loosened two drift checks: `ActionCatalogStartupValidator.Check`'s advertised-names check and its `KnownShellToolNames` check called `TryResolve` without also requiring `key.Ns == Tool` (checks 1, 2 and 4 do), so an `mcp__*` name in a shipped agent config stopped being a startup violation. Strictness restored, with the tool-plane requirement now on all four. **LOW-6** — `CatalogDefaultToolLoopAutonomyGate.TryResolveKey` now TRIMS before resolving; a leading space made an `mcp__*` name resolve to nothing and come back Allowed. | Claude |
+| 2026-07-30 | 1.0.2   | MCP governance decision: `ToolNameAliases` resolves the `mcp__*` prefix family to `effect:mcp.tool.invoke` (the one alias outside the `tool:` plane) and that member now ships `AlwaysHuman` — because MCP is the one family for which epic D2's "unmergeable in CI" half cannot exist. Resolution-only guarantee, `All`-iterating validator checks and advertised names all unchanged. Also: the Seam B gate now honours the 43-5 F11 break-glass override. | Claude |

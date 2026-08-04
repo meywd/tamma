@@ -217,7 +217,25 @@ public class DeploymentPipelineWorkflowTests
     public void ApprovalNeeded_GatesProd_DevModeBypassesToProd()
     {
         // After UAT success the pipeline decides whether prod needs approval.
-        HasEdge("EmitUatSuccess", null, "ProdApprovalNeeded").Should().BeTrue();
+        // 43-9 AC11 inserted the governance gate BETWEEN the two, so this is now a
+        // two-hop path rather than a direct edge. Asserting the hops AND every one of
+        // the gate's outcomes is strictly stronger than the single edge this replaced:
+        // it also pins that no outcome can dead-end the pipeline after UAT.
+        HasEdge("EmitUatSuccess", null, "CheckProdDeployGate").Should().BeTrue(
+            "UAT success consults the prod-deploy gate before the approval decision");
+        HasEdge("CheckProdDeployGate", "Automated", "ProdApprovalNeeded").Should().BeTrue(
+            "an automated gate resolution still reaches the pre-existing approval decision");
+        HasEdge("CheckProdDeployGate", "RequiresHuman", "ProdApprovalNeeded").Should().BeTrue(
+            "a requires-human gate resolution routes into the SAME decision — the gate ADDS "
+            + "a term to the approval predicate, it never replaces or bypasses the decision");
+        // 2026-08-01 finding F1 — the THIRD outcome, and the one that must NOT reach
+        // this decision. A denial (the action disabled, or an AllowedRoles restriction)
+        // is not something the deployment-approval human may approve past, so it goes
+        // to the refusal terminal. Detail lives in DeploymentPipelineGateTests.
+        HasEdge("CheckProdDeployGate", "Denied", "SetProdGateDenied").Should().BeTrue(
+            "a denied gate resolution is a hard refusal with its own terminal");
+        HasEdge("CheckProdDeployGate", "Denied", "ProdApprovalNeeded").Should().BeFalse(
+            "and it must NOT be answerable by the standing approval flow");
         // Business mode (True) → the human gate; dev mode (False) → straight to prod start.
         HasEdge("ProdApprovalNeeded", "True", "WaitProdApproval").Should().BeTrue(
             "Business Mode must route to the human approval gate before prod");

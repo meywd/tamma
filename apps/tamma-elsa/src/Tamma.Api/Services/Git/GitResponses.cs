@@ -34,6 +34,19 @@ public sealed record GitMediationResult
     public bool? Reused { get; init; }
     public bool? IsDraft { get; init; }
 
+    // ── pr lifecycle read-backs (Story 31-13) ──
+    /// <summary>The PR's state (open | closed) after a close/reopen verb.</summary>
+    public string? PrState { get; init; }
+
+    /// <summary>The id of a posted review comment (Story 31-13 review-comment verb).</summary>
+    public int? CommentId { get; init; }
+
+    // ── pr details read (Story 43-12 — merge-target key selection) ──
+    /// <summary>The PR's base/target branch (the branch being merged into). Set by
+    /// <see cref="IGitMediationService.GetPullRequestAsync"/>; null when unreadable
+    /// (the selector then fails closed to git.merge.main).</summary>
+    public string? TargetBranch { get; init; }
+
     // ── merge ──
     public bool? Merged { get; init; }
     public string? MergeSha { get; init; }

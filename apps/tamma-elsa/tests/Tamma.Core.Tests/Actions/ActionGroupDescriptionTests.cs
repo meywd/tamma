@@ -58,6 +58,15 @@ public class ActionGroupDescriptionTests
 
         text.Should().ContainEquivalentOf("MCP");
         text.Should().ContainEquivalentOf("coarse");
+
+        // 2026-07-30 — the description must also carry the CONSEQUENCE of that
+        // coarseness, not just the fact: an admin re-opening this member is
+        // re-opening every server and every tool on it, and the reason it is shut
+        // by default is that no CI check will ever flag a new MCP capability.
+        // Without this the admin UI would render "requires a person" with no
+        // explanation an operator could act on.
+        text.Should().ContainEquivalentOf("requires a person");
+        text.Should().ContainEquivalentOf("every server");
     }
 
     [Test]

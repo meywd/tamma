@@ -136,6 +136,13 @@ namespace Tamma.Data.Migrations.ControlPlane
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("now()");
 
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("single-use");
+
                     b.Property<string>("State")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -174,6 +181,8 @@ namespace Tamma.Data.Migrations.ControlPlane
                     b.ToTable("action_authorizations", null, t =>
                         {
                             t.HasCheckConstraint("ck_action_authorizations_principal_scope", "NOT (\"TenantId\" IS NOT NULL AND \"UserId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_action_authorizations_scope", "\"Scope\" IN ('single-use','correlation-standing')");
 
                             t.HasCheckConstraint("ck_action_authorizations_state", "\"State\" IN ('pending','granted','denied','expired')");
 

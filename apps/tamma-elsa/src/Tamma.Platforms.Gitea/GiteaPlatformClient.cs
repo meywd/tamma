@@ -277,6 +277,45 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
         };
     }
 
+    // Story 31-13 — Gitea (and Forgejo, which rides this client) does not yet
+    // carry the PrLifecycle capability, so the six PR lifecycle verbs return
+    // capability_unsupported per the interface no-throw contract. Wiring them for
+    // real is 31-6 follow-up work, recorded via the absent capability flag.
+    private static Task<PlatformResult<PullRequest>> PrLifecycleUnsupported() =>
+        Task.FromResult(PlatformResult<PullRequest>.FromError(
+            new PlatformError.InvalidRequest("capability_unsupported",
+                "the Gitea driver does not implement PR lifecycle verbs yet (31-6)")));
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> ClosePullRequestAsync(
+        string owner, string repoName, string prNumber, CancellationToken ct = default) =>
+        PrLifecycleUnsupported();
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> ReopenPullRequestAsync(
+        string owner, string repoName, string prNumber, CancellationToken ct = default) =>
+        PrLifecycleUnsupported();
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> RequestReviewersAsync(
+        RequestReviewersRequest request, CancellationToken ct = default) =>
+        PrLifecycleUnsupported();
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> AddPullRequestLabelsAsync(
+        AddPullRequestLabelsRequest request, CancellationToken ct = default) =>
+        PrLifecycleUnsupported();
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> RemovePullRequestLabelAsync(
+        string owner, string repoName, string prNumber, string label, CancellationToken ct = default) =>
+        PrLifecycleUnsupported();
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> SetDraftAsync(
+        SetPullRequestDraftRequest request, CancellationToken ct = default) =>
+        PrLifecycleUnsupported();
+
     /// <inheritdoc />
     public async Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
         string owner, string repoName, string issueOrPrNumber, string body,

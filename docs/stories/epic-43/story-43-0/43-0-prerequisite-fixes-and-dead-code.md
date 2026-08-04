@@ -1,6 +1,20 @@
 # Story 43-0: Prerequisite Fixes and Dead Code — the `acceptorRequirement` Reset, a Mistyped Client, and Two Orphan Tool Vocabularies
 
-Status: drafted
+Status: done — implemented 2026-07-29. One deliberate deviation from the plan's **D1**, recorded in full
+under "Corrections applied while implementing (2026-07-29)" below: the fix is on BOTH sides, not the client
+only — the API no longer invents `acceptorRequirement` for a body that omits it.
+
+> **Read the scope boundary before quoting this story's headline.** The fix covers
+> `PUT /api/acceptance-rules/{documentTypeKey}`. A `PUT /api/acceptance-rules/base` can STILL erase the
+> shipped human acceptor floor on `design`, `sprint-plan` and `threat-model` — not through defaulting, but
+> through 39-5's tier-2 WHOLESALE shadowing, which predates this story and is a recorded follow-up. See
+> **"Amendment — 2026-07-29" → A1**.
+>
+> **UPDATE 2026-07-30 — that follow-up is CLOSED.** The base route can no longer lower a shipped human
+> acceptor floor: the shipped per-type `AcceptorRequirement` is now a FLOOR composed by `max()` across
+> tiers, with tier 1 (a per-type override row) deliberately exempt. The paragraph above is kept as the
+> statement of the defect; read **A1's "RESOLUTION — 2026-07-30"** for what shipped and what
+> deliberately did not.
 
 ## MANDATORY: Before You Code
 
@@ -19,7 +33,7 @@ Then, before writing any code, check the knowledge base:
 
 As a **platform/tenant admin editing acceptance rules**,
 I want a save from the admin dialog to preserve every field the API models — not silently reset the ones the dialog does not know about —
-So that `design`'s shipped `acceptorRequirement = human` survives an unrelated edit, and so that Epic 43's catalog is not layered on top of a surface that already loses policy on write.
+So that `design`'s shipped `acceptorRequirement = human` survives an unrelated edit, and so that Epic 43's catalog is not layered on top of a surface that already loses policy on write. *[SCOPE-BOUNDED — true of `PUT /api/acceptance-rules/{documentTypeKey}` only; a `PUT /api/acceptance-rules/base` can still erase that floor via 39-5's tier-2 wholesale shadowing. See the header callout and amendment A1 before quoting this line.]*
 
 Secondarily, as a **developer about to author the action catalog**, I want the two orphan tool vocabularies and the mistyped registry client removed or resolved first, so the catalog is derived from vocabularies that are actually reachable.
 
@@ -29,7 +43,13 @@ P1 — **ships standalone, before anything else in Epic 43.** The `acceptorRequi
 
 ## Architectural Context (READ FIRST)
 
-### (1) The live bug: every admin save resets `acceptorRequirement`
+### (1) The live bug: every admin save resets `acceptorRequirement` *[pre-fix state — see "Corrections applied while implementing"]*
+
+> The code quoted in this section **no longer exists**. In particular the DTO's
+> trailing parameter is now `AcceptorRequirement?` defaulting to `null`, not the
+> non-nullable `AcceptorRequirement AcceptorRequirement = AcceptorRequirement.Any`
+> quoted below, and the dashboard interface/memo now carry the field. Kept
+> verbatim as the diagnosis that motivated the fix.
 
 Three files, one silent loss:
 
@@ -41,7 +61,10 @@ Three files, one silent loss:
 
 Net effect: a PUT from the dialog binds `AcceptorRequirement.Any`, `ToRules()` (`:28-39`) maps it through, and the row is written with `any`. `AcceptanceDefaults.For` ships `design` with `AcceptorRequirement.Human`; **the first admin save of `design` for any unrelated reason destroys that.** The write path validates (`AcceptanceRulesService`) but validation does not object to `any` — it is a legal value.
 
-### (2) The mistyped conventions registry client
+### (2) The mistyped conventions registry client *[pre-fix state — see "Corrections applied while implementing"]*
+
+> `conventions-api-client.ts:160` no longer returns `string[]`; AC6 was applied.
+> The snippet below is the pre-fix declaration, kept as the diagnosis.
 
 `packages/dashboard/src/services/admin/conventions-api-client.ts:160`:
 
@@ -94,7 +117,7 @@ So "DI-register or delete" is a false dichotomy. The resolution is: **keep, do n
 
 2. **The dialog can edit it, not merely echo it.** `RulesEditDialog.tsx` renders an `acceptorRequirement` control (select/segmented, alongside the existing reviewer-selection controls) with helper text stating what each value means. Echoing-without-editing would fix the data loss but leave a field that only the API can set — a second instance of the same class of trap.
 
-3. **Server-side regression pin.** `AcceptanceRulesEndpointsTests.Upsert_PreservesAcceptorRequirement` — PUT a body with `acceptorRequirement: "human"`, GET it back, assert `human`; and a second case PUTs a body **omitting** the field and asserts the documented legacy default (`any`) still applies, so the DTO's deliberate default is pinned as intentional rather than deleted.
+3. **Server-side regression pin.** ~~`AcceptanceRulesEndpointsTests.Upsert_PreservesAcceptorRequirement`~~ *[RENAMED AND SPLIT — no test by that name exists. D1 was superseded (see "Corrections applied while implementing"), so the one pin became five, all in `apps/tamma-elsa/tests/Tamma.Api.Tests/AcceptanceRules/`:* `AcceptanceRulesEndpointsTests.Upsert_stated_acceptorRequirement_human_round_trips`, `…Upsert_omitting_acceptorRequirement_preserves_shipped_human_floor`, `…Upsert_omitting_acceptorRequirement_preserves_a_stored_human_override`, `…Upsert_omitting_acceptorRequirement_on_an_any_type_stays_any`, `…Bind_body_without_acceptorRequirement_yields_null_not_any`.*]* — PUT a body with `acceptorRequirement: "human"`, GET it back, assert `human`; and a second case PUTs a body **omitting** the field and asserts the documented legacy default (`any`) still applies, so the DTO's deliberate default is pinned as intentional rather than deleted. *[The second clause is superseded too: omission now preserves the value IN FORCE rather than writing the constant `any`; the `any`-type case survives as `…on_an_any_type_stays_any`. See "Effect on AC3" below.]*
 
 4. **Client-side regression pin.** A dashboard test (`RulesEditDialog` / `AcceptanceRulesAdminPage` suite, Vitest) renders the dialog over a resolved payload carrying `acceptorRequirement: 'human'`, changes an unrelated field (e.g. `maxRevisionRounds`), saves, and asserts the captured `onSave` body contains `acceptorRequirement: 'human'`. This is the test that would have caught the bug.
 
@@ -124,8 +147,292 @@ So "DI-register or delete" is a false dichotomy. The resolution is: **keep, do n
 
 2 days
 
+## Corrections applied while implementing (2026-07-29)
+
+*[Amendment 2026-07-29 — the fix is two-sided; D1 is superseded. The original D1 text is kept in
+`implementation-plan.md` as the historical record.]*
+
+**D1 said:** fix the TypeScript only, keep the DTO's non-nullable
+`AcceptorRequirement AcceptorRequirement = AcceptorRequirement.Any`, and pin that default as intentional —
+on the reasoning that the default exists to bind "stored legacy bodies" and removing it would turn a silent
+loss into an outage.
+
+**What shipped instead:** both sides.
+
+1. `AcceptanceRulesUpsertRequest.AcceptorRequirement` is now `AcceptorRequirement?`, defaulting to `null` =
+   *"the caller did not say"*. `ToRules` takes the currently-effective requirement as a required argument
+   (there is no parameterless overload), and `AcceptanceRulesEndpoints.Upsert` resolves it — the override
+   row if one exists, else `AcceptanceDefaults.For(type)` — before mapping. An omitted field is therefore
+   **preserved**, never invented. An explicitly stated `"any"` still lowers the floor: silence and intent
+   are now distinguishable, which is the whole point.
+
+2. The dashboard sends the field (interface + memo + a `<select>` control), as AC1/AC2 required.
+
+**Why D1's reasoning did not survive contact with the code.** The "legacy stored body" safety net is not on
+this DTO at all — persistence round-trips the DOMAIN record
+(`AcceptanceRulesService.UpsertAsync` → `AcceptanceRulesJson.Serialize`; `Materialize` →
+`AcceptanceRulesJson.Deserialize`), and it is
+`Tamma.Core.Documents.Policy.AcceptanceRules.AcceptorRequirement { get; init; } = AcceptorRequirement.Any`
+that binds a pre-39-13 row. That property is untouched. `AcceptanceRulesUpsertRequest` only ever binds
+INBOUND PUT bodies, so making it nullable cannot affect a single stored row — D1's stated cost was not real,
+and the story's own framing ("defaulted bodies ARE the bug class") wins.
+
+Two further facts weighed here, both dated after the story was drafted:
+
+- **The repo now has a precedent that says exactly this.** `ActionPolicyEndpoints` (Story 43-6, shipped)
+  opens with: *"Every write endpoint takes ONE nullable-required field: a body missing the field is a 400,
+  NEVER a defaulted write"* — and names the rule **"the 43-0 bug class"**. A 400 is the right shape for a
+  single-field write; for this whole-object PUT the equivalent is preserve-on-absent, which keeps every
+  legacy 8-field client working while making silent policy reset impossible.
+- **The blast radius was larger than the story said.** The story names `design`. Since 41-1b/41-1c,
+  `sprint-plan` and `threat-model` also ship `AcceptorRequirement.Human`
+  (`AcceptanceDefaults.For`), so the pre-fix dialog silently stripped the human-acceptance requirement from
+  **three** document types, not one.
+
+**Effect on AC3.** Case (a) (stated `human` round-trips) is unchanged. Case (b) is now pinned as
+*`Upsert_omitting_acceptorRequirement_on_an_any_type_stays_any`*: for a type whose effective requirement is
+`any`, an omitting body still writes `any` — the documented pre-39-13 behavior is preserved for every type
+that never had a human floor. What changed is only that omission means "keep what is in force" instead of
+the literal constant `any`. The regression pin the bug actually needed is
+*`Upsert_omitting_acceptorRequirement_preserves_shipped_human_floor`*.
+
+**AC8 partially deferred (already satisfied elsewhere).** The `Program.cs` D6 comment extension and
+`GetAcceptanceRulesToolReachabilityTests` were NOT added: Story 43-4 landed first and already carries the
+exemption as a shrink-only, count-pinned, justification-bearing entry —
+`ToolCatalogAllowlists.NotDiRegisteredTools` (one entry, `tool:get_acceptance_rules`), pinned by
+`ToolCatalogAllowlistTests` and enforced at boot by `ActionCatalogStartupValidator`. That is a strictly
+stronger guard than the proposed test, so the "Handoff to 43-4" section is **consumed, not pending**. What
+43-0 did add is the pointer: `GetAcceptanceRulesTool`'s class doc now explains why a singleton
+`IToolExecutor` registration would be wrong and names the allowlist.
+
+## Amendment — 2026-07-29 (adversarial review of the shipped slice)
+
+### A1. SCOPE BOUNDARY: the fix covers the PER-TYPE route only. The base route can still erase the human floor. (must-read)
+
+**This story's headline is "an admin save no longer resets `acceptorRequirement`".
+That is true of `PUT /api/acceptance-rules/{documentTypeKey}`. It is NOT true of
+`PUT /api/acceptance-rules/base`,** and the gap is not an omission-handling bug —
+preserve-on-absent works correctly on the base route too (it carries the BASE
+row's own in-force requirement forward). The gap is **tier-2 wholesale
+shadowing**, which is 39-5's D1/D2 resolution semantics and predates this story.
+
+**The mechanism.** `AcceptanceRulesService.ResolveAsync` resolves WHOLESALE:
+tier 1 is the per-type override row, tier 2 is the principal BASE override row,
+tier 3 is `AcceptanceDefaults.For(type)`. There is no field merge. So the moment
+a base override row exists, it shadows tier 3 **entirely** — including the
+per-type `AcceptorRequirement.Human` floors that `design`, `sprint-plan` and
+`threat-model` ship (and `threat-model`'s `security` reviewer selection).
+
+Consequence, proved: **one** `PUT /api/acceptance-rules/base` whose body omits
+`acceptorRequirement` writes a base row carrying the BASE row's in-force value
+(`any`), and from then on `design`, `sprint-plan` and `threat-model` all resolve
+to `any` — their human floor is gone, without any of them having been written.
+Worse, a subsequent OMITTING per-type save then reads that degraded value as
+"what is in force" and bakes it into a type row, at which point deleting the base
+row no longer restores the floor.
+
+**Not a regression, and not UI-reachable today.** The semantics are 39-5's, not
+43-0's; and the admin page renders only the ten per-type rows, so nothing in the
+shipped UI issues a base PUT. But it is the same user-visible failure this story
+claims to have closed, reachable by anything that speaks HTTP.
+
+**Decision: recorded as a FOLLOW-UP, not fixed here — with the reason.** The
+instruction to "apply the same in-force-preservation to the base route if it is
+genuinely the same shape" was evaluated and **it is not the same shape.**
+Preserve-on-absent carries forward *the value in force for the row being
+written*; the base row is ONE row standing in for ten document types with three
+different floors, so there is no single value to carry forward that would protect
+them. Closing this requires changing what tier 2 MEANS — either merging
+`AcceptorRequirement` per-type instead of shadowing it, or making the floor a
+`max()` across tiers rather than a wholesale pick. That is a deliberate change to
+39-5 D1/D2's wholesale-row contract, affects every field (not just this one), and
+belongs in a story that owns the resolution semantics. Doing it inside 43-0 would
+change resolution behaviour for every existing stored base row without a story
+saying so.
+
+**What a follow-up must decide:** whether tier 2 stays wholesale (and the base
+route grows a guard that REFUSES to lower a floor below any shipped per-type
+floor), or tier 2 becomes a per-field merge for `AcceptorRequirement`
+specifically. Either closes it; they are not equivalent and the choice is a
+product one.
+
+#### RESOLUTION — 2026-07-30 (the follow-up, decided and shipped)
+
+**Decision: tier 2 stays WHOLESALE, and the shipped human-acceptance requirement
+becomes a FLOOR — a tier may raise it, never silently lower it. Lowering it
+requires naming the type.** The general per-field merge was rejected.
+
+**Why not the per-field merge.** It is precisely what 39-5 **D2** rejected, in
+those words: "*field-level deep-merging is rejected: it makes provenance
+unexplainable in the admin UI and has no precedent (a prompt override replaces
+the template entirely)*". Merging every field would also change resolution for
+every stored base row across every field, which is the reason 43-0 declined to
+do it here. The floor is the narrow, monotone alternative: **exactly one field**
+composes across tiers, by `max()` over a two-element lattice
+(`any` &lt; `human`); every other field keeps wholesale-row precedence, so
+`source` still names the single row that produced the resolution.
+
+**Why the floor framing is the right one, on this codebase's own terms.** The
+epic already uses `max()` for every policy input that can only tighten:
+`AutonomyGateEvaluator` composes the platform ceiling and the legacy
+always-escalate floor that way. Decisively, the **action catalog already treats
+the shipped acceptor requirement as non-negotiable**:
+`ActionCatalog.Descriptors` pins `document-type:design`,
+`document-type:sprint-plan` and `document-type:threat-model` at
+`AutonomyDial.AlwaysHuman` *because* `AcceptanceDefaults.For` ships them
+`AcceptorRequirement.Human` (`DesignDocumentType_MatchesAcceptanceDefaults`
+pins the derivation). Before this fix, one base `PUT` put the two governance
+surfaces into open disagreement — the catalog saying a design needs a person,
+the acceptance-rules resolver saying it does not. The floor restores coherence.
+
+**The tier-1 exemption is the product decision, and it was already the
+established semantic.** A per-type `PUT /api/acceptance-rules/design` stating
+`"acceptorRequirement": "any"` still lowers it — pinned since 43-0 by
+`Upsert_explicit_any_clears_the_human_floor` ("*an admin can still LOWER the
+floor — but only by saying so; that is the difference between silence and
+intent*"). A BASE row is one row standing in for every document type with three
+different floors: it has no way to express intent about any single one, which is
+exactly why it may not lower any of them.
+
+**The bake-in path closes as a consequence.** 43-0's preserve-on-absent reads
+"what is in force"; with the floor applied at resolution, that value is now
+`human`, so a later omitting per-type save writes `human` rather than baking in
+a loss. Deleting the base row therefore still restores everything.
+
+**Implementation** — `apps/tamma-elsa/src/Tamma.Core/Documents/Policy/AcceptanceFloors.cs`
+(the lattice, `ShippedFloorFor`, `ApplyShippedAcceptorFloor`, and the full
+argument in its doc comment), applied in `AcceptanceRulesService.ResolveAsync` /
+`ResolveForTenantAsync` on the tier-2 branch only. `ResolvedAcceptanceRules`
+gains `AcceptorRequirementFloored` (wire `acceptorRequirementFloored`, additive)
+so the one non-wholesale field is VISIBLE rather than surprising; the dashboard's
+hand-maintained `ResolvedAcceptanceRules` interface carries it too.
+
+**Review 3.2 (2026-07-30) — the flag is now RENDERED, not only declared.** As
+first shipped, `acceptorRequirementFloored` reached the TypeScript interface but
+no component read it, so `RulesEditDialog` showed provenance `principal-default`
+next to an acceptor of `human` with nothing explaining the contradiction — the
+field existed to make the one exception visible and was visible only in raw JSON.
+`RulesEditDialog` now renders a short note beside the acceptor control when the
+flag is set, naming the document type and stating that a base-level save cannot
+lower the shipped requirement (only a save on that type explicitly selecting
+`any`). Pinned by `RulesEditDialog.test.tsx`:
+`explains the shipped acceptor floor when the resolution was floored`, with two
+controls — `shows no floor note when the resolution was not floored` and
+`shows no floor note when the field is absent from the payload` — so an ordinary
+resolution does not grow an unexplained warning.
+
+**Tests** — `AcceptanceFloorsTests` (the pure lattice + a monotonicity sweep over
+every document type × every requirement), and, in
+`AcceptanceRulesEndpointsTests`:
+`Upsert_base_cannot_erase_the_shipped_human_acceptor_floor` (fires on an
+EXPLICIT `any`, which is what makes it a resolution-semantics bug and not 43-0's
+omission bug), `A_later_omitting_per_type_save_cannot_bake_in_a_lost_floor`,
+`An_explicit_per_type_any_still_wins_over_the_base_floor`,
+`Upsert_base_cannot_erase_the_human_floor_in_SaaS_mode_either`, and
+`Base_row_still_shadows_per_type_reviewer_selection_by_design`. No existing test
+needed changing — `ResolveAsync_falls_back_to_base_override` and
+`Upsert_base_writes_principal_base_row` still pass unmodified, because tier-2
+precedence itself is untouched.
+
+**Review 3.3 (2026-07-30) — SaaS coverage broadened to match single-user.** As
+first shipped the SaaS path had exactly ONE test on ONE document type
+(`threat-model`) while single-user had four. The code IS symmetric —
+`ResolveAsync` and `ResolveForTenantAsync` apply the floor on the same tier-2
+branch and exempt tier 1 identically — but symmetric code is a reason to *expect*
+the tests to agree, not a substitute for them: nothing structural stops the two
+methods diverging, and the SaaS branch is the one an auditor cares about most.
+`Upsert_base_cannot_erase_the_human_floor_in_SaaS_mode_either` now sweeps all
+three human-pinned types plus a `findings` control, and two new tests mirror the
+remaining single-user cases:
+`A_later_omitting_per_type_save_cannot_bake_in_a_lost_floor_in_SaaS_mode` (the
+bake-in path, including that deleting the tenant base row still restores the
+floor) and `An_explicit_per_type_any_still_wins_over_the_base_floor_in_SaaS_mode`
+(the tier-1 exemption, plus an unwritten sibling type keeping its floor, so the
+exemption is proven per-type rather than a blanket switch-off).
+
+**NOT closed, deliberately: `threat-model`'s `security` reviewer selection is
+still shadowed by a base row.** Reviewer selection has no ordering — there is no
+`max(architect, security)` — so no monotone floor exists for it, and a
+deployment-wide reviewer choice is a legitimate thing for a base row to say
+(that is what tier 2 is for). Closing it would require either the rejected
+per-field merge or forbidding `reviewerSelection` on the base route, both of
+which remove a real capability to protect a preference rather than a safety
+property. Pinned as deliberate by
+`Base_row_still_shadows_per_type_reviewer_selection_by_design` so a future reader
+finds a decision rather than a gap.
+
+### A2. A corrupt stored row is now a 400, not a 500 (fixed)
+
+**This commit introduced a new 500 on a shipped admin surface.** Story 43-0 made
+`Upsert` READ before writing (that is how an omitted field is preserved). The
+read goes through `AcceptanceRulesService.Materialize` →
+`AcceptanceRulesJson.Deserialize`, which throws `TammaError`
+`ACCEPTANCE_RULES.INVALID` on an out-of-range body (caught → 400) **or
+`JsonException` on malformed JSON — which the endpoint's `catch (TammaError)` did
+not cover, so it escaped as a 500.** Because per-type resolution falls through to
+the base row, ONE corrupt base row made `PUT` fail for EVERY document type.
+Before this commit `Upsert` never read, so overwriting the row WAS the repair.
+
+**Fixed:** the catch is widened to `JsonException` on both `Upsert` and
+`GetResolved`, returning `400 ACCEPTANCE_RULES.STORED_ROW_UNREADABLE` whose
+message names the fall-through (the corrupt row may be `base` even though the
+caller addressed a type) and the repair path.
+
+**The repair path, documented:** `DELETE /api/acceptance-rules/{key}` — DELETE
+never reads the body — drops to the next tier, then `PUT` the wanted rules. A PUT
+alone can no longer repair a corrupt row, precisely because since 43-0 it must
+read the in-force value in order to preserve it. Pinned by
+`Upsert_over_a_malformed_stored_row_is_400_naming_the_problem_not_500`,
+`One_malformed_BASE_row_makes_every_type_400_not_500`,
+`Get_resolved_over_a_malformed_stored_row_is_400_not_500` and
+`Delete_then_put_recovers_from_a_malformed_stored_row`.
+
+*Adjacent, NOT changed:* `ListEffective` catches `InvalidOperationException` /
+`NpgsqlException` / `DbUpdateException` and degrades to shipped defaults. A
+corrupt row still throws past it. Widening that catch was deliberately NOT done —
+it would silently serve defaults over a corrupt row, masking the corruption
+instead of reporting it, which is the opposite of D3's "a corrupt row throws,
+never degrades".
+
+### A3. Comment corrections
+
+- **`RulesEditDialog.test.tsx`** — the whole-body test's comment claimed a future
+  tenth field "fails here". It cannot: the expected key list is a hardcoded
+  literal, so a tenth field forgotten in the memo leaves BOTH the memo and the
+  literal at nine and the assertion still passes. What actually catches it is
+  `tsc` (the memo is typed `useMemo<AcceptanceRules>`) plus the C#
+  `AcceptanceRulesUpsertRequestFieldSetTests` (reflection over the DTO). Comment
+  corrected to say what the test does catch: the memo dropping a field the
+  interface still declares — the original 43-0 defect shape.
+- **`AcceptanceRulesDtos.cs`** — documented `null` as "the caller did not say"
+  but never stated that a client SENDING `null` is treated identically to
+  omitting the field. It is: this is a plain `AcceptorRequirement?` reduced with
+  `?? current`, not a tri-state, so "clear this field" is not expressible. Now
+  stated, with the contrast to Story 44-2's `Optional<T>` tri-state (built in the
+  same commit for exactly the cases this member does not need, because an
+  always-present enum floor has no cleared state).
+
+### A4. Wiki corrected — `ResolveToolsActivity` was documented as live surface
+
+`wiki.tamma.dev` is live and still described the activity this story DELETED as
+existing surface, including Story 42-3 being specified as "extends
+`ResolveToolsActivity`". Corrected in both the wiki and its
+`apps/wiki-site/public/content/` mirrors: `Epics/Epic-42-Tool-Layer.md`
+(4 places), `Architecture.md`, `Workflow-LLM-Call.md`, `Roadmap.md`. Each now
+states plainly that Story 43-0 deleted it on 2026-07-29, that **nothing replaced
+it** (tool selection is not a workflow activity), and where the work has to land
+instead — `IToolExecutorRegistry` and the API-side tool loop
+(`InlineToolLoopRunner` / `ParallelToolExecutor`). Epic 42 is backlog, so this is
+a re-siting of unstarted work, not a lost implementation. Historical story
+documents under `content/stories/` are left as written — they are dated records
+of past state, and several already say "deleted by Story 43-0".
+
 ## Change Log
 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-29 | 1.1.0   | Implemented. D1 superseded — the API side no longer defaults an omitted `acceptorRequirement` (preserve-on-absent); `ResolveToolsActivity` deleted; 43-4's story text reconciled; AC8 recorded as satisfied by 43-4's allowlist. | Claude |
+| 2026-07-29 | 1.2.0   | Adversarial-review round (see "Amendment — 2026-07-29"). FIXED: a malformed stored row is now a typed 400 on `Upsert`/`GetResolved` instead of a 500 this commit introduced, with the DELETE-then-PUT repair path documented and tested. RECORDED as follow-up with reasoning: tier-2 wholesale shadowing means a `PUT .../base` omitting `acceptorRequirement` still erases the human floor on `design`/`sprint-plan`/`threat-model` — pre-existing 39-5 D1/D2 semantics, not the same shape as preserve-on-absent, and closing it changes what tier 2 means. Comment corrections in `RulesEditDialog.test.tsx` and `AcceptanceRulesDtos.cs`. Wiki + mirrors corrected: `ResolveToolsActivity` no longer documented as live surface. | Claude |
+| 2026-07-30 | 1.3.0   | **A1 CLOSED.** Tier 2 stays wholesale; the shipped per-type `AcceptorRequirement` is now a FLOOR composed by `max()` across tiers (tier-1 per-type rows exempt — lowering requires naming the type). New `AcceptanceFloors` in `Tamma.Core`; `ResolvedAcceptanceRules.AcceptorRequirementFloored` surfaces the raise; dashboard interface updated. The general per-field merge was evaluated against 39-5 D2 and rejected. Reviewer-selection shadowing is recorded as the deliberate remainder (no lattice exists for it). | Claude |
+| 2026-07-30 | 1.3.1   | Adversarial review of the A1 close. **3.2 fixed** — `RulesEditDialog` now RENDERS `acceptorRequirementFloored` (a note beside the acceptor control naming the type and the floor); it had reached the TypeScript interface but no component read it, so an admin saw `principal-default` next to `human` with no explanation. **3.3 fixed** — SaaS floor coverage broadened from one test on one document type to match single-user: all three human-pinned types plus a control, the bake-in path, and the explicit-per-type-`any` exemption. | Claude |

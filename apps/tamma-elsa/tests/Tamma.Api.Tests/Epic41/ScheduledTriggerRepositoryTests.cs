@@ -179,6 +179,129 @@ public class ScheduledTriggerRepositoryTests
         }
     }
 
+    // ── MODERATE-5 (2026-07-30): the settled-window probe ──
+
+    /// <summary>
+    /// The tick asks this BEFORE taking the advisory lock so a window that
+    /// already reached a terminal outcome is re-observed silently. Pre-fix, a
+    /// burnt window kept recomputing as due (the trigger row's
+    /// <c>LastFiredAt</c> only advances on SUCCESS) and every 60-second tick
+    /// of every pod re-lost the claim and wrote another
+    /// <c>SCHEDULE.FIRE.SUPPRESSED</c> audit row.
+    /// </summary>
+    [Test]
+    public async Task GetFireOutcome_Returns_TheLedgerRowsOutcome_And_Null_WhenTheWindowIsUnclaimed()
+    {
+        var tenant = await SeedTenantAsync();
+        var trigger = await SeedTriggerAsync(tenant);
+        const string windowKey = "2026-07-27T03:00:00Z";
+
+        (await _repository.GetFireOutcomeAsync(trigger.Id, windowKey)).Should().BeNull(
+            "no ledger row ⇒ the window has never been touched");
+
+        var fire = Fire(trigger, windowKey);
+        (await _repository.TryClaimFireAsync(fire)).Should().BeTrue();
+        (await _repository.GetFireOutcomeAsync(trigger.Id, windowKey)).Should().Be("claimed",
+            "a claim in flight is NOT terminal — the tick must still report concurrency");
+
+        await _repository.StampOutcomeAsync(fire.Id, "failed", null, "engine gone", null);
+        (await _repository.GetFireOutcomeAsync(trigger.Id, windowKey)).Should().Be("failed",
+            "a burnt window is terminal — every later tick short-circuits silently");
+
+        (await _repository.GetFireOutcomeAsync(trigger.Id, "2026-07-27T04:00:00Z")).Should().BeNull(
+            "the probe is scoped to the exact (trigger, window)");
+    }
+
+    // ── LOW-8 (2026-07-30): the stale-claim sweep ──
+
+    [Test]
+    public async Task ListStaleClaimedFires_Returns_OnlyClaimedRowsOlderThanTheCutoff_OldestFirst_Bounded()
+    {
+        var tenant = await SeedTenantAsync();
+        var trigger = await SeedTriggerAsync(tenant);
+        var now = DateTime.UtcNow;
+
+        async Task SeedAsync(string windowKey, DateTime claimedAt, string outcome)
+        {
+            await using var db = _dbFactory.CreateDbContext();
+            db.ScheduledTriggerFires.Add(new ScheduledTriggerFire
+            {
+                Id = Guid.NewGuid(),
+                TriggerId = trigger.Id,
+                TenantId = tenant,
+                DefinitionId = trigger.DefinitionId,
+                WindowKey = windowKey,
+                ClaimedAt = claimedAt,
+                Outcome = outcome,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await SeedAsync("2026-07-27T01:00:00Z", now.AddHours(-3), "claimed");   // stale
+        await SeedAsync("2026-07-27T02:00:00Z", now.AddHours(-2), "claimed");   // stale
+        await SeedAsync("2026-07-27T03:00:00Z", now.AddHours(-1), "claimed");   // stale
+        await SeedAsync("2026-07-27T04:00:00Z", now.AddMinutes(-1), "claimed"); // in flight
+        await SeedAsync("2026-07-27T05:00:00Z", now.AddHours(-4), "dispatched");// terminal
+        await SeedAsync("2026-07-27T06:00:00Z", now.AddHours(-4), "failed");    // terminal
+
+        var stale = await _repository.ListStaleClaimedFiresAsync(now.AddMinutes(-15), limit: 2);
+
+        stale.Should().HaveCount(2, "the per-tick sweep is bounded");
+        stale.Select(f => f.WindowKey).Should().ContainInOrder(
+            "2026-07-27T01:00:00Z", "2026-07-27T02:00:00Z");
+
+        var all = await _repository.ListStaleClaimedFiresAsync(now.AddMinutes(-15), limit: 100);
+        all.Should().HaveCount(3,
+            "only rows still 'claimed' AND older than the threshold are abandoned fires — "
+            + "an in-flight claim and a terminal row are neither");
+    }
+
+    /// <summary>
+    /// The sweep's arbiter, proven against real Postgres like the two claim
+    /// races above: an abandoned fire is announced EXACTLY ONCE fleet-wide,
+    /// and burning the row is what takes it out of the sweep's feed for good
+    /// (so the new surface cannot itself become a per-tick drip).
+    /// </summary>
+    [Test]
+    public async Task TryMarkFireAbandoned_EightConcurrentSweeps_ExactlyOneWins_AndTheRowLeavesTheFeed()
+    {
+        var tenant = await SeedTenantAsync();
+        var trigger = await SeedTriggerAsync(tenant);
+        var fire = Fire(trigger, "2026-07-27T03:00:00Z");
+        fire.ClaimedAt = DateTime.UtcNow.AddHours(-3);
+        fire.DispatchedAt = DateTime.UtcNow.AddHours(-3); // a burnt MANUAL fire's CAS marker
+        (await _repository.TryClaimFireAsync(fire)).Should().BeTrue();
+
+        await using (var db = _dbFactory.CreateDbContext())
+        {
+            await db.ScheduledTriggerFires.Where(f => f.Id == fire.Id)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(f => f.ClaimedAt, fire.ClaimedAt)
+                    .SetProperty(f => f.DispatchedAt, fire.DispatchedAt));
+        }
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() =>
+                _repository.TryMarkFireAbandonedAsync(fire.Id, "abandoned: swept"))));
+
+        results.Count(r => r).Should().Be(1,
+            "LOW-8 — exactly one pod's sweep owns the announcement of an abandoned fire");
+
+        await using (var db = _dbFactory.CreateDbContext())
+        {
+            var row = await db.ScheduledTriggerFires.SingleAsync(f => f.Id == fire.Id);
+            row.Outcome.Should().Be("failed", "the window is BURNT — the sweep is not a retry");
+            row.Detail.Should().Be("abandoned: swept");
+            row.DispatchedAt.Should().NotBeNull(
+                "a burnt manual fire keeps its drain CAS marker — the sweep must not erase it");
+        }
+
+        (await _repository.ListStaleClaimedFiresAsync(DateTime.UtcNow, limit: 100))
+            .Should().BeEmpty("a swept row is terminal and never re-announced");
+        (await _repository.TryMarkFireAbandonedAsync(fire.Id, "abandoned: again"))
+            .Should().BeFalse();
+    }
+
     // ── template materialisation (D6) ──
 
     [Test]

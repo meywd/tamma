@@ -3,14 +3,17 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Tamma.Activities.Security;
+using Tamma.Api.Infrastructure;
 using Tamma.Api.Services.PlatformEvents;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
+using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.Secrets;
@@ -56,11 +59,24 @@ namespace Tamma.Api.Services.Secrets;
 /// <list type="bullet">
 ///   <item><description><b>Lock lifetime owned by Npgsql, not EF</b>:
 ///     the advisory lock is acquired on a dedicated
-///     <see cref="NpgsqlConnection"/> opened from the registered
-///     <see cref="NpgsqlDataSource"/> (PF-C3). EF's pooled
-///     <c>DbContext</c> sends <c>DISCARD ALL</c> on connection return,
-///     which silently releases session-level advisory locks; bypassing
-///     EF for the lock keeps the contract explicit.</description></item>
+///     <see cref="NpgsqlConnection"/> built from the registered
+///     <see cref="NpgsqlDataSource"/>'s connection string (PF-C3). EF's
+///     pooled <c>DbContext</c> sends <c>DISCARD ALL</c> on connection
+///     return, which silently releases session-level advisory locks;
+///     bypassing EF for the lock keeps the contract explicit.
+///     <b>2026-07-30 audit</b>: "dedicated" was necessary but not
+///     sufficient — the connection was taken from the data source's POOL,
+///     so the mirror-image failure applied. Returning a pooled connector
+///     to the pool keeps its session, and the lock, ALIVE (the
+///     <c>DISCARD ALL</c> that would release it is deferred until that
+///     connector is next used), so any exit that skipped or failed the
+///     explicit unlock parked this CONSTANT, never-rotating key shut for
+///     the entire cluster — every later <c>/start</c> failing with the
+///     untrue "another rotation is already in progress". The lock now
+///     rides a <c>Pooling=false</c> session
+///     (<see cref="Tamma.Data.Pooling.PostgresAdvisoryLock"/>), which is
+///     what makes "closing the connection releases the lock" actually
+///     true.</description></item>
 ///   <item><description><b>State changes happen INSIDE the lock</b>
 ///     (PF-S5): the retry path no longer mutates
 ///     <see cref="KekProvider"/>'s in-memory secondary or flips the
@@ -99,6 +115,26 @@ public sealed class KekRotationCoordinator
     /// for future per-purpose sub-locks.
     /// </summary>
     public const long AdvisoryLockKey = 0x281228_00000001L;
+
+    /// <summary>
+    /// How often a running rotation re-verifies, from the lock session itself,
+    /// that it still holds the cluster-wide rotation gate.
+    ///
+    /// <para>5s — the tightest of the three watched sites, judged against the
+    /// consequence rather than the duration. A rotation holds the gate across
+    /// a full re-encrypt of every tenant row: decrypt under the old primary,
+    /// re-encrypt under the new key, write. Its unit of work is
+    /// milliseconds, so a long interval buys a second pod a great many rows.
+    /// And two concurrent re-encrypts are not "duplicate work" — pod A rewrites
+    /// a row under key A and bumps its version, pod B rewrites it under key B,
+    /// and the surviving envelope is readable only by whichever pod's key
+    /// eventually gets promoted. That is unreadable tenant secrets, which is
+    /// not recoverable by re-running anything. Against that, the probe is one
+    /// indexed <c>pg_locks</c> read on an otherwise idle dedicated session: a
+    /// half-hour fleet rotation pays 360 of them. Overridable for tests
+    /// only.</para>
+    /// </summary>
+    internal TimeSpan LockHeartbeatInterval { get; init; } = TimeSpan.FromSeconds(5);
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly KekProvider _kekProvider;
@@ -431,7 +467,19 @@ public sealed class KekRotationCoordinator
         // open for the full RunRotationAsync lifetime keeps the lock
         // until we explicitly release it in the finally-block.
         //
-        // The connection is resolved lazily through the service scope
+        // 2026-07-30 audit: "dedicated" is not enough — it must also be
+        // NON-POOLED. NpgsqlDataSource.OpenConnectionAsync hands out a
+        // POOLED connector, so disposing it in the finally-block returned
+        // it to the pool with the backend session, and the rotation lock,
+        // still alive; the DISCARD ALL that would have released the lock
+        // is deferred until that connector is next used. Because this key
+        // is a CONSTANT that never rotates, one swallowed unlock (the
+        // catch below is best-effort) wedged KEK rotation shut for the
+        // whole cluster with the operator-visible lie "another rotation is
+        // already in progress". The lock now rides a Pooling=false session
+        // via PostgresAdvisoryLock, where closing really does release.
+        //
+        // The data source is resolved lazily through the service scope
         // factory: when the test container has no NpgsqlDataSource
         // registered (EF InMemory fixtures), we fall back to the
         // in-process _lock as the only guard, which matches the
@@ -439,8 +487,13 @@ public sealed class KekRotationCoordinator
         await using var lockScope = _scopeFactory.CreateAsyncScope();
         var dataSource = lockScope.ServiceProvider.GetService<NpgsqlDataSource>();
 
-        NpgsqlConnection? lockConnection = null;
+        PostgresAdvisoryLockLease? lockLease = null;
         bool acquired;
+        // Set when the gate could not even be EVALUATED (bad configuration, a
+        // database that would not answer). Distinguished from a gate that was
+        // evaluated and refused, because "another rotation is already in
+        // progress" is a lie in the first case and the operator acts on it.
+        string? acquisitionFailure = null;
         try
         {
             if (dataSource is null)
@@ -458,36 +511,94 @@ public sealed class KekRotationCoordinator
             }
             else
             {
-                lockConnection = await dataSource
-                    .OpenConnectionAsync(ct).ConfigureAwait(false);
-                acquired = await TryAcquireAdvisoryLockAsync(lockConnection, ct)
-                    .ConfigureAwait(false);
+                // Same key, same pg_try_advisory_lock(bigint) call — only
+                // the session it rides on changed.
+                //
+                // NOTE — do NOT reach for dataSource.ConnectionString here.
+                // Npgsql STRIPS THE PASSWORD from it (PersistSecurityInfo is
+                // false by default), so a connection re-parsed from it cannot
+                // authenticate; the lock attempt would throw NpgsqlException,
+                // fall into the PF-S8 fail-closed branch below, and abort
+                // EVERY rotation. Story 44-1 hit the same trap (see the note at
+                // Program.cs on the migrate-all sweep). The credentials-
+                // bearing string is the control plane's own, and the singleton
+                // NpgsqlDataSource is built from exactly that string
+                // (TenantConnectionPoolServiceCollectionExtensions), so this
+                // targets the same database the lock has always lived on.
+                var connectionString = ResolveLockConnectionString(
+                    lockScope.ServiceProvider);
+
+                if (connectionString is null)
+                {
+                    // Fail closed, never open: an unresolvable lock target is
+                    // not permission to rotate. And say SO — reporting a
+                    // configuration fault as "another rotation is already in
+                    // progress" is the exact operator-visible untruth this
+                    // whole audit is about.
+                    _logger.LogWarning(
+                        "tenant.kek.rotate aborted: no usable control-plane connection string "
+                        + "for the cluster-wide advisory lock lockKey={LockKey}",
+                        AdvisoryLockKey);
+                    acquired = false;
+                    acquisitionFailure =
+                        "the cluster-wide rotation gate could not be evaluated: no usable "
+                        + "control-plane connection string for its dedicated advisory-lock "
+                        + "session. NpgsqlDataSource.ConnectionString never carries the "
+                        + "password and EF inherits that laundered string whenever one is "
+                        + "registered in DI — set ConnectionStrings:ControlPlane. No rotation "
+                        + "was started and nothing was re-encrypted.";
+                }
+                else
+                {
+                    lockLease = await PostgresAdvisoryLock.TryAcquireAsync(
+                        connectionString,
+                        PostgresAdvisoryLockKey.FromInt64(AdvisoryLockKey),
+                        _logger,
+                        ct).ConfigureAwait(false);
+                    acquired = lockLease is not null;
+                }
             }
         }
         catch (OperationCanceledException)
         {
-            if (lockConnection is not null)
+            if (lockLease is not null)
             {
-                await lockConnection.DisposeAsync().ConfigureAwait(false);
+                await lockLease.DisposeAsync().ConfigureAwait(false);
             }
             throw;
         }
-        catch (NpgsqlException ex)
+        catch (Exception ex)
         {
-            // PF-S8: a transient Postgres error during lock acquisition
-            // is NOT a free pass. Two pods racing the rotation would
-            // both flip to "acquired" under the previous (broken)
-            // catch-all. Fail closed: log + bail, the operator hits
-            // /start again once the database is healthy.
+            // PF-S8: a failure during lock acquisition is NOT a free pass.
+            // Two pods racing the rotation would both flip to "acquired"
+            // under the original (broken) catch-all-and-continue. Fail
+            // closed: log + bail, the operator hits /start again once the
+            // deployment is healthy.
+            //
+            // 2026-07-31 review, F5 — this used to catch NpgsqlException
+            // only, and fail-closed is not the same as fail-STUCK. A
+            // malformed connection string ("Host=h;Bogus=1") reaches
+            // TryAcquireAsync and comes back out of its connection-string
+            // rewrite as an ArgumentException, which escaped this method
+            // ENTIRELY — before the try/finally that owns the status. The
+            // phase stayed Running forever, _activeRotationId was never
+            // cleared, the Task.Run faulted unobserved, and /status reported
+            // a rotation that could never finish or be retried. The seam now
+            // refuses a malformed string itself, and this catch is total so
+            // no future exception type can reopen the hole: EVERY way of
+            // failing to take the gate ends as Failed with a reason.
             _logger.LogWarning(ex,
-                "tenant.kek.rotate aborted: transient Npgsql error during "
-                + "advisory lock acquisition lockKey={LockKey}",
-                AdvisoryLockKey);
+                "tenant.kek.rotate aborted: {ErrorType} during advisory lock acquisition "
+                + "lockKey={LockKey}", ex.GetType().Name, AdvisoryLockKey);
             acquired = false;
-            if (lockConnection is not null)
+            acquisitionFailure =
+                $"the cluster-wide rotation gate could not be evaluated ({ex.GetType().Name}): "
+                + RedactForEvent(ex)
+                + ". No rotation was started and nothing was re-encrypted.";
+            if (lockLease is not null)
             {
-                await lockConnection.DisposeAsync().ConfigureAwait(false);
-                lockConnection = null;
+                await lockLease.DisposeAsync().ConfigureAwait(false);
+                lockLease = null;
             }
         }
 
@@ -497,13 +608,36 @@ public sealed class KekRotationCoordinator
             {
                 Phase = KekRotationPhase.Failed,
                 CompletedAt = DateTimeOffset.UtcNow,
-                FailureReason = "another rotation is already in progress on this cluster",
+                FailureReason = acquisitionFailure
+                    ?? "another rotation is already in progress on this cluster",
             });
             _logger.LogWarning(
-                "tenant.kek.rotate aborted: advisory lock {LockKey} held by another pod",
-                AdvisoryLockKey);
+                "tenant.kek.rotate aborted: advisory lock {LockKey} not taken (evaluated={Evaluated})",
+                AdvisoryLockKey, acquisitionFailure is null);
+            // The retry path sets _activeRotationId BEFORE the background task
+            // starts, so a rotation that never took the gate must clear it —
+            // otherwise the coordinator carries a pointer to a row it is not
+            // working on.
+            lock (_lock) { _activeRotationId = null; }
             return;
         }
+
+        // 2026-07-30 follow-up — the REVERSE hazard. Everything above stops a
+        // second pod being ADMITTED; nothing stopped this rotation carrying on
+        // after the gate silently OPENED underneath it. The lock session sits
+        // idle for the whole re-encrypt (the work runs on entirely different
+        // connections), so a pooler recycle, an idle timeout or an
+        // administrative pg_terminate_backend ends it without touching this
+        // process — and a second pod is then admitted into a concurrent
+        // re-encrypt of the same rows. That does not merely duplicate work: two
+        // pods re-encrypting the same envelope under two different keys leaves
+        // tenant connection strings that only one pod can read, and only one of
+        // those keys is ever promoted. So the run is re-verified and ABORTED on
+        // loss. `ct` is rebound to the watchdog's linked token, which is what
+        // makes the abort reach the per-row loop.
+        var lockWatchdog = lockLease?.WatchLiveness(
+            LockHeartbeatInterval, ct, _logger, "tenant.kek.rotate");
+        if (lockWatchdog is not null) ct = lockWatchdog.Token;
 
         byte[]? oldPrimary = null;
         byte[]? retryStagedSecondary = null;
@@ -787,12 +921,36 @@ public sealed class KekRotationCoordinator
         }
         catch (OperationCanceledException)
         {
+            // A lost lock and an ordinary cancellation arrive through the same
+            // token — but they are completely different stories for an
+            // operator, and they need different persisted state. A cancelled
+            // rotation is over; a lock-lost rotation stopped PART WAY through a
+            // fleet re-encrypt and must stay resumable, so the staged secondary
+            // is kept and the row is marked failed (which is what /retry looks
+            // for) rather than cancelled (which zeroes the staged key).
+            var lockLost = lockWatchdog?.LockLost == true;
+            var reason = lockLost
+                ? "the cluster-wide rotation lock was LOST mid-rotation (the session holding "
+                  + "pg_try_advisory_lock died — a pooler/proxy drop, an idle timeout, or a "
+                  + "terminated backend). The rotation was ABORTED because it could no longer "
+                  + "guarantee it was the only re-encryption running on this cluster; two pods "
+                  + "re-encrypting the same rows under different keys leaves tenant secrets "
+                  + "readable by neither. Some rows are already on the new key — re-run "
+                  + "/api/admin/kek/retry to finish the rotation from where it stopped."
+                : "rotation cancelled";
+
             UpdateStatus(s => s with
             {
                 Phase = KekRotationPhase.Failed,
                 CompletedAt = DateTimeOffset.UtcNow,
-                FailureReason = "rotation cancelled",
+                FailureReason = reason,
             });
+            if (lockLost)
+            {
+                _logger.LogError(
+                    "tenant.kek.rotate aborted: cluster-wide advisory lock {LockKey} was lost "
+                    + "mid-rotation", AdvisoryLockKey);
+            }
             if (rotationId is not null)
             {
                 try
@@ -802,7 +960,12 @@ public sealed class KekRotationCoordinator
                     var fac = bestEffortScope.ServiceProvider
                         .GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
                     await PersistRotationCompletedAsync(
-                        fac, rotationId.Value, "cancelled", "cancelled", CancellationToken.None)
+                        fac,
+                        rotationId.Value,
+                        lockLost ? "failed" : "cancelled",
+                        lockLost ? reason : "cancelled",
+                        CancellationToken.None,
+                        keepStaged: lockLost)
                             .ConfigureAwait(false);
                 }
                 catch (Exception persistEx)
@@ -811,6 +974,11 @@ public sealed class KekRotationCoordinator
                         "tenant.kek.rotate cancellation: failed to persist cancelled state");
                 }
             }
+
+            // A lost lock is not a cancellation of this process's work by
+            // anyone — rethrowing an OperationCanceledException would surface
+            // to WaitForCompletionAsync/host logs as an orderly shutdown.
+            if (lockLost) return;
             throw;
         }
         catch (Exception ex)
@@ -855,22 +1023,26 @@ public sealed class KekRotationCoordinator
             {
                 CryptographicOperations.ZeroMemory(retryStagedSecondary);
             }
-            // PF-C3: release the advisory lock on the dedicated
-            // NpgsqlConnection. Disposing the connection auto-releases
-            // any session-level locks it holds (unlock is best-effort —
-            // the connection drop is the actual guarantee).
-            if (lockConnection is not null)
+            // Stop the liveness watchdog BEFORE the lease it watches goes
+            // away: both ride the same single session, so a probe racing the
+            // release would either fault on a concurrent command or report a
+            // spurious loss. Disposing the watchdog does NOT cancel the work
+            // token, so a rotation that already finished cannot be
+            // retro-cancelled here.
+            if (lockWatchdog is not null)
             {
-                try
-                {
-                    await ReleaseAdvisoryLockAsync(lockConnection, CancellationToken.None)
-                        .ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "advisory lock release skipped");
-                }
-                await lockConnection.DisposeAsync().ConfigureAwait(false);
+                await lockWatchdog.DisposeAsync().ConfigureAwait(false);
+            }
+
+            // PF-C3: release the advisory lock. The lease unlocks
+            // explicitly (best-effort, on CancellationToken.None so the
+            // cancelled path still issues it) and then ends its NON-POOLED
+            // session — and that session ending is the actual guarantee,
+            // which is only true because it is not pooled (2026-07-30
+            // audit; see PostgresAdvisoryLock).
+            if (lockLease is not null)
+            {
+                await lockLease.DisposeAsync().ConfigureAwait(false);
             }
             lock (_lock) { _activeRotationId = null; }
         }
@@ -922,46 +1094,44 @@ public sealed class KekRotationCoordinator
     }
 
     /// <summary>
-    /// R2-H14 + PF-C3: try to acquire the cluster-wide rotation
-    /// advisory lock on a dedicated <see cref="NpgsqlConnection"/>.
-    /// Returns true on success. Pg's <c>pg_try_advisory_lock</c> never
-    /// blocks — it returns false immediately when another pod holds
-    /// the lock. The connection itself is owned by the caller and held
-    /// open for the rotation lifetime so the session-level lock isn't
-    /// released by EF's pooled-context recycling.
+    /// The connection string the cluster-wide rotation lock's dedicated,
+    /// non-pooled session should be opened from.
+    ///
+    /// <para>All four advisory-lock sites now go through the SAME resolution
+    /// (<see cref="PostgresAdvisoryLock.TryResolveSessionConnectionString"/>) —
+    /// configuration first because it is the only source Npgsql never
+    /// launders, EF's view second, each rejected unless it still carries a
+    /// password. This site is where the trap was found: the first cut of the
+    /// 2026-07-30 fix read <c>NpgsqlDataSource.ConnectionString</c>, which
+    /// NEVER carries the password, so every rotation failed closed with the
+    /// operator-visible untruth "another rotation is already in progress on
+    /// this cluster". Keeping the policy in one place is the same argument
+    /// that justified the shared lock helper: four sites had each re-derived
+    /// this and each got it wrong.</para>
+    ///
+    /// <para>Null means "nothing usable" — the caller fails CLOSED. It is
+    /// deliberately NOT backed off to <c>dataSource.ConnectionString</c>:
+    /// against a live cluster that string cannot authenticate, and the
+    /// resulting error reads as "someone else holds the gate", i.e. it would
+    /// silently disable rotation forever.</para>
     /// </summary>
-    private static async Task<bool> TryAcquireAdvisoryLockAsync(
-        NpgsqlConnection conn, CancellationToken ct)
+    private string? ResolveLockConnectionString(
+        IServiceProvider scopedProvider)
     {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT pg_try_advisory_lock(@key)";
-        var p = cmd.CreateParameter();
-        p.ParameterName = "key";
-        p.Value = AdvisoryLockKey;
-        cmd.Parameters.Add(p);
-        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return result is bool b && b;
-    }
+        var cfg = scopedProvider.GetService<IConfiguration>();
+        var cpFactory = scopedProvider
+            .GetService<IDbContextFactory<ControlPlaneDbContext>>();
 
-    /// <summary>
-    /// R2-H14 + PF-C3: release the advisory lock on the dedicated
-    /// connection. Safe to call even when the lock was never acquired
-    /// — Postgres ignores spurious releases. The follow-up
-    /// <c>DisposeAsync</c> on the connection itself also releases any
-    /// remaining session-level locks; this explicit unlock makes the
-    /// release deterministic on the happy path.
-    /// </summary>
-    private static async Task ReleaseAdvisoryLockAsync(
-        NpgsqlConnection conn, CancellationToken ct)
-    {
-        if (conn.State != System.Data.ConnectionState.Open) return;
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT pg_advisory_unlock(@key)";
-        var p = cmd.CreateParameter();
-        p.ParameterName = "key";
-        p.Value = AdvisoryLockKey;
-        cmd.Parameters.Add(p);
-        await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        // The context is only consulted for its connection string; created and
+        // disposed here rather than held, so the lock never rides it.
+        using var cp = cpFactory?.CreateDbContext();
+        // The logger is threaded through (it used to be null) because the seam
+        // is where the two refusals are TOLD APART: a laundered password logs a
+        // warning naming the mechanism, a malformed string logs an error naming
+        // the typo. Swallowing that left the operator with only the
+        // coordinator's status text (2026-07-31 review, F5).
+        return PostgresAdvisoryLock.TryResolveSessionConnectionString(
+            cfg, cp, _logger, site: "the cluster-wide KEK rotation gate");
     }
 
     private static async Task<Guid> PersistRotationStartAsync(

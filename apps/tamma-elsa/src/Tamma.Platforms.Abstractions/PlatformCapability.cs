@@ -104,4 +104,13 @@ public enum PlatformCapability
     /// powers the onboarding "pick a repo" UI (Story 31-9).
     /// </summary>
     ListAccessibleRepos = 11,
+
+    /// <summary>
+    /// Story 31-13 — driver implements the full PR lifecycle verbs:
+    /// close, reopen, request reviewers, add/remove labels, and
+    /// draft↔ready toggle. GitHub-only today; the other drivers answer
+    /// these interface members with <c>capability_unsupported</c> and
+    /// this flag records that they do not (yet) perform them.
+    /// </summary>
+    PrLifecycle = 12,
 }

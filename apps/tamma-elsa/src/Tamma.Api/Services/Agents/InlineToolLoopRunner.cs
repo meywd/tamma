@@ -11,6 +11,7 @@ using Tamma.Activities.Security;
 using Tamma.Activities.ToolExecution;
 using Tamma.Api.Services.Providers;
 using Tamma.Core;
+using Tamma.Core.Actions;
 
 namespace Tamma.Api.Services.Agents;
 
@@ -57,6 +58,8 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     private readonly ParallelToolExecutor? _parallelExecutor;
     private readonly IProviderCredentialResolver? _credentialResolver;
     private readonly IProviderSettingsStore? _settingsStore;
+    private readonly Tamma.Api.Services.Actions.ActionGateEventsService? _actionGateEvents;
+    private readonly ToolLoopAuthorizationBroker? _authorizationBroker;
 
     public InlineToolLoopRunner(
         ILogger<InlineToolLoopRunner>? logger,
@@ -75,7 +78,20 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         ToolLoopEventEmitter? eventEmitter = null,
         ParallelToolExecutor? parallelExecutor = null,
         IProviderCredentialResolver? credentialResolver = null,
-        IProviderSettingsStore? settingsStore = null)
+        IProviderSettingsStore? settingsStore = null,
+        // Epic 43 F11 — the durable record of a BREAK-GLASS BYPASS at Seam B.
+        // It lives here rather than in the gate because the gate is sync by
+        // design (43-5 AC12: the per-tool-call path must never block on a
+        // database) while this loop is async, and the append is deliberately
+        // NON-swallowing: a bypass that cannot be recorded must not happen
+        // quietly. Optional only so pre-43 unit compositions still construct;
+        // production DI always supplies it.
+        Tamma.Api.Services.Actions.ActionGateEventsService? actionGateEvents = null,
+        // Story 43-14 (D6) — the DENIAL-path ledger broker. Optional-nullable
+        // (registration decides): with it, a Seam B denial first checks whether a
+        // correlation-standing grant already covers the run (one shell ask per run,
+        // not per call). The sync gate above stays REQUIRED and untouched.
+        ToolLoopAuthorizationBroker? authorizationBroker = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
@@ -95,6 +111,8 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         // the standalone engine and in pre-46 unit-test compositions): with no
         // store, default-model resolution is byte-identical to pre-46-1.
         _settingsStore = settingsStore;
+        _actionGateEvents = actionGateEvents;
+        _authorizationBroker = authorizationBroker;
     }
 
     /// <inheritdoc />
@@ -340,9 +358,79 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
                 }
 
                 var gateDecision = _autonomyGate.Evaluate(tc.ToolName, tc.ArgumentsJson);
+
+                // Epic 43 F11 — one durable row per decision the break-glass
+                // override let through a degraded policy read, on the
+                // NON-swallowing append path. Emitted for the ALLOWED and the
+                // DENIED shape alike: what is being recorded is "the fail-closed
+                // posture was suspended for this call", which is a fact about
+                // the operator's override, not about the outcome. If the append
+                // throws, the run fails — deliberately: an unrecordable bypass
+                // is indistinguishable from an unauthorised one.
+                if (gateDecision.BreakGlass is { } breakGlassState
+                    && _actionGateEvents is not null)
+                {
+                    await _actionGateEvents.EmitBreakGlassBypassAsync(
+                        gateDecision.ActionKey?.ToWire() ?? tc.ToolName,
+                        actionGroupWire: null,
+                        breakGlassState,
+                        seam: "tool-loop",
+                        outcome: gateDecision.IsDenied ? "denied" : "automated",
+                        autonomyLevel: gateDecision.Dial,
+                        effectiveMinAutonomy: gateDecision.MinAutonomy,
+                        correlationId: workflowInstanceId,
+                        degradedReason: AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable)
+                        .ConfigureAwait(false);
+                }
+
                 if (gateDecision.IsDenied)
                 {
+                    // Story 43-14 (D6, AC5) — DENIAL-path ledger consult. A
+                    // correlation-standing grant minted at run entry ("this run
+                    // may use the shell") covers every subsequent shell call
+                    // WITHOUT a second human ask, so a denied call whose run is
+                    // already covered PROCEEDS instead of being rejected. Only the
+                    // FIRST uncovered call mints a pending ask (idempotent per run
+                    // via the open-row index → exactly one pending row for a loop
+                    // of N shell calls).
+                    var actionKeyWire = gateDecision.ActionKey?.ToWire();
+                    var coveringGrant = _authorizationBroker is not null && actionKeyWire is not null
+                        ? await _authorizationBroker
+                            .TryCoverAsync(actionKeyWire, workflowInstanceId, cancellationToken)
+                            .ConfigureAwait(false)
+                        : null;
+                    if (coveringGrant is not null)
+                    {
+                        // Review 5a — a denied call that PROCEEDS on a grant is a
+                        // security-relevant override and must leave a durable audit
+                        // row, exactly like the Seam-C consume path, not just a
+                        // transient log. EmitAuthorizedAsync is best-effort (the
+                        // grant ROW is the primary record; the block-not-recorded
+                        // rule protects denials, and this is an authorization).
+                        if (_actionGateEvents is not null)
+                        {
+                            await _actionGateEvents.EmitAuthorizedAsync(
+                                coveringGrant.TenantId, coveringGrant.UserId,
+                                actionKeyWire!, workflowInstanceId, coveringGrant.Id)
+                                .ConfigureAwait(false);
+                        }
+                        _logger?.LogInformation(
+                            "Tool call {ToolName} denied by the sync gate but COVERED by grant "
+                            + "{AuthorizationId} ({Scope}) for run {Correlation}; proceeding.",
+                            tc.ToolName, coveringGrant.Id, coveringGrant.Scope, workflowInstanceId);
+                        continue; // covered — do not reject; fall through to execution
+                    }
+
                     rejectedToolCalls[tc.Id] = ComposeDenialMessage(tc.ToolName, gateDecision);
+
+                    // No cover — mint (idempotently) the pending ask a person
+                    // decides on, so ONE approval covers the rest of the run.
+                    if (_authorizationBroker is not null && actionKeyWire is not null)
+                    {
+                        await _authorizationBroker
+                            .EnsurePendingAsync(actionKeyWire, workflowInstanceId, gateDecision.MinAutonomy, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
 
                     // A denial under enforcement is never swallowed silently
                     // (epic audit rule; the 43-9 audit event family joins here).

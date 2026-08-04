@@ -87,6 +87,36 @@ public interface IGitPlatformClient
     Task<PlatformResult<PullRequest>> MergePullRequestAsync(
         MergePullRequestRequest request, CancellationToken ct = default);
 
+    // ── Story 31-13 — the full PR lifecycle. Drivers without the
+    //    PrLifecycle capability MUST return PlatformError.InvalidRequest
+    //    with code "capability_unsupported" (never throw — the no-throw
+    //    contract above). Close↔reopen invert; the rest are editable
+    //    on-platform. ──
+
+    /// <summary>Close an open PR (returns the updated PR).</summary>
+    Task<PlatformResult<PullRequest>> ClosePullRequestAsync(
+        string owner, string repoName, string prNumber, CancellationToken ct = default);
+
+    /// <summary>Reopen a closed PR (returns the updated PR).</summary>
+    Task<PlatformResult<PullRequest>> ReopenPullRequestAsync(
+        string owner, string repoName, string prNumber, CancellationToken ct = default);
+
+    /// <summary>Request individual and/or team reviewers on a PR.</summary>
+    Task<PlatformResult<PullRequest>> RequestReviewersAsync(
+        RequestReviewersRequest request, CancellationToken ct = default);
+
+    /// <summary>Add labels to a PR (labels live on the issue side of a PR).</summary>
+    Task<PlatformResult<PullRequest>> AddPullRequestLabelsAsync(
+        AddPullRequestLabelsRequest request, CancellationToken ct = default);
+
+    /// <summary>Remove a single label from a PR.</summary>
+    Task<PlatformResult<PullRequest>> RemovePullRequestLabelAsync(
+        string owner, string repoName, string prNumber, string label, CancellationToken ct = default);
+
+    /// <summary>Toggle a PR between draft and ready-for-review.</summary>
+    Task<PlatformResult<PullRequest>> SetDraftAsync(
+        SetPullRequestDraftRequest request, CancellationToken ct = default);
+
     /// <summary>
     /// Post a top-level comment on an issue or PR.
     /// </summary>

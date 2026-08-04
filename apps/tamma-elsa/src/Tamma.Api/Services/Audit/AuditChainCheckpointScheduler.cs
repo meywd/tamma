@@ -1,7 +1,6 @@
-using System.Data;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using Tamma.Data;
+using Tamma.Data.Pooling;
 
 namespace Tamma.Api.Services.Audit;
 
@@ -31,7 +30,8 @@ public sealed class AuditChainCheckpointOptions
 /// scope. Structurally the <c>AuditProjectorBackgroundService</c> host (per-tick
 /// DI scope, <c>RunOnStartup</c> gate, WARN-and-continue) combined with the
 /// <c>HourlyAnalyticsRollupScheduler</c>'s multi-pod leader election
-/// (<c>pg_try_advisory_lock</c> on the CP connection keyed by the hour) and
+/// (<c>pg_try_advisory_lock</c> keyed by the hour, on a dedicated NON-POOLED
+/// session via <see cref="Tamma.Data.Pooling.PostgresAdvisoryLock"/>) and
 /// <c>_lastFired</c> hour dedup.
 ///
 /// <para><b>Placement note.</b> The spec sketched this as an Elsa-dispatched
@@ -41,6 +41,20 @@ public sealed class AuditChainCheckpointOptions
 /// the audit projector host — it runs as a Tamma.Api <see cref="BackgroundService"/>
 /// that invokes the service directly. On-demand checkpointing reuses the same
 /// service from the admin endpoint.</para>
+///
+/// <para><b>No liveness watchdog here, deliberately</b> (2026-07-30 follow-up).
+/// <see cref="PostgresAdvisoryLockLease.WatchLiveness"/> exists for critical
+/// sections long enough that the lock session can plausibly die inside them; a
+/// tick writes one signed checkpoint per active scope and is over in seconds,
+/// with the same connection actively in use throughout. And the cost of the
+/// hazard here is small and self-correcting: if this pod's leader lock silently
+/// dropped mid-tick and a second pod won the hour, the result is a duplicate
+/// checkpoint row for an hour — an append-only tamper-evidence anchor written
+/// twice, not data lost. Compare <c>TenantMoveService</c> (a dump/restore, where
+/// two concurrent movers destroy a tenant's schema) and
+/// <c>KekRotationCoordinator</c> (a fleet-wide re-encrypt, where two concurrent
+/// rotations leave rows encrypted under a key no pod has); those two are
+/// watched.</para>
 /// </summary>
 public sealed class AuditChainCheckpointScheduler : BackgroundService
 {
@@ -89,6 +103,30 @@ public sealed class AuditChainCheckpointScheduler : BackgroundService
             {
                 break;
             }
+            catch (AdvisoryLockConnectionStringException ex)
+            {
+                // 2026-07-31 review. Everything else here is WARN-and-continue
+                // because a tick can fail transiently and the next one is 30s
+                // away. This one cannot: it is a permanent CONFIGURATION fault
+                // (no usable / a malformed control-plane connection string),
+                // so it will fail identically every tick, forever, and the
+                // consequence is that this deployment writes NO tamper-evidence
+                // anchors at all while looking healthy. That deserves ERROR,
+                // and a message that says what is not happening rather than
+                // just what threw.
+                //
+                // Deliberately still CONTINUE rather than crash the host: the
+                // checkpoint loop is opt-in (RunOnStartup) and taking a whole
+                // API down over a background-scheduler misconfiguration trades
+                // a compliance gap for an outage. The escalation is the alert;
+                // the operator's fix is a config change and a restart.
+                _logger.LogError(ex,
+                    "audit.chain.checkpoint.misconfigured — NO audit-chain checkpoints are being "
+                    + "written by this deployment. The hourly leader election cannot open its "
+                    + "dedicated advisory-lock session, and this will not fix itself: it is a "
+                    + "connection-string fault, not a transient one. Every hour it persists is an "
+                    + "hour with no tamper-evidence anchor for any scope.");
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "AuditChainCheckpointScheduler tick threw; continuing.");
@@ -107,6 +145,16 @@ public sealed class AuditChainCheckpointScheduler : BackgroundService
     /// <summary>Test-only single-tick driver (bypasses the loop + fire-minute gate).</summary>
     public Task RunOnceAsync(CancellationToken ct) => WriteAllAsync(ct);
 
+    /// <summary>
+    /// Test-only: run exactly one <see cref="TickAsync"/> and let it THROW.
+    /// <see cref="ExecuteAsync"/>'s loop deliberately swallows a failing tick
+    /// (WARN-and-continue), which makes the fail-closed paths — notably an
+    /// unusable lock connection string — unobservable from outside. This
+    /// exists so those can be asserted on directly; it is not a second entry
+    /// point (<see cref="RunOnceAsync"/> is the checkpoint-only one).
+    /// </summary>
+    internal Task TickForTestAsync(CancellationToken ct) => TickAsync(ct);
+
     private async Task TickAsync(CancellationToken ct)
     {
         var now = _clock.GetUtcNow();
@@ -117,62 +165,64 @@ public sealed class AuditChainCheckpointScheduler : BackgroundService
         using var scope = _services.CreateScope();
         var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
-        // Multi-pod leader election on the CP connection: only the pod that wins
+        // Multi-pod leader election: only the pod that wins
         // pg_try_advisory_lock for this hour writes checkpoints. Non-Postgres
         // (tests) → single-pod, always leader.
+        //
+        // 2026-07-30 audit — the lock is taken on its own NON-POOLED session,
+        // NOT on this scope's pooled CP connection. It used to ride the CP
+        // context's pooled connector, and the unlock in the finally was passed
+        // the tick's OWN CancellationToken: on host shutdown, ct is already
+        // cancelled when the finally runs, so the unlock threw immediately,
+        // was swallowed by a bare catch, and the connector went back to the
+        // pool with the hour's lock STILL HELD (Npgsql defers the DISCARD ALL
+        // that releases it until that connector is next used). Every pod then
+        // saw "another pod is leader" and skipped, so that hour got no audit
+        // checkpoints from anyone. See PostgresAdvisoryLock.
         var lockKey = AdvisoryLockBase ^ ((long)hourKey.Year << 20) ^ (hourKey.DayOfYear * 64L + hourKey.Hour);
         var isPg = cp.Database.IsNpgsql();
-        var conn = isPg ? (NpgsqlConnection)cp.Database.GetDbConnection() : null;
-        var opened = false;
-        var acquired = !isPg;
 
-        try
+        PostgresAdvisoryLockLease? lease = null;
+        if (isPg)
         {
-            if (isPg && conn is not null)
-            {
-                if (conn.State != ConnectionState.Open)
-                {
-                    await conn.OpenAsync(ct).ConfigureAwait(false);
-                    opened = true;
-                }
-                await using var lockCmd = conn.CreateCommand();
-                lockCmd.CommandText = "SELECT pg_try_advisory_lock(@k);";
-                lockCmd.Parameters.AddWithValue("k", lockKey);
-                acquired = (bool?)await lockCmd.ExecuteScalarAsync(ct).ConfigureAwait(false) == true;
-            }
+            // Configuration first, EF second, each rejected unless it still
+            // carries credentials. EF's Database.GetConnectionString() — what
+            // this used to read directly — comes back with the password
+            // stripped whenever an NpgsqlDataSource is registered in DI, which
+            // is the production shape; the lock would then fail to open, this
+            // pod would read that as "another pod is the leader", and the hour
+            // would get no checkpoints from anyone. Throws, naming the
+            // mechanism, when nothing usable resolves.
+            var connectionString = PostgresAdvisoryLock.ResolveSessionConnectionString(
+                scope.ServiceProvider.GetService<IConfiguration>(),
+                cp,
+                "the audit-chain checkpoint leader election",
+                _logger);
 
-            if (!acquired)
+            // Same key, same pg_try_advisory_lock(bigint) call as before.
+            lease = await PostgresAdvisoryLock.TryAcquireAsync(
+                connectionString,
+                PostgresAdvisoryLockKey.FromInt64(lockKey),
+                _logger,
+                ct).ConfigureAwait(false);
+
+            if (lease is null)
             {
                 _lastFired = hourKey; // another pod owns this hour
                 _logger.LogInformation(
                     "audit.chain.checkpoint.skipped_not_leader hour={Hour}", $"{now:yyyy-MM-dd HH:00}");
                 return;
             }
+        }
 
+        await using (lease)
+        {
             var checkpoints = scope.ServiceProvider.GetRequiredService<IAuditChainCheckpointService>();
             var written = await checkpoints.WriteAllActiveScopesAsync(ct).ConfigureAwait(false);
             _lastFired = hourKey;
             _logger.LogInformation(
                 "audit.chain.checkpoint.tick_complete hour={Hour} checkpointsWritten={Written}",
                 $"{now:yyyy-MM-dd HH:00}", written);
-        }
-        finally
-        {
-            if (isPg && conn is not null && acquired)
-            {
-                try
-                {
-                    await using var unlock = conn.CreateCommand();
-                    unlock.CommandText = "SELECT pg_advisory_unlock(@k);";
-                    unlock.Parameters.AddWithValue("k", lockKey);
-                    await unlock.ExecuteScalarAsync(ct).ConfigureAwait(false);
-                }
-                catch { /* closing the connection releases it anyway */ }
-            }
-            if (opened && conn is not null)
-            {
-                await conn.CloseAsync().ConfigureAwait(false);
-            }
         }
     }
 

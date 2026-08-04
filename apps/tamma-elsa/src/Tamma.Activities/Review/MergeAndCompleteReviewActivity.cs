@@ -126,7 +126,14 @@ public class MergeAndCompleteReviewActivity : Activity
         var verifyCi = VerifyCIBeforeMerge.Get(context);
         var deleteBranch = DeleteBranchAfterMerge.Get(context);
         var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
-        var correlationId = context.WorkflowExecutionContext.Id;
+        // Story 43-14 (AC4) — the RUN correlation (cycle instance id, threaded as
+        // the Elsa correlation), not the merge sub-workflow's own id, so the
+        // ?correlationId= this passes to DeleteBranchAsync matches the human's
+        // approval-minted grant (and the SeamEMediationTests pin at :381 that
+        // names this call).
+        var correlationId = string.IsNullOrWhiteSpace(context.WorkflowExecutionContext.CorrelationId)
+            ? context.WorkflowExecutionContext.Id
+            : context.WorkflowExecutionContext.CorrelationId!;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;
 

@@ -301,6 +301,13 @@ public class GitEndpointsTests
             return Task.FromResult(NextComments ?? new GitMediationResult { Success = true, Outcome = "Done", Comments = new List<PrCommentDto>() });
         }
 
+        // Story 43-12 — the PR-details read used by the merge-target key selector.
+        public Task<GitMediationResult> GetPullRequestAsync(Guid? tenantId, string repo, int prNumber, string correlationId, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "Done", TargetBranch = "main" });
+        }
+
         public Task<GitMediationResult> GetCommitsAsync(Guid? tenantId, string repo, string branch, DateTime? since, string correlationId, CancellationToken ct = default)
         {
             LastTenantId = tenantId; LastRepo = repo;
@@ -328,6 +335,49 @@ public class GitEndpointsTests
             {
                 Success = true, Outcome = "Created", ReleaseTag = body.TagName, ReleaseUrl = "https://gh/releases/1", ReleaseId = 1,
             });
+        }
+
+        // Story 31-13 — the 7 PR-lifecycle verbs.
+        public Task<GitMediationResult> ClosePullRequestAsync(Guid? tenantId, string repo, int prNumber, ClosePrRequest body, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "Closed", PrNumber = prNumber, PrState = "closed" });
+        }
+
+        public Task<GitMediationResult> ReopenPullRequestAsync(Guid? tenantId, string repo, int prNumber, ReopenPrRequest body, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "Reopened", PrNumber = prNumber, PrState = "open" });
+        }
+
+        public Task<GitMediationResult> CommentOnPullRequestAsync(Guid? tenantId, string repo, int prNumber, PrCommentRequest body, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "Commented", PrNumber = prNumber });
+        }
+
+        public Task<GitMediationResult> ReviewCommentOnPullRequestAsync(Guid? tenantId, string repo, int prNumber, PrReviewCommentRequest body, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "Commented", PrNumber = prNumber, CommentId = 1 });
+        }
+
+        public Task<GitMediationResult> RequestPullRequestReviewersAsync(Guid? tenantId, string repo, int prNumber, PrReviewersRequest body, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "ReviewersRequested", PrNumber = prNumber });
+        }
+
+        public Task<GitMediationResult> UpdatePullRequestLabelsAsync(Guid? tenantId, string repo, int prNumber, PrLabelsRequest body, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "LabelsUpdated", PrNumber = prNumber });
+        }
+
+        public Task<GitMediationResult> SetPullRequestDraftAsync(Guid? tenantId, string repo, int prNumber, PrDraftRequest body, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "DraftSet", PrNumber = prNumber, IsDraft = body.Draft });
         }
     }
 

@@ -69,7 +69,8 @@ public static class AdlEndpoints
         [FromServices] IElsaWorkflowService elsa,
         [FromServices] ITenantContext tenantContext,
         ClaimsPrincipal principal,
-        [FromServices] ILoggerFactory loggerFactory)
+        [FromServices] ILoggerFactory loggerFactory,
+        [FromServices] Services.Actions.ApprovalGrantMinter? grantMinter = null)
     {
         var logger = loggerFactory.CreateLogger("Tamma.Api.AdlEndpoints");
 
@@ -97,6 +98,28 @@ public static class AdlEndpoints
 
         try
         {
+            // Story 43-14 (D3) — on a MERGE decision, mint the merge-composite
+            // correlation-standing grants BEFORE resuming, so the merge sub-workflow's
+            // mediated calls pass Seam C via ReasonCoveredByAuthorization instead of
+            // 409ing the human's "yes". LOCATE first (find the run correlation without
+            // running), then MINT, then RESUME — because the engine resume runs the
+            // merge synchronously, a mint after would lose the race. A rejection mints
+            // nothing (AC3's second half). Locate 404 → no mint, today's 404 below.
+            if (grantMinter is not null
+                && string.Equals(req.Decision.Trim(), "merge", StringComparison.OrdinalIgnoreCase))
+            {
+                var located = await elsa.LocateMergeApprovalGateAsync(
+                    req.IssueNumber, req.PrNumber, tenantId, req.Repository);
+                if (located.Found && !string.IsNullOrWhiteSpace(located.CorrelationId))
+                {
+                    await grantMinter.MintForChainAsync(
+                        Services.Actions.ApprovalChains.MergeComposite,
+                        located.CorrelationId!,
+                        ResolveApproverUserId(principal), approver,
+                        located.WorkflowInstanceId);
+                }
+            }
+
             var result = await elsa.ResumeMergeApprovalAsync(
                 req.IssueNumber, req.PrNumber, tenantId, req.Repository,
                 req.Decision, req.Feedback, approver);
@@ -160,7 +183,8 @@ public static class AdlEndpoints
         [FromServices] IElsaWorkflowService elsa,
         [FromServices] ITenantContext tenantContext,
         ClaimsPrincipal principal,
-        [FromServices] ILoggerFactory loggerFactory)
+        [FromServices] ILoggerFactory loggerFactory,
+        [FromServices] Services.Actions.ApprovalGrantMinter? grantMinter = null)
     {
         var logger = loggerFactory.CreateLogger("Tamma.Api.AdlEndpoints");
 
@@ -186,6 +210,24 @@ public static class AdlEndpoints
 
         try
         {
+            // Story 43-14 (D3, AC3) — on an APPROVE decision, mint the deploy-tail
+            // correlation-standing grants (effect:deploy.prod + effect:git.release.create)
+            // BEFORE resuming. Locate → mint → resume. A rejection mints nothing.
+            if (grantMinter is not null
+                && string.Equals(req.Decision.Trim(), "approve", StringComparison.OrdinalIgnoreCase))
+            {
+                var located = await elsa.LocateDeploymentApprovalGateAsync(
+                    req.IssueNumber, tenantId, req.Repository, req.MergeSha);
+                if (located.Found && !string.IsNullOrWhiteSpace(located.CorrelationId))
+                {
+                    await grantMinter.MintForChainAsync(
+                        Services.Actions.ApprovalChains.DeployTail,
+                        located.CorrelationId!,
+                        ResolveApproverUserId(principal), approver,
+                        located.WorkflowInstanceId);
+                }
+            }
+
             var result = await elsa.ResumeDeploymentApprovalAsync(
                 req.IssueNumber, tenantId, req.Repository, req.MergeSha,
                 req.Decision, req.Feedback, approver);
@@ -534,4 +576,14 @@ public static class AdlEndpoints
            ?? principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
            ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
            ?? "unknown";
+
+    /// <summary>Story 43-14 — the decider's user id (audit) parsed from the
+    /// subject / name-identifier claim, or <see cref="Guid.Empty"/> when the
+    /// principal carries no parseable id (e.g. single-user planes).</summary>
+    internal static Guid ResolveApproverUserId(ClaimsPrincipal principal)
+    {
+        var raw = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                  ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
+    }
 }

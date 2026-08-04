@@ -181,11 +181,23 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 var sid = ctx.GetInput<Guid>("sessionId");
                 if (sid == Guid.Empty) sid = UuidV7.NewGuid();
 
+                // Story 41-2 AC3 — the OPTIONAL upstream lineage anchor. A binding that
+                // knows which accepted document its produce descends from (41-2: the
+                // accepted Clarification, else the Findings) hands the id here, and every
+                // draft this lifecycle mints carries it into `document_instances`
+                // .parent_document_id. Absent/blank/unparseable ⇒ null, which is what
+                // every pre-41-2 producer supplies, so their persisted rows are unchanged.
+                // Read as object + ToString so a caller may hand either a string id or a
+                // Guid without a conversion throw at the dispatch boundary.
+                var parentDocId = DocumentLifecycleHelper.ParseParentDocumentId(
+                    ctx.GetInput<object>("parentDocumentId")?.ToString());
+
                 var rules = DocumentLifecycleHelper.ResolveRules(rulesInput, typeKey, DateTimeOffset.UtcNow);
 
                 // Fail-loud producer spec + type key validation (D2/AC1).
                 var state = DocumentLifecycleHelper.Init(
-                    role, action, variablesJson, typeKey, issue, corr, sid, feedbackVar, ambiguityScore, rules);
+                    role, action, variablesJson, typeKey, issue, corr, sid, feedbackVar, ambiguityScore, rules,
+                    parentDocumentId: parentDocId);
 
                 producerRole.Set(ctx, role);
                 producerAction.Set(ctx, action);

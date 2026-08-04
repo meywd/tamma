@@ -56,6 +56,7 @@ public class PlanGenerationWorkflow : WorkflowBase
 {
     private const string PlanDocumentType = "plan";
     private const string DecompositionDocumentType = "decomposition";
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -81,6 +82,10 @@ public class PlanGenerationWorkflow : WorkflowBase
         var decompositionFound = builder.WithVariable<bool>();
         var decompositionDocId = builder.WithVariable<string>();
         var decompositionLineage = builder.WithVariable<string>();
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── 39-10 re-entry position (D9) ───────────────────────────────
         var reEntryPositionJson = builder.WithVariable<string>();
@@ -176,39 +181,61 @@ public class PlanGenerationWorkflow : WorkflowBase
         };
         fetchDecomposition.SetDisplayText("Fetch Accepted Decomposition");
 
+        // ── Step 3b (39-25 leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Fail-closed: no accepted assessment for this issue ⇒ Found=false ⇒ the
+        // ambiguityScore dispatch key below is OMITTED (never a fabricated 0.0).
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment", Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 4: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["documentType"]          = PlanDocumentType,
-                ["producerRole"]          = AgentRole.Architect.ToWire(),
-                ["producerAction"]        = AgentAction.PlanSystemDesign.ToWire(),
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    ["workItemJson"] = workItemJson.Get(ctx) ?? "",
-                    // D4 — the consumed decomposition is folded into the DECLARED contextFindings
-                    // carrier ahead of poSummary; NOT a new (render-dropped) decompositionJson key.
-                    ["contextFindings"] = PlanBindingHelper.MergeDecompositionIntoCarrier(
-                        poSummary.Get(ctx) ?? "", decompositionJson.Get(ctx) ?? ""),
-                    ["poSummary"]      = poSummary.Get(ctx) ?? "",
-                    ["contextIds"]     = contextIds.Get(ctx) ?? "[]",
-                    ["repository"]     = repository.Get(ctx) ?? "",
-                    ["reviewNotes"]    = reviewNotes.Get(ctx) ?? "",
-                    ["revisionNumber"] = revisionNumber.Get(ctx),
-                }),
-                // 39-6 D11 — repair/revise notes land in the DECLARED carrier, not a dropped key.
-                ["feedbackVariableName"] = "contextFindings",
-                ["issueId"]             = issueId.Get(ctx) ?? "",
-                ["correlationId"]       = issueId.Get(ctx) ?? "",
-                ["tenantId"]            = tenantId.Get(ctx) ?? "",
-                // D3 — behavior-preserving default rules (rounds 3 / repair 2 / 7-role panel) unless
-                // the caller/store passes an explicit override.
-                ["acceptanceRulesJson"] = string.IsNullOrWhiteSpace(acceptanceRulesJson.Get(ctx))
-                    ? PlanBindingHelper.DefaultPlanRulesJson()
-                    : acceptanceRulesJson.Get(ctx)!,
+                    ["documentType"]          = PlanDocumentType,
+                    ["producerRole"]          = AgentRole.Architect.ToWire(),
+                    ["producerAction"]        = AgentAction.PlanSystemDesign.ToWire(),
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["workItemJson"] = workItemJson.Get(ctx) ?? "",
+                        // D4 — the consumed decomposition is folded into the DECLARED contextFindings
+                        // carrier ahead of poSummary; NOT a new (render-dropped) decompositionJson key.
+                        ["contextFindings"] = PlanBindingHelper.MergeDecompositionIntoCarrier(
+                            poSummary.Get(ctx) ?? "", decompositionJson.Get(ctx) ?? ""),
+                        ["poSummary"]      = poSummary.Get(ctx) ?? "",
+                        ["contextIds"]     = contextIds.Get(ctx) ?? "[]",
+                        ["repository"]     = repository.Get(ctx) ?? "",
+                        ["reviewNotes"]    = reviewNotes.Get(ctx) ?? "",
+                        ["revisionNumber"] = revisionNumber.Get(ctx),
+                    }),
+                    // 39-6 D11 — repair/revise notes land in the DECLARED carrier, not a dropped key.
+                    ["feedbackVariableName"] = "contextFindings",
+                    ["issueId"]             = issueId.Get(ctx) ?? "",
+                    ["correlationId"]       = issueId.Get(ctx) ?? "",
+                    ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                    // D3 — behavior-preserving default rules (rounds 3 / repair 2 / 7-role panel) unless
+                    // the caller/store passes an explicit override.
+                    ["acceptanceRulesJson"] = string.IsNullOrWhiteSpace(acceptanceRulesJson.Get(ctx))
+                        ? PlanBindingHelper.DefaultPlanRulesJson()
+                        : acceptanceRulesJson.Get(ctx)!,
+                };
+                // 39-25 — thread the accepted assessment's score; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -292,7 +319,7 @@ public class PlanGenerationWorkflow : WorkflowBase
             Activities =
             {
                 readInputs, computeReEntry, readPositionStage, freshRun,
-                fetchDecomposition, dispatchLifecycle, readLifecycleExit,
+                fetchDecomposition, fetchAmbiguityAssessment, dispatchLifecycle, readLifecycleExit,
                 lifecycleAcceptedGate, storeAggregateReview, exposeOutput,
             },
             Connections =
@@ -301,11 +328,14 @@ public class PlanGenerationWorkflow : WorkflowBase
                 new(computeReEntry, readPositionStage),
                 new(readPositionStage, freshRun),
 
-                // Fresh run → fetch the consumed decomposition → dispatch.
+                // Fresh run → fetch the consumed decomposition → ambiguity fetch → dispatch.
                 new(new FlowEndpoint(freshRun, "True"),  new FlowEndpoint(fetchDecomposition)),
-                new(fetchDecomposition, dispatchLifecycle),
-                // Re-entry → straight to dispatch (a re-entry does not re-fetch, D9).
-                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
+                new(fetchDecomposition, fetchAmbiguityAssessment),
+                // Re-entry → ambiguity fetch → dispatch (the consumed-decomposition fetch is
+                // still skipped on re-entry, D9; the 39-25 score fetch runs on EVERY path that
+                // dispatches, as the single predecessor of the dispatch).
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(fetchAmbiguityAssessment)),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
 
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, lifecycleAcceptedGate),

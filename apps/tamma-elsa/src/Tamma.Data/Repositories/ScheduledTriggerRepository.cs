@@ -143,6 +143,60 @@ public class ScheduledTriggerRepository(
         return affected == 1;
     }
 
+    public async Task<string?> GetFireOutcomeAsync(
+        Guid triggerId, string windowKey, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        // Single-row probe on the unique (TriggerId, WindowKey) index —
+        // MODERATE-5: the tick asks "is this window already settled?" BEFORE
+        // it takes the advisory lock, so a burnt window is re-observed
+        // silently (no lock, no claim, no duplicate audit row) instead of
+        // re-losing the claim and emitting SCHEDULE.FIRE.SUPPRESSED on every
+        // 60-second tick of every pod for the rest of the cadence.
+        return await db.ScheduledTriggerFires
+            .AsNoTracking()
+            .Where(f => f.TriggerId == triggerId && f.WindowKey == windowKey)
+            .Select(f => f.Outcome)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ScheduledTriggerFire>> ListStaleClaimedFiresAsync(
+        DateTime claimedBeforeUtc, int limit, CancellationToken ct = default)
+    {
+        if (limit <= 0) return Array.Empty<ScheduledTriggerFire>();
+
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        // LOW-8: bounded — oldest first, Take(limit). In the normal case this
+        // matches nothing (every claim reaches a terminal outcome within one
+        // dispatch), so the sweep costs one indexed-ish read per tick.
+        return await db.ScheduledTriggerFires
+            .AsNoTracking()
+            .Where(f => f.Outcome == "claimed" && f.ClaimedAt < claimedBeforeUtc)
+            .OrderBy(f => f.ClaimedAt)
+            .Take(limit)
+            .ToListAsync(ct);
+    }
+
+    public async Task<bool> TryMarkFireAbandonedAsync(
+        Guid fireId, string detail, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        // LOW-8: conditional CAS, same shape as the manual-drain arbiter.
+        // Postgres decides which pod's sweep owns the row, so the abandoned
+        // fire is announced exactly once fleet-wide; and because the row
+        // becomes TERMINAL, the next tick's sweep no longer sees it (this is
+        // what keeps the new surface from becoming the very per-tick drip
+        // MODERATE-5 was about). DispatchedAt is left as-is — for a burnt
+        // manual fire it is the CAS marker, not a dispatch time.
+        var affected = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE scheduled_trigger_fires
+            SET "Outcome" = 'failed', "Detail" = {detail}
+            WHERE "Id" = {fireId}
+              AND "Outcome" = 'claimed';
+            """, ct);
+        return affected == 1;
+    }
+
     public async Task StampOutcomeAsync(
         Guid fireId, string outcome, string? workflowInstanceId, string? detail,
         DateTime? dispatchedAtUtc, CancellationToken ct = default)

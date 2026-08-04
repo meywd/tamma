@@ -51,6 +51,13 @@ public class ResumableStandardStructuralTests
             ["CleanUpFailedTenantWorkflow"] = "platform tenant-cleanup saga, no document lifecycle (burn-down: n/a — platform, revisit 39-15+).",
             ["CodeReviewWorkflow"] = "code-review leaf, runs to completion (burn-down: 39-14+).",
             ["ContextGatheringWorkflow"] = "context-scan producer, no suspend gate (burn-down: 39-12+).",
+            // Story 40-8 D7 — deliberately allowlisted, NOT undeclared-by-omission: clause (c)
+            // of this gate requires the document-coupled ComputeReEntryPositionActivity for any
+            // LatestStateReEntry declaration, which this non-document workflow cannot honestly
+            // wire until 40-4 AC10's CanonicalReEntryActivities registry seam lands. The
+            // idempotency SUBSTANCE ships regardless (platform-side title dedupe — a crash
+            // re-run never double-creates; pinned by CreateIssuesActivityTests).
+            ["CreateIssuesWorkflow"] = "issue-create side-effect leaf; idempotent re-run via platform dedupe (40-8 D3); declares LatestStateReEntry the moment 40-4's clause-(c) registry seam lands.",
             ["CreateTenantWorkflow"] = "platform provisioning saga, no document lifecycle (burn-down: n/a — platform).",
             // DebuggingWorkflow burned down in Story 39-15 — it now declares
             // [ResumeBehavior(LatestStateReEntry)] with the ComputeReEntryPositionActivity gate

@@ -74,6 +74,38 @@ public sealed class NullGitPlatformDriver : IGitPlatformDriver
             MergePullRequestRequest request, CancellationToken ct = default) =>
             Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());
 
+        // Story 31-13 — the PR lifecycle verbs. The null driver never has the
+        // PrLifecycle capability, so per the interface contract it returns
+        // capability_unsupported (never throws).
+        private static Task<PlatformResult<PullRequest>> PrLifecycleUnsupported() =>
+            Task.FromResult(PlatformResult<PullRequest>.FromError(
+                new PlatformError.InvalidRequest("capability_unsupported",
+                    "the null git platform driver does not implement PR lifecycle verbs")));
+
+        public Task<PlatformResult<PullRequest>> ClosePullRequestAsync(
+            string owner, string repoName, string prNumber, CancellationToken ct = default) =>
+            PrLifecycleUnsupported();
+
+        public Task<PlatformResult<PullRequest>> ReopenPullRequestAsync(
+            string owner, string repoName, string prNumber, CancellationToken ct = default) =>
+            PrLifecycleUnsupported();
+
+        public Task<PlatformResult<PullRequest>> RequestReviewersAsync(
+            RequestReviewersRequest request, CancellationToken ct = default) =>
+            PrLifecycleUnsupported();
+
+        public Task<PlatformResult<PullRequest>> AddPullRequestLabelsAsync(
+            AddPullRequestLabelsRequest request, CancellationToken ct = default) =>
+            PrLifecycleUnsupported();
+
+        public Task<PlatformResult<PullRequest>> RemovePullRequestLabelAsync(
+            string owner, string repoName, string prNumber, string label, CancellationToken ct = default) =>
+            PrLifecycleUnsupported();
+
+        public Task<PlatformResult<PullRequest>> SetDraftAsync(
+            SetPullRequestDraftRequest request, CancellationToken ct = default) =>
+            PrLifecycleUnsupported();
+
         public Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
             string owner, string repoName, string issueOrPrNumber, string body,
             CancellationToken ct = default) =>

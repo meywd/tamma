@@ -183,7 +183,11 @@ public class CallLlmInlineActivity : CodeActivity
         var toolLoopConfig = ParseToolLoopConfig(toolLoopConfigJson);
 
         var model = input.ModelOverrides.TryGetValue(providerName, out var mo) ? mo : null;
-        var correlationId = context.WorkflowExecutionContext.Id;
+        // Story 43-14 (AC4) — the RUN correlation (cycle instance id, threaded as
+        // the Elsa correlation), not this sub-workflow's own id.
+        var correlationId = string.IsNullOrWhiteSpace(context.WorkflowExecutionContext.CorrelationId)
+            ? context.WorkflowExecutionContext.Id
+            : context.WorkflowExecutionContext.CorrelationId!;
 
         // Map the activity's Input<> props → the wire request. The per-iteration
         // provider name (the ForEach<provider> chain in LlmCallWorkflow) maps to

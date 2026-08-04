@@ -32,31 +32,77 @@ public class ToolLoopAutonomyGateTests
     [TestCase("git_operations")]
     [TestCase("Bash")]
     [TestCase("Write")]
-    public void Shipped_defaults_allow_every_tool_at_every_valid_dial(string toolName)
+    public void Every_tool_is_allowed_at_the_top_of_the_dial(string toolName)
     {
-        // Epic D1: v1 enforces WITH defaults that reproduce today's behaviour —
-        // every tool descriptor ships DefaultMinAutonomy = AutonomyDial.Min, so
-        // no dial position can deny a shipped default.
-        foreach (var dial in AutonomyDial.ValidLevels())
-        {
-            var gate = new CatalogDefaultToolLoopAutonomyGate(dial);
-            var decision = gate.Evaluate(toolName, "{}");
+        // Story 43-11: "at 100 everything is automated" — every tool automates at
+        // the max dial. (Below Max the dial now BITES: shell_execute sits at 80, so
+        // it is denied below 80 — see Shell_execute_is_denied_at_the_default_dial.)
+        var decision = new CatalogDefaultToolLoopAutonomyGate(AutonomyDial.Max).Evaluate(toolName, "{}");
 
-            decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed,
-                $"'{toolName}' at dial {dial} must be allowed under shipped defaults (behaviour-preserving v1)");
-        }
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed,
+            $"'{toolName}' must be allowed at the max dial (100)");
     }
 
     [Test]
     public void Production_constructor_uses_the_shipped_dial_default_and_allows()
     {
-        var decision = new CatalogDefaultToolLoopAutonomyGate().Evaluate("shell_execute", "{}");
+        // The production constructor uses the shipped DEFAULT dial (70). A tool at
+        // or below 70 (file_write = 25) is allowed.
+        var decision = new CatalogDefaultToolLoopAutonomyGate().Evaluate("file_write", "{}");
 
         decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
         decision.Dial.Should().Be(AcceptanceDefaults.DefaultAutonomyLevel);
-        decision.MinAutonomy.Should().Be(AutonomyDial.Min);
-        decision.ActionKey.Should().Be(Tool(ToolAction.ShellExecute));
+        decision.MinAutonomy.Should().Be(25);
+        decision.ActionKey.Should().Be(Tool(ToolAction.FileWrite));
         decision.Reason.Should().Be("at-or-above-min-autonomy");
+    }
+
+    [Test]
+    public void Shell_execute_is_denied_at_the_default_dial()
+    {
+        // THE day-one behaviour change (Story 43-11 OQ1 / Amendment 2-D):
+        // shell_execute sits at 80 (unbounded execution, holding the deployment's
+        // secrets), above the shipped default dial of 70 — so every agent shell
+        // call at the default dial now suspends for a person.
+        var decision = new CatalogDefaultToolLoopAutonomyGate().Evaluate("shell_execute", "{}");
+
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied);
+        decision.Dial.Should().Be(AcceptanceDefaults.DefaultAutonomyLevel);
+        decision.MinAutonomy.Should().Be(80);
+        decision.ActionKey.Should().Be(Tool(ToolAction.ShellExecute));
+        decision.Reason.Should().Be("below-min-autonomy");
+    }
+
+    // ── Story 42-10 (AC6, D7) — the shell secret-read reclassification ──────
+
+    [TestCase("env")]
+    [TestCase("printenv")]
+    [TestCase("cat .env")]
+    public void A_shell_command_that_reads_a_secret_reclassifies_to_secret_read(string command)
+    {
+        // At dial 85, shell_execute (80) automates but secret.read (90) does not,
+        // so the reclassification is what flips the outcome — proving the grading
+        // changed the action, not just the level.
+        var gate = new CatalogDefaultToolLoopAutonomyGate(dial: 85);
+
+        var decision = gate.Evaluate("shell_execute", $"{{\"command\":\"{command}\"}}");
+
+        decision.ActionKey.Should().Be(new ActionKey(ActionNamespace.Effect, ExternalEffect.SecretRead.ToWire()),
+            "a secret-reading shell command is graded as effect:secret.read, not tool:shell_execute");
+        decision.MinAutonomy.Should().Be(90);
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied, "secret.read (90) is above dial 85");
+    }
+
+    [Test]
+    public void A_plain_shell_command_stays_tool_shell_execute()
+    {
+        var gate = new CatalogDefaultToolLoopAutonomyGate(dial: 85);
+
+        var decision = gate.Evaluate("shell_execute", "{\"command\":\"ls -la\"}");
+
+        decision.ActionKey.Should().Be(Tool(ToolAction.ShellExecute));
+        decision.MinAutonomy.Should().Be(80);
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed, "shell_execute (80) is at or below dial 85");
     }
 
     // ── Denied: dial below the effective threshold ──────────────────────────
@@ -128,14 +174,74 @@ public class ToolLoopAutonomyGateTests
         // Unclassified is allowed at RUNTIME, unmergeable in CI (the startup
         // validator + sweeps are the merge gate) — a catalog gap must never
         // stall a live workflow.
+        //
+        // The exemplar was `mcp__some_server__some_tool` until 2026-07-30. It is
+        // now a genuinely unknown name, because MCP names are no longer
+        // uncatalogued — see
+        // An_mcp_tool_name_is_NOT_uncatalogued_it_resolves_to_the_mcp_effect below.
+        // Epic D2 itself is unchanged and still pinned here.
         var gate = new CatalogDefaultToolLoopAutonomyGate(
             dial: AutonomyDial.Min, minAutonomyOverride: _ => AutonomyDial.AlwaysHuman);
 
-        var decision = gate.Evaluate("mcp__some_server__some_tool", "{}");
+        var decision = gate.Evaluate("frobnicate_the_widget", "{}");
 
         decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
         decision.Reason.Should().Be("uncatalogued");
         decision.ActionKey.Should().BeNull();
+    }
+
+    /// <summary>
+    /// THE MCP governance decision (2026-07-30) at the one gate that enforces
+    /// today.
+    ///
+    /// <para><b>Why this family is carved out of epic D2 while every other
+    /// unknown name is not.</b> D2's bargain is "an unclassified action is allowed
+    /// at RUNTIME because it is UNMERGEABLE IN CI". For every other capability the
+    /// second half is real — the 43-8 harnesses sweep routes, executors,
+    /// activities and background actors out of this tree. No harness can
+    /// enumerate the tools of an MCP server: they live in another process, behind
+    /// <c>POST /api/kb/mcp/tools/invoke</c>, and adding a server or a tool changes
+    /// nothing in this repository. So for MCP the CI half never fires, the
+    /// runtime tolerance is never paid for, and "allowed because it will be
+    /// caught" would be false.</para>
+    ///
+    /// <para>Deliberately narrow: this changes the <c>mcp__*</c> family ONLY.
+    /// Making all uncatalogued names deny would be a far larger behaviour change
+    /// and is NOT what this decision does — the test above is its guard.</para>
+    /// </summary>
+    [TestCase("mcp__some_server__some_tool")]
+    [TestCase("mcp__github__create_issue")]
+    [TestCase("MCP__Shouty__Server")]
+    public void An_mcp_tool_name_is_NOT_uncatalogued_it_resolves_to_the_mcp_effect(string name)
+    {
+        var gate = new CatalogDefaultToolLoopAutonomyGate(AutonomyDial.Min);
+
+        var decision = gate.Evaluate(name, "{}");
+
+        decision.ActionKey.Should().Be(
+            new ActionKey(ActionNamespace.Effect, ExternalEffect.McpToolInvoke.ToWire()),
+            "every mcp__server__tool name lands on the ONE coarse catalog member");
+        decision.Reason.Should().NotBe("uncatalogued");
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied,
+            "effect:mcp.tool.invoke ships level 80 (unbounded execution); at dial 1 the "
+            + "shipped default denies until an admin opts in or the dial reaches 80");
+        decision.Reason.Should().Be("below-min-autonomy");
+    }
+
+    /// <summary>
+    /// And it is a DEFAULT, not a hardcoded refusal: one action-scoped policy row
+    /// at the floor re-opens the family. This is the reversibility the decision
+    /// rests on — if it were not cheaply reversible, tightening a capability an
+    /// operator may legitimately want would be the wrong call.
+    /// </summary>
+    [Test]
+    public void An_admin_policy_row_re_opens_mcp()
+    {
+        var gate = new CatalogDefaultToolLoopAutonomyGate(
+            dial: AutonomyDial.Min, minAutonomyOverride: _ => AutonomyDial.Min);
+
+        gate.Evaluate("mcp__some_server__some_tool", "{}")
+            .Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
     }
 
     [Test]
@@ -169,9 +275,10 @@ public class ToolLoopAutonomyGateTests
     public void Gating_git_writes_denies_push_but_not_status()
     {
         // The whole point of the read/write split: git push independently
-        // gateable while git status stays automated.
+        // gateable while git status stays automated. Dial = the default (70), above
+        // git-read's level (5) so read stays automated; write is pinned AlwaysHuman.
         var gate = new CatalogDefaultToolLoopAutonomyGate(
-            dial: AutonomyDial.Min,
+            dial: AcceptanceDefaults.DefaultAutonomyLevel,
             minAutonomyOverride: d => d.Key == Tool(ToolAction.GitOperationsWrite)
                 ? AutonomyDial.AlwaysHuman
                 : d.DefaultMinAutonomy);

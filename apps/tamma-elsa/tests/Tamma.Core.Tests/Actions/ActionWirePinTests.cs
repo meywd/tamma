@@ -43,11 +43,47 @@ public class ActionWirePinTests
             "engine.events.append", "engine.platform-events.append", "engine.document.persist",
             "engine.document.set-status", "engine.channel-outbox.enqueue",
             "llm.call", "git.branch.create", "git.branch.delete", "git.pull-request.create",
-            "git.pull-request.merge", "git.release.create", "git.issue.patch", "jira.ticket.patch",
+            // 43-12 — the coarse git.pull-request.merge is RETIRED; merge splits by PR
+            // base branch into the zone-ladder trio (dev 55 / qa 60 / main 65).
+            "git.merge.dev", "git.merge.qa", "git.merge.main",
+            "git.release.create",
+            // 43-12 — RESERVED source-control-write keys (no performer in the tree):
+            // git.checks.bypass (50) and git.webhook.register (85, DUAL-dormant).
+            "git.checks.bypass", "git.webhook.register",
+            // 31-13 — the 7 PR operation verbs (source-control-write), declared
+            // between git.webhook.register and git.issue.patch; enum-order-sensitive.
+            "git.pull-request.close", "git.pull-request.reopen", "git.pull-request.comment",
+            "git.pull-request.review-comment", "git.pull-request.request-reviewers",
+            "git.pull-request.label", "git.pull-request.set-draft",
+            "git.issue.patch", "jira.ticket.patch",
+            // 31-13 — the 4 formerly-ungoverned issue callbacks (issue-tracking),
+            // declared immediately after jira.ticket.patch.
+            "git.issue.create", "git.issue.comment", "git.issue.labels.set", "git.issue.labels.remove",
             "ci.tests.trigger", "agent-dispatch.run", "notify.slack.queue", "notify.email.send",
-            "mcp.tool.invoke", "secret.reveal", "process.spawn", "deploy.promote-prod", "deploy.rollback",
+            // 42-10 — secret.read (level 90) is declared adjacent to secret.reveal;
+            // this list is enum-order-sensitive, so it sits between reveal and spawn.
+            "mcp.tool.invoke", "secret.reveal", "secret.read", "process.spawn",
+            // 43-12 — the coarse deploy.promote-prod is RETIRED; deploy splits by
+            // target env (dev 70 / qa 75 / uat 80 / staging 85 / prod 90). dev+staging
+            // are RESERVED (no pipeline stage exists — QA->UAT->Prod only).
+            "deploy.dev", "deploy.qa", "deploy.uat", "deploy.staging", "deploy.prod",
+            "deploy.rollback",
             // 41-30 — the scheduled-trigger admin surface (tree-truth reconcile).
-            "schedule.create", "schedule.update", "schedule.delete");
+            "schedule.create", "schedule.update", "schedule.delete",
+            // 44-2 — the NATIVE tracker's ten mutating routes. `tracker.` prefixed
+            // so they never read as the EXTERNAL-tracker pair above
+            // (git.issue.patch / jira.ticket.patch), which mutate somebody else's
+            // system of record.
+            "tracker.project.create", "tracker.project.update", "tracker.project.delete",
+            "tracker.work-item.create", "tracker.work-item.update", "tracker.work-item.delete",
+            "tracker.work-item.assign", "tracker.work-item.set-status",
+            "tracker.preferences.set", "tracker.preferences.delete",
+            // 43-8 (AC1 step 2) — MentorshipController's four [HttpPost] actions, the
+            // repo's only attribute-routed controller and the only users of the
+            // [Governs] attribute shape. `mentorship.session.` prefixed so they read
+            // as one lifecycle family.
+            "mentorship.session.start", "mentorship.session.pause",
+            "mentorship.session.resume", "mentorship.session.cancel");
     }
 
     [Test]

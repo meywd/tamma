@@ -129,6 +129,12 @@ public class DispatchCycleActivity : TammaAsyncActivity
         {
             Input = input,
             InstanceId = instanceId,
+            // Story 43-14 (D5) — the cycle's correlation IS the cycle instance id.
+            // The RunCorrelation middleware puts this on the ambient during the
+            // cycle's execution, and CorrelationPropagatingWorkflowDispatcher
+            // propagates it to every sub-workflow — so the whole chain shares one
+            // ledger-visible correlation and a human's approval covers the run.
+            CorrelationId = instanceId,
         };
 
         await _dispatcher.DispatchAsync(request, default);

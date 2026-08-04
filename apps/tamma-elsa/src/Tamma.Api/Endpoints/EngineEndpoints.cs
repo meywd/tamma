@@ -26,10 +26,9 @@ namespace Tamma.Api.Endpoints;
 /// </summary>
 public static class EngineEndpoints
 {
-    // ─── Engine lifecycle (commands / state / events / stats / plan / history) ─
-
-    public static Task<IResult> SendCommand(SendCommandRequest req) =>
-        Task.FromResult(Results.Ok(new { message = "Command accepted", command = req.Command }));
+    // ─── Engine lifecycle (state / events / stats / plan / history) ─
+    // Story 43-12 — SendCommand DELETED (was a 200 "Command accepted" no-op; see the
+    // route deletion in Program.cs and the story's engine.command resolution).
 
     public static async Task<IResult> GetState(IEventRepository eventRepo, ITenantContext tc)
     {

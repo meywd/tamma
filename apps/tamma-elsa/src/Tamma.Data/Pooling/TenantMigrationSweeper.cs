@@ -44,8 +44,9 @@ public sealed class TenantMigrationSweeper : ITenantMigrationSweeper
     }
 
     public async Task<TenantMigrationSweepResult> SweepAsync(
-        bool dryRun = false,
+        bool dryRun,
         int maxConcurrency = TenantMigrationSweep.DefaultMaxConcurrency,
+        Action<TenantMigrationSweepEntry>? onTenantCompleted = null,
         CancellationToken ct = default)
     {
         var bound = Math.Clamp(maxConcurrency, 1, 16);
@@ -71,7 +72,21 @@ public sealed class TenantMigrationSweeper : ITenantMigrationSweeper
             await gate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                return await SweepOneAsync(tenantId, dryRun, ct).ConfigureAwait(false);
+                var entry = await SweepOneAsync(tenantId, dryRun, ct).ConfigureAwait(false);
+                // Publish BEFORE the roll-up exists: if the sweep dies partway
+                // (cancellation, lost advisory lock, control plane gone) the
+                // caller's observer is the only record of which tenants were
+                // already touched. Never allowed to abort the sweep.
+                if (onTenantCompleted is not null)
+                {
+                    try { onTenantCompleted(entry); }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex,
+                            "tenant.migration_sweep.observer_failed tenantId={TenantId}", tenantId);
+                    }
+                }
+                return entry;
             }
             finally
             {
@@ -79,14 +94,7 @@ public sealed class TenantMigrationSweeper : ITenantMigrationSweeper
             }
         })).ConfigureAwait(false);
 
-        var result = new TenantMigrationSweepResult(
-            DryRun: dryRun,
-            Total: entries.Length,
-            Migrated: entries.Count(e => e.Outcome == TenantMigrationSweep.OutcomeMigrated),
-            AlreadyCurrent: entries.Count(e => e.Outcome == TenantMigrationSweep.OutcomeAlreadyCurrent),
-            Pending: entries.Count(e => e.Outcome == TenantMigrationSweep.OutcomePending),
-            Failed: entries.Count(e => e.Outcome == TenantMigrationSweep.OutcomeFailed),
-            Tenants: entries);
+        var result = TenantMigrationSweep.Summarize(dryRun, entries);
 
         _logger.LogInformation(
             "tenant.migration_sweep.completed total={Total} migrated={Migrated} "

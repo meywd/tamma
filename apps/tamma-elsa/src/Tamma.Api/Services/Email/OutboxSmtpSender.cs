@@ -149,7 +149,15 @@ public sealed class OutboxSmtpSender : BackgroundService
         {
             try
             {
-                await ProcessOnceAsync(stoppingToken);
+                // Seam D (Story 43-9 AC9) — ONE gate call per tick, deny-only.
+                if (await Tamma.Api.Services.Actions.BackgroundActionGateAccessor
+                        .MayRunTickAsync(
+                            _serviceProvider,
+                            Tamma.Core.Actions.BackgroundActor.OutboxSmtpSender,
+                            tenantId: null, stoppingToken).ConfigureAwait(false))
+                {
+                    await ProcessOnceAsync(stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

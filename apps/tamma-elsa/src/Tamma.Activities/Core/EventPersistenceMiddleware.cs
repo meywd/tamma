@@ -415,7 +415,12 @@ public static class EventPersistencePipelineExtensions
         workflows.WithDefaultActivityExecutionPipeline(pipeline =>
             pipeline.Use(EventPersistenceMiddleware.Create()));
         workflows.WithDefaultWorkflowExecutionPipeline(pipeline =>
-            pipeline.UseMiddleware<EventPersistenceWorkflowMiddleware>());
+            // Story 43-14 (D5) — seed the ambient RunCorrelation FIRST (outermost),
+            // so it is set for the whole execution including the event drain and any
+            // sub-workflow dispatched from within this run.
+            pipeline
+                .UseMiddleware<RunCorrelationWorkflowMiddleware>()
+                .UseMiddleware<EventPersistenceWorkflowMiddleware>());
         return workflows;
     }
 }

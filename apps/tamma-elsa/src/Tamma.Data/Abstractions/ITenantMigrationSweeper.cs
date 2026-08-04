@@ -25,10 +25,29 @@ public interface ITenantMigrationSweeper
     /// count per tenant without applying anything;
     /// <paramref name="maxConcurrency"/> bounds parallel tenant migrations
     /// (default 4, clamped to [1, 16]).
+    ///
+    /// <para><paramref name="dryRun"/> has <b>no default</b> (2026-07-30): the
+    /// same "the safe action must be the explicit-free one" reasoning that
+    /// flipped the HTTP endpoint's default applies to the seam. A default of
+    /// <c>false</c> made <c>SweepAsync()</c> — the shortest thing to write —
+    /// mean "apply DDL to every tenant"; there is no defensible default for
+    /// that choice, so every call site states it.</para>
+    ///
+    /// <para><paramref name="onTenantCompleted"/> (2026-07-30 review follow-up)
+    /// is invoked once per tenant AS IT FINISHES, before the roll-up exists.
+    /// It is the only way a caller can learn which tenants received DDL when
+    /// the sweep dies partway (control plane unreachable, cancellation, lost
+    /// advisory lock): the returned <see cref="TenantMigrationSweepResult"/>
+    /// never materialises on that path, and "we do not know which tenants got
+    /// the DDL" is the worst possible post-failure state for a fleet-DDL
+    /// primitive. Invoked from the sweep's worker tasks — implementations MUST
+    /// be thread-safe. An observer that throws is swallowed; a bookkeeping
+    /// callback must never be able to abort a fleet migration.</para>
     /// </summary>
     Task<TenantMigrationSweepResult> SweepAsync(
-        bool dryRun = false,
+        bool dryRun,
         int maxConcurrency = TenantMigrationSweep.DefaultMaxConcurrency,
+        Action<TenantMigrationSweepEntry>? onTenantCompleted = null,
         CancellationToken ct = default);
 }
 
@@ -48,6 +67,24 @@ public static class TenantMigrationSweep
 
     /// <summary>This tenant failed (resolution, connection, or migration); see the error. Never aborts the sweep.</summary>
     public const string OutcomeFailed = "failed";
+
+    /// <summary>
+    /// Roll up per-tenant entries into a <see cref="TenantMigrationSweepResult"/>.
+    /// Shared so a PARTIAL result (the entries a died-partway sweep managed to
+    /// complete, assembled by <c>TenantMigrationSweepRunner</c>) counts exactly
+    /// the same way a complete one does — an operator reading a failed run's
+    /// result must not have to wonder whether the arithmetic differs.
+    /// </summary>
+    public static TenantMigrationSweepResult Summarize(
+        bool dryRun, IReadOnlyList<TenantMigrationSweepEntry> entries) =>
+        new(
+            DryRun: dryRun,
+            Total: entries.Count,
+            Migrated: entries.Count(e => e.Outcome == OutcomeMigrated),
+            AlreadyCurrent: entries.Count(e => e.Outcome == OutcomeAlreadyCurrent),
+            Pending: entries.Count(e => e.Outcome == OutcomePending),
+            Failed: entries.Count(e => e.Outcome == OutcomeFailed),
+            Tenants: entries);
 }
 
 /// <summary>One tenant's row in the sweep result.</summary>

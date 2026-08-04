@@ -37,7 +37,7 @@ P0 — Wave 0. 44-3, 44-4, 44-6, 44-7 and 44-8 are all consumers of this surface
 - **Mode detection:** `apps/tamma-elsa/src/Tamma.Api/Services/PromptStore/TammaMode.cs:67` — explicit `Tamma:Mode`, else inferred SaaS from `Tamma:TenantSharedSecret` / `ConnectionStrings:ControlPlane`, else `SingleUser`.
 - **The assignee-eligibility seam is a fail-closed stub today.** `apps/tamma-elsa/src/Tamma.Api/Services/Access/ITaskAudienceResolver.cs:45-56` returns the initiator only, and its sole production consumer `Tamma.Api/Services/Channels/ChannelOutboxService.cs:143` **hardcodes `InitiatorUserId: null`**, so `EligibleAudienceAsync` returns empty unconditionally. Nothing may assume it works.
 - **Epic 43's drift harness is bidirectional and CI-blocking** (`docs/stories/epic-43/README.md:186-190`, D2 at `:395`): a mutating route without a catalog entry is unmergeable once 43-8 arms. The `issue-tracking` `ActionGroup` already exists in the 15-member partition (`:104-107`) and is near-empty.
-- **The 43-0 bug class to not repeat:** the acceptance-rules edit dialog builds its PUT body without `acceptorRequirement` and the API defaults the missing field, so every admin save silently resets it (`epic-43/README.md:380-383`). **Single-field PATCHes, never defaulted full-body PUTs.**
+- **The 43-0 bug class to not repeat** *(historical — FIXED by Story 43-0, 2026-07-29, in this same wave; stated here in the past tense because the rule is why it must not recur, not because it is still live)*: the acceptance-rules edit dialog **built** its PUT body without `acceptorRequirement` and the API **defaulted** the missing field, so every admin save silently reset it (`epic-43/README.md:380-383`). 43-0 fixed BOTH sides — the DTO field is nullable and an omitted `acceptorRequirement` now preserves the stored value, and the client sends the field. **Single-field PATCHes, never defaulted full-body PUTs.**
 
 ## Acceptance Criteria
 
@@ -56,7 +56,7 @@ P0 — Wave 0. 44-3, 44-4, 44-6, 44-7 and 44-8 are all consumers of this surface
 4. **RBAC, three places, both modes.**
    - `tracker:view` = `["member","admin","owner"]` and `tracker:manage` = `["admin","owner"]` added to `Permissions.Matrix`.
    - Policies `TrackerView` and `TrackerManage` added to the `AddAuthorization` block and to the roster array at `Program.cs:1724-1726`.
-   - **Project and iteration structure** (`POST/PATCH/DELETE /api/projects`) requires `TrackerManage`. **Work-item CRUD, status and assignment** requires `TrackerView` — a `member` can file and move their own work, which is the point of a tracker.
+   - **Project and iteration structure** (`POST/PATCH/DELETE /api/projects`) requires `TrackerManage`. **Work-item CRUD, status and assignment** requires `TrackerView` — a `member` can file and move their own work, which is the point of a tracker. *[TIGHTENED — `DELETE /api/work-items/{id}` is `TrackerManage`, not `TrackerView`; there is no ownership plane, so at `TrackerView` any member could hard-delete any item in the tenant. See amendment B1. The recoverable writes (create/patch/status/assign) are as written here.]*
    - In single-user mode both policies admit the sole user (per the Operating Modes rule).
 
 5. **Mode-correct scoping, with parallel service methods.** `TrackerService` exposes `…Async(Guid? userId)` / `…ForTenantAsync(Guid tenantId)` pairs for **preferences only** (the per-principal configuration). Work-item and project reads/writes are tenant-schema scoped and carry no mode split — a test asserts no work-item service method takes a `userId` scoping parameter (epic Decisions D6).
@@ -112,3 +112,212 @@ exists; this story owns calling it at the boundary.
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-29 | 1.2.0   | Conformance round. Code fix: `DELETE /api/tracker/preferences` now honours `If-Match` (AC9 was literally false for that one route — amendment B10), with the contract test's enumerated list corrected. Doc fixes: AC4's work-item-CRUD clause carries an inline `[TIGHTENED]` marker pointing at B1; the Architectural Context's 43-0 bug-class note retagged as historical now that Story 43-0 fixed both sides. | Claude |
+| 2026-07-29 | 1.1.0   | Amendment section added (see below). Records the four implementation deviations never written down at the time — `(Rank, Key)` keyset (plan D7), descriptors as real `ActionCatalog` members rather than the planned data file, `TrackerManage` on the preference writes (absent from AC4) — plus the adversarial-review round: `DELETE /api/work-items/{id}` tightened to `TrackerManage` (no ownership plane exists), `Version` made a real EF concurrency token on projects and preferences (AC9 was false for both), the `If-Match` precondition plumbed into the repositories so it is atomic with the write, FK-violation races on both deletes mapped to the documented 409, six catalog SiteKeys corrected to carry route constraints (and 44-2's own harness made strict), the `HandleNull` rationale corrected, and estimate/scale coherence extended to the project write. Status intentionally left `drafted` — conformance is a separate round. | Claude |
+
+---
+
+## Amendment — 2026-07-29 (implementation deviations + adversarial-review round)
+
+The story text above is the DRAFT. This section records where the shipped code
+deliberately differs from it, and what the adversarial review of the shipped
+slice changed. Nothing here is a silent deviation: each item states what the
+draft said, what shipped, and why. **Status is deliberately NOT flipped in this
+amendment** — the conformance round is separate.
+
+### A. Deviations taken while implementing (recorded late — the omission is itself a finding)
+
+**A1. Keyset cursor is `(Rank, Key)`, not `(Rank, Id)`.** The Technical Notes say
+"keyset-paged on `(Rank, Id)`" and plan D7 changed it. `Key` is the tie-break
+because it is the column the SQL `ORDER BY` already uses (`COLLATE "C"`), so
+paging cannot disagree with the ordering; ordering by `Rank, Id` would have
+required a second, unindexed sort key.
+
+**⚠️ This tie-break rests on an UNENFORCED invariant — a hard constraint on
+44-3.** `(Rank, Key)` is only a total order if **ranks are unique within a
+project**, and nothing enforces that: `IWorkItemRepository.SetRanksAsync`
+(44-3's seam) validates rank FORMAT (`Rank.IsValid`) and nothing else. Today the
+invariant holds incidentally — ranks are minted per project by appending to the
+project's current max, and a cross-project rekey is refused
+(`TRACKER.CROSS_PROJECT_REKEY`), so a rekey cannot reorder a tied pair. **The
+day a duplicate rank exists inside one project**, a rekey changes the `Key`
+half of the tie-break and can move a row across a page boundary that has already
+been served — a skipped or duplicated row, intermittently. The story's original
+`(Rank, Id)` would not have that failure mode, because `Id` is immutable.
+**44-3 must either enforce rank uniqueness within a project (unique index or
+validation in `SetRanksAsync`) or the cursor must move back to an immutable
+tie-break.**
+
+**A2. Descriptors ship as real `ActionCatalog` members, not a data file.** AC10
+allows either ("if Epic 43's core has not landed, the descriptors ship as a data
+file"). 43-2's core HAD landed, so the ten descriptors are `ExternalEffect`
+members in `ActionCatalog.Descriptors.cs`, and `ActionVocabularyCountTests` moves
+25 → 35. The data-file branch of AC10 is unused.
+
+**A3. `PUT`/`DELETE /api/tracker/preferences` require `TrackerManage`.** AC4 does
+not mention the preferences routes at all. They are gated admin+ because in SaaS
+the preference row is TENANT-wide configuration — there is no per-user plane —
+so a `member` editing it changes everyone's defaults. This follows the
+prompt/convention/acceptance-rules store precedent. `GET` stays at
+`TrackerView`.
+
+### B. Adversarial-review round — 2026-07-29
+
+**B1. (MAJOR) `DELETE /api/work-items/{id}` moved from `TrackerView` to
+`TrackerManage`.** AC4's normative clause puts "work-item CRUD" at
+`TrackerView`, and its justification says a member must be able to move "their
+own work". **There is no ownership plane.** `TrackerService` checks neither
+`CreatedByUserId` nor `AssigneeUserId` on any route, and AC7's honest
+degradation makes the list tenant-wide, so at `TrackerView` any tenant `member`
+could irreversibly hard-delete ANY work item in the tenant. Compounding: the
+delete is a HARD delete this story's own descriptor grades
+`Destructive`/`reversible: false`, and **44-2 emits no events at all** (44-5 owns
+emission) — so the loss would be unrecoverable AND unaudited.
+
+The recoverable writes (create / patch / status / assign) stay at `TrackerView`:
+AC4's clause covers them and a bad patch is repairable. The destructive route is
+admin-gated until an ownership plane (39-20's resolver) or the 44-5 audit trail
+lands. The justification comments in `Permissions.cs`, `Program.cs` and
+`TrackerEndpoints.cs` were rewritten to stop implying an ownership scoping that
+does not exist. Pinned by `TrackerRbacTests.Member_may_not_hard_delete_a_work_item`
+and the extended `Tenant_admin_is_not_403d`.
+
+**B2. (MAJOR) AC9 was FALSE for projects and preferences.**
+`ProjectEntity.Version` and `TrackerPreference.Version` were plain ints, not EF
+concurrency tokens (only work items had one). Proved: two concurrent PATCHes
+both sending `If-Match: 1` both returned `200`, and the first writer's rename
+was silently reverted. Both are now `.IsConcurrencyToken()`. `dotnet ef
+migrations has-pending-model-changes` is clean for BOTH contexts — for a plain
+`int` this is model metadata only and needs no migration (as 44-1 established).
+
+**B3. (MODERATE) The precondition is now ATOMIC with the write on every
+mutation.** The token alone was insufficient: the service reads, checks
+`RequireVersion`, and the repository then RE-READS in a fresh context, so
+`W2.read(v1) → W1 completes(v2) → W2.repo-read(v2) → W2 writes v3` passed the
+service check and never tripped the token. The caller's `If-Match` now rides into
+the repository (`expectedVersion`), where it pins the concurrency token's
+ORIGINAL value so the UPDATE/DELETE itself carries `WHERE "Version" = @expected`.
+Applied to project patch/delete, work-item patch/status/assign/delete, and the
+preference upsert.
+
+**One deliberate asymmetry.** A caller that supplies NO `If-Match` has opted out
+of the precondition (`TryReadIfMatch` documents this). Work items and projects
+are strict regardless — 44-1 chose that so a lost write cannot drop
+`PreviousKeys` history. The preference UPSERT is convergent instead: with no
+precondition it re-reads and re-applies (bounded) rather than 409ing, because
+"an upsert converges" is its documented contract and 44-1's
+`Concurrent_first_upserts_for_one_principal_converge_on_a_single_row` pins it.
+With a precondition it is strict like everything else.
+
+**B4. (MODERATE) The delete pre-checks surfaced as 500, not the documented 409.**
+`DeleteWorkItem` and `DeleteProject` pre-query their blocking children and then
+delete; a row created in that gap trips the RESTRICT FK, and only `TammaError`
+was caught, so `PostgresException` 23503 escaped as an unhandled 500 — despite
+`ProjectRepository.DeleteAsync`'s own comment asserting "the caller (44-2) maps
+the constraint violation to a 409". That mapping is now written, following
+`CreateProject`'s existing 23505 pattern.
+
+**B5. (MODERATE) Six of the ten catalog `SiteKey`s did not match their live route
+patterns.** The live patterns carry route constraints
+(`/api/projects/{projectId:guid}`); the SiteKeys omitted them. 43-8's
+`GovernedEndpointBindingSweepTests` compares `RawText` ORDINALLY and does not
+strip constraints, so all six would have been rejected the moment 43-9 bound
+them. 44-2's own `Every_mutating_route_has_a_descriptor` passed only because it
+applied a lenient `Normalize()` — two harnesses disagreeing, with the lenient one
+guarding the descriptors. The SiteKeys now carry the constraints, and 44-2's test
+compares STRICTLY (the `Normalize` helper is deleted) so they cannot drift apart
+again. 43-8's sweeps were not touched and stay green; no count pin moved.
+
+**B6. (MODERATE) The `HandleNull` rationale on `Optional<T>` was wrong.** It
+claimed STJ short-circuits a JSON `null` to `default` (unset) without the
+override. It does not: STJ's default is `HandleNullOnRead = !CanBeNull`, and
+`Optional<T>` is a non-nullable struct, so `Read` already receives the null
+token. The behaviour was never at risk. The override is KEPT (explicitness, and
+defence against a future change that makes the type nullable-shaped, at which
+point the STJ default flips) and the comment now states the true mechanism.
+
+**B7. (MINOR) Visibility keys on the CREATOR, not the assignee — recorded, not
+fixed.** `TrackerService` builds `TaskRef(tenantId, item.CreatedByUserId, …)`, so
+once 39-20's real resolver lands, an item ASSIGNED TO the viewer but created by
+someone else is filtered out of that viewer's own list. **Not fixed here because
+it is not a one-liner:** `TaskRef` carries exactly ONE principal axis
+(`InitiatorUserId`) and Story 39-20 owns that shape — there is no assignee axis
+to add, and passing an assignee AS the initiator would lie to the resolver.
+**Constraint on 39-20:** widen `TaskRef` (or add an assignee-aware overload) in
+the same change that swaps the DI registration. Today's behaviour is pinned by
+`Visibility_is_keyed_on_the_creator_not_the_assignee`, which is written to FAIL
+when 39-20 lands, as the reminder.
+
+**B8. (MINOR) Estimate/scale coherence now applies to the PROJECT write too.** It
+was enforced on work-item writes only, so an admin could set `estimateScale` to
+`not_used` on a project already holding estimated items — the same
+representable-and-meaningless state the work-item rule refuses, entered through
+the other door. `PatchProjectAsync` now refuses it (`TRACKER.ESTIMATE_NOT_ALLOWED`,
+naming the blocking items). Same Core rule (`EstimateScale.AllowsEstimate`),
+second call site.
+
+**B9. (MINOR) The lost-update test was sequential.** `Lost_update_is_409` lets
+writer one COMPLETE before writer two starts, so it would pass against a pure
+check-then-write with no atomic guard — which is exactly what projects and
+preferences had. It is kept (it pins the ETag/409 wire contract) and joined by
+tests that actually discriminate: deterministic repository-seam tests reproducing
+the B3 interleaving, and genuinely concurrent handler-level tests
+(`Task.WhenAll`, both writers' reads preceding either write) asserting exactly
+one winner — for work items, projects AND preferences.
+
+### B (cont.). Conformance round — 2026-07-29
+
+**B10. (MAJOR) AC9 was still literally FALSE for one route: `DELETE
+/api/tracker/preferences`.** B2/B3 above fixed the token and the atomicity for
+the preference UPSERT and left the DELETE untouched. The handler never called
+`TryReadIfMatch`, and `ITrackerService.DeletePreferencesAsync` /
+`DeletePreferencesForTenantAsync` took no `ifMatchVersion` at all — so the
+header was not merely unenforced, it was structurally unreachable. A reset
+racing a concurrent save therefore discarded that save with a `200`.
+
+**The gap survived review because the guard that should have caught it shares
+the omission.** `TrackerServiceContractTests.Every_mutation_accepts_an_if_match_version`
+enumerates its six methods BY NAME and both delete-preferences methods were
+simply absent from the list, so the "a handler physically cannot forget to plumb
+the precondition through" claim in that test's own comment was not true of the
+two methods it did not name.
+
+**Fixed in the CODE, not by amending the AC.** A carve-out ("every mutation
+except this one") is worse than consistency, and the guarantee is worth having:
+deleting the override is a destructive reset of whatever the concurrent editor
+just saved, which is precisely the lost update AC9 exists to refuse. So
+`int? ifMatchVersion` is plumbed through both service methods and both
+repository methods (`ITrackerPreferenceRepository.DeleteAsync` /
+`DeleteByTenantAsync`), the handler reads `If-Match` exactly as its siblings do,
+and the repository pins the concurrency token's ORIGINAL value so the DELETE
+itself carries `WHERE "Version" = @expected` — the same shape as the upsert's
+`ApplyUpdateAsync` and `ProjectRepository.PinExpectedVersion`, i.e. atomic with
+the write, not merely checked against an earlier read (B3).
+
+Established semantics are matched exactly: absent `If-Match` still opts OUT
+(unconditional delete), `*` passes, junk is `400 TRACKER.INVALID_IF_MATCH`, a
+stale version is `409 TRACKER.CONCURRENCY_CONFLICT` with `retryable: true`, and
+"no override to delete" stays a `404`. **No convergence loop here**, unlike the
+opted-out upsert: a delete that asserted a version is asking to remove exactly
+THAT row, and re-reading and deleting the winner's newer row would destroy the
+very edit the precondition exists to protect.
+
+Pinned by `TrackerEndpointsTests.Delete_preferences_honours_if_match` and
+`Delete_preferences_without_if_match_still_opts_out`, and both methods added to
+`Every_mutation_accepts_an_if_match_version`'s enumerated list so the contract
+test now covers the surface it claims to.
+
+### C. Recorded, not fixed
+
+**C1. The keyset cursor is plain base64url with no MAC.** Acceptable: the cursor
+carries `(Rank, Key)` and no authorization data, and it is decoded inside a
+request already scoped to the caller's tenant — so forging one only re-positions
+the caller within their own tenant's page sequence. A malformed cursor already
+fails loud (`TRACKER.INVALID_CURSOR`) rather than silently restarting at page 1.
+It is NOT a capability token and must not become one; if a future cursor ever
+carries a filter or a scope, it needs a MAC.
+
+**C2. The ownership plane itself.** B1 gates the destructive route; it does not
+create ownership. Every tenant member can still see and edit every work item.
+Closing that is 39-20 (visibility) plus a deliberate decision about whether edit
+should be ownership-scoped at all — not this story.

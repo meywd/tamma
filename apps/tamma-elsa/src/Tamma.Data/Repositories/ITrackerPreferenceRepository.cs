@@ -24,11 +24,25 @@ public interface ITrackerPreferenceRepository
     /// fresh-insert flag. The entity must carry <c>UserId</c> set and
     /// <c>TenantId</c> null.
     /// </summary>
+    /// <param name="expectedVersion">
+    /// The caller's <c>If-Match</c> precondition, applied ATOMICALLY with the
+    /// UPDATE branch as <c>WHERE "Version" = @expected</c> (44-2 review
+    /// 2026-07-29). A mismatch raises the typed, retryable
+    /// <c>TRACKER.CONCURRENCY_CONFLICT</c>. Null means "no precondition".
+    /// </param>
     Task<(TrackerPreference Entity, bool WasCreated)> UpsertAsync(
-        TrackerPreference preference, Guid? actingUserId = null);
+        TrackerPreference preference, Guid? actingUserId = null, int? expectedVersion = null);
 
     /// <summary>Delete the user-plane row. False when no row matched.</summary>
-    Task<bool> DeleteAsync(Guid? userId);
+    /// <param name="expectedVersion">
+    /// The caller's <c>If-Match</c> precondition, applied ATOMICALLY with the
+    /// DELETE as <c>WHERE "Version" = @expected</c> (44-2 conformance round
+    /// 2026-07-29 — AC9 says "every mutation", and a delete of a preferences
+    /// override can lose a concurrent edit exactly as an upsert can). A
+    /// mismatch raises the typed, retryable <c>TRACKER.CONCURRENCY_CONFLICT</c>.
+    /// Null means "no precondition" and keeps the unconditional delete.
+    /// </param>
+    Task<bool> DeleteAsync(Guid? userId, int? expectedVersion = null);
 
     // ───────────────────────── SaaS mode ────────────────────────────────
 
@@ -39,9 +53,11 @@ public interface ITrackerPreferenceRepository
     /// Upsert the tenant-plane row. The entity must carry <c>TenantId</c> set
     /// and <c>UserId</c> null.
     /// </summary>
+    /// <param name="expectedVersion">See <see cref="UpsertAsync"/>.</param>
     Task<(TrackerPreference Entity, bool WasCreated)> UpsertForTenantAsync(
-        TrackerPreference preference, Guid? actingUserId = null);
+        TrackerPreference preference, Guid? actingUserId = null, int? expectedVersion = null);
 
     /// <summary>Delete the tenant-plane row. False when no row matched.</summary>
-    Task<bool> DeleteByTenantAsync(Guid tenantId);
+    /// <param name="expectedVersion">See <see cref="DeleteAsync"/>.</param>
+    Task<bool> DeleteByTenantAsync(Guid tenantId, int? expectedVersion = null);
 }

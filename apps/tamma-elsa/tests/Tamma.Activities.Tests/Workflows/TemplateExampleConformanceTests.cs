@@ -119,15 +119,20 @@ public class TemplateExampleConformanceTests
             [("tester", "verify-acceptance")] = new("review", "41-15",
                 "example instructs an {issues, summary: {decision, ...}} shape; Review requires root-level " +
                 "subject/decision/summary (summary is a string, not an object) — MALFORMED_PAYLOAD"),
-            [("product_owner", "define-acceptance-criteria")] = new("acceptance-criteria", "41-2",
-                "example instructs the legacy plan wire; 41-1b mints the AcceptanceCriteria document type " +
-                "this cell will produce, and 41-2 rewrites the cell when it binds"),
+            // (product_owner, define-acceptance-criteria) REMOVED (Story 41-2, 2026-07-29):
+            // AcceptanceCriteriaAuthoringWorkflow binds the cell, so it moved to
+            // ContractBindingTests.Bindings and test 1 now owns it. Its template was rewritten
+            // from the legacy task-breakdown (plan) wire to the AcceptanceCriteria wire in the
+            // same change — a bound cell may never be baselined here (test 3). Pin 16 → 15.
             [("product_owner", "plan-roadmap")] = new("prose", "41-4",
                 "example instructs the legacy plan wire; 41-4 produces prose (roadmap, audience=stakeholder) " +
                 "once 41-1c lands the prose document type"),
-            [("product_owner", "prioritize-backlog")] = new("backlog-ordering", "41-3",
-                "example instructs the retired P0-P3 / severity / ownerRole triage vocabulary; 41-1b mints " +
-                "the BacklogOrdering document type this cell will produce"),
+            // (product_owner, prioritize-backlog) REMOVED (Story 41-3, 2026-08-01):
+            // BacklogPrioritizationWorkflow binds the cell, so it moved to
+            // ContractBindingTests.Bindings and test 1 now owns it. Its template was rewritten
+            // from the single-item P0-P3 / severity / ownerRole triage vocabulary to the
+            // backlog-ordering wire (a total order over the referenced set) in the same change —
+            // a bound cell may never be baselined here (test 3). Pin 14 → 13.
             [("devops", "plan-incident-response")] = new("plan", "41-22",
                 "example instructs the legacy plan wire — files as {path, action} objects plus a " +
                 "\"dependencies\" key — MALFORMED_PAYLOAD against Plan"),
@@ -150,9 +155,12 @@ public class TemplateExampleConformanceTests
             // it became visible only because test 5 started enumerating the taxonomy. The
             // templates are NOT rewritten here (each is owned by its story); they are
             // recorded so the debt is explicit and shrink-only from now on.
-            [("architect", "write-adr")] = new("prose", "41-9",
-                "no JSON example — the template instructs a markdown ADR; 41-9 rewrites the cell as a " +
-                "prose (adr, audience=engineering) producer"),
+            // (architect, write-adr) REMOVED (Story 41-9, 2026-07-29): AdrAuthoringWorkflow binds
+            // the cell, so it moved to ContractBindingTests.Bindings and test 1 now owns it. Its
+            // template was rewritten from the markdown issue-comment report to the prose envelope
+            // (kind=adr, audience=engineering) in the same change — a bound cell may never be
+            // baselined here (test 3). Pin 15 → 14. This is the FIRST of the six prose-family
+            // baseline entries to clear; 41-4/41-22/41-24/41-25/41-26 own the rest.
             [("tech_writer", "write-release-notes")] = new("prose", "41-24",
                 "no JSON example — the template instructs markdown release notes; 41-24 rewrites the cell " +
                 "as a prose (release-notes, audience=user) producer"),
@@ -180,9 +188,47 @@ public class TemplateExampleConformanceTests
     /// ever record is the one in the change that WIDENED the gate: before test 5 the
     /// fixture never looked outside its own tables, so the five prose cells added above
     /// were invisible debt, not new drift. Widening the lens is allowed to reveal what
-    /// was already there; nothing else may raise this number.</para>
+    /// was already there; nothing else may raise this number.
+    /// 16 → 15 (2026-07-29, Story 41-2): the ratchet turning the right way for the first
+    /// time — (product_owner, define-acceptance-criteria) was BOUND, its template
+    /// rewritten to the AcceptanceCriteria wire, and its baseline entry deleted.
+    /// 15 → 14 (2026-07-29, Story 41-9): (architect, write-adr) was BOUND, its template
+    /// rewritten from the markdown issue-comment report to the prose envelope
+    /// (kind=adr, audience=engineering), and its baseline entry deleted.
+    /// 14 → 13 (2026-08-01, Story 41-3): (product_owner, prioritize-backlog) was BOUND, its
+    /// template rewritten from the single-item P0-P3 / ownerRole triage vocabulary to the
+    /// backlog-ordering wire (a total order over the referenced item set), and its baseline
+    /// entry deleted.</para>
+    ///
+    /// <para><b>The direction rule is now ASSERTED, not only written</b> (43-8
+    /// follow-up F2, 2026-07-29). Until this change the shrink-only property was
+    /// PROSE: nothing mechanically forbade replacing <c>14</c> with a larger literal,
+    /// which is the exact defect 43-8's own plan cites about
+    /// <c>ContractBindingTests.cs:255-271</c> ("the pin is a comment; additions are
+    /// undetectable"). The pin's value is now the last element of
+    /// <see cref="PinHistory"/>, and
+    /// <see cref="TheRatchetPin_IsMechanicallyShrinkOnly"/> asserts that history is
+    /// strictly decreasing after its one documented widening — so RAISING the pin
+    /// requires appending a value that makes the fixture RED.</para>
     /// </summary>
-    private const int KnownNonConformingTemplateCount = 16;
+    private const int KnownNonConformingTemplateCount = 13;
+
+    /// <summary>
+    /// The pin's recorded high-water history, oldest first. Index 0 → 1 is the ONE
+    /// permitted increase: the change that widened the gate (test 5 started
+    /// enumerating the whole taxonomy, revealing five prose cells that were already
+    /// non-conforming — invisible debt, not new drift). Every element after index 1
+    /// must be strictly LESS than its predecessor.
+    ///
+    /// <para><b>Honest residual.</b> This makes the ratchet mechanically shrink-only
+    /// against the ordinary laundering path (edit one literal). It does not make it
+    /// tamper-proof: an author could still append an increase AND edit
+    /// <see cref="TheRatchetPin_IsMechanicallyShrinkOnly"/> to permit it. That is a
+    /// two-place, semantically obvious diff that changes an assertion — the property
+    /// this buys is that widening the baseline can no longer be a one-literal change
+    /// that reads like routine maintenance.</para>
+    /// </summary>
+    private static readonly int[] PinHistory = [11, 16, 15, 14, 13];
 
     // NOTE (2026-07-29): the PlannedFutureTypeKeys escape hatch is gone — 41-1b
     // registered test-plan / acceptance-criteria / backlog-ordering and 41-1c
@@ -565,6 +611,32 @@ public class TemplateExampleConformanceTests
     // ====================================================================
     // Test 2 — the ratchet: entries must still be non-conforming, and may only shrink
     // ====================================================================
+
+    [Test]
+    public void TheRatchetPin_IsMechanicallyShrinkOnly()
+    {
+        // 43-8 follow-up F2. The pin used to be a bare const compared with HaveCount:
+        // nothing mechanically forbade raising it, so "shrink-only" was prose. Bind
+        // the pin to its recorded history and assert the history's DIRECTION.
+        PinHistory.Should().NotBeEmpty();
+        KnownNonConformingTemplateCount.Should().Be(PinHistory[^1],
+            "the pin IS the last recorded high-water value; changing one without the other is the "
+            + "shape of an undeclared re-widening");
+
+        PinHistory[1].Should().BeGreaterThan(PinHistory[0],
+            "index 0 → 1 is the ONE documented increase: the change that widened the gate and "
+            + "revealed debt that was already there");
+
+        for (var i = 2; i < PinHistory.Length; i++)
+        {
+            PinHistory[i].Should().BeLessThan(PinHistory[i - 1],
+                $"pin history entry #{i} ({PinHistory[i]}) must be strictly smaller than #{i - 1} "
+                + $"({PinHistory[i - 1]}). A ratchet that can turn both ways is not a ratchet: an "
+                + "entry may only leave this baseline when its owning story rewrites the template. "
+                + "If a widening is genuinely warranted a second time, that is a deliberate design "
+                + "change and must be argued in a review, not appended here.");
+        }
+    }
 
     [Test]
     public void KnownNonConformingTemplates_AreStillNonConforming_AndCountOnlyShrinks()

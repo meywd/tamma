@@ -61,6 +61,53 @@ public static class MergeApprovalResumeEndpoint
     public static string BookmarkName(string? tenantId, string? repository, int issueNumber, int prNumber)
         => WaitForMergeApprovalActivity.BookmarkName(tenantId, repository, issueNumber, prNumber);
 
+    /// <summary>
+    /// Story 43-14 (D3) — the LOCATE half of the resume seam: find the suspended
+    /// bookmark and return <c>{workflowInstanceId, correlationId}</c> WITHOUT
+    /// running the instance. Tamma.Api calls this BEFORE resuming so it can mint
+    /// the correlation-standing grant against the run correlation FIRST — because
+    /// <see cref="Resume"/> runs the approved merge SYNCHRONOUSLY, a mint after
+    /// resume returns would lose the race (the merge call would have already
+    /// 409'd). Same tenant/repo bookmark scoping + collision refusal as Resume.
+    /// </summary>
+    public static async Task<IResult> Locate(
+        [FromBody] ResumeRequest request,
+        [FromServices] IBookmarkStore bookmarkStore,
+        [FromServices] ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("Tamma.ElsaServer.MergeApprovalLocate");
+        var name = BookmarkName(request.TenantId, request.Repository, request.IssueNumber, request.PrNumber);
+
+        var bookmarks = (await bookmarkStore
+            .FindManyAsync(new BookmarkFilter { Name = name }, ct)
+            .ConfigureAwait(false)).ToList();
+
+        if (bookmarks.Count == 0)
+        {
+            return Results.NotFound(new { error = "bookmark_not_found", bookmark = name });
+        }
+        if (bookmarks.Count > 1)
+        {
+            logger.LogError(
+                "Ambiguous merge-approval bookmark {Bookmark}: {Count} live instances — refusing to locate an arbitrary one",
+                name, bookmarks.Count);
+            return Results.Conflict(new { error = "ambiguous_bookmark", bookmark = name, count = bookmarks.Count });
+        }
+
+        var bookmark = bookmarks[0];
+        return Results.Ok(new
+        {
+            found = true,
+            workflowInstanceId = bookmark.WorkflowInstanceId,
+            // The run correlation the approved workflow's mediated calls carry
+            // (D5). Falls back to the instance id when no correlation was set.
+            correlationId = string.IsNullOrWhiteSpace(bookmark.CorrelationId)
+                ? bookmark.WorkflowInstanceId
+                : bookmark.CorrelationId,
+        });
+    }
+
     public static async Task<IResult> Resume(
         [FromBody] ResumeRequest request,
         [FromServices] IBookmarkStore bookmarkStore,

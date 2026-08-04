@@ -17,6 +17,16 @@ namespace Tamma.Api.Services.Agents;
 /// lie (epic README, Seam B). A denial becomes a rejected-tool-call entry that
 /// the loop's existing machinery feeds back to the model as a tool result — no
 /// exception, no new plumbing.</para>
+///
+/// <para><b>The caller kind here is STRUCTURALLY <see cref="CallerKind.Llm"/>
+/// (Story 43-13 D10)</b> — this seam takes no <see cref="CallerKind"/> and never
+/// calls <c>AutonomyGateEvaluator.Evaluate</c>: its input is a MODEL-EMITTED
+/// tool call by construction (<c>InlineToolLoopRunner</c> dispatches what the
+/// model asked for), which is stronger than a passed flag — a constant plumbed
+/// through this sync interface could be mis-set; the input's provenance cannot.
+/// The threshold it reads (<c>ResolveEffectiveMinAutonomy</c>) is therefore
+/// always the LLM-path view, which is exactly the view 43-11's dial table
+/// assigns. Pinned by <c>CallerKindResidencyTests</c>.</para>
 /// </summary>
 public interface IToolLoopAutonomyGate
 {
@@ -47,13 +57,25 @@ public enum ToolLoopGateOutcome
 /// <param name="MinAutonomy">The effective minimum-autonomy threshold applied, when one was.</param>
 /// <param name="Dial">The dial position the decision was taken at.</param>
 /// <param name="Reason">Machine-readable reason tag (e.g. <c>below-min-autonomy</c>, <c>uncatalogued</c>).</param>
+/// <param name="BreakGlass">
+/// Non-null when this decision was let through by the operator's BREAK-GLASS
+/// override instead of failing closed on an unreadable policy input (43-5 F11).
+/// It carries the override's expiry and reason so the seam can log and audit
+/// them. Null on every ordinary decision, including every decision taken while
+/// the control plane is healthy — an engaged override has no effect at all
+/// unless a read has actually degraded.
+/// </param>
 public sealed record ToolLoopGateDecision(
     ToolLoopGateOutcome Outcome,
     ActionKey? ActionKey,
     int? MinAutonomy,
     int Dial,
-    string Reason)
+    string Reason,
+    BreakGlassState? BreakGlass = null)
 {
     /// <summary>Convenience: is this a denial?</summary>
     public bool IsDenied => Outcome == ToolLoopGateOutcome.Denied;
+
+    /// <summary>Convenience: did the break-glass override decide this one?</summary>
+    public bool IsBreakGlassBypass => BreakGlass is not null;
 }

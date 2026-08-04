@@ -59,6 +59,48 @@ public static class DeploymentApprovalResumeEndpoint
     public static string BookmarkName(string? tenantId, string? repository, int issueNumber, string? mergeSha)
         => WaitForDeploymentApprovalActivity.BookmarkName(tenantId, repository, issueNumber, mergeSha);
 
+    /// <summary>
+    /// Story 43-14 (D3) — the LOCATE half: find the suspended bookmark and return
+    /// <c>{workflowInstanceId, correlationId}</c> WITHOUT running, so Tamma.Api can
+    /// mint the deploy-tail correlation-standing grant BEFORE resuming. Mirrors
+    /// <see cref="MergeApprovalResumeEndpoint.Locate"/>.
+    /// </summary>
+    public static async Task<IResult> Locate(
+        [FromBody] ResumeRequest request,
+        [FromServices] IBookmarkStore bookmarkStore,
+        [FromServices] ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("Tamma.ElsaServer.DeploymentApprovalLocate");
+        var name = BookmarkName(request.TenantId, request.Repository, request.IssueNumber, request.MergeSha);
+
+        var bookmarks = (await bookmarkStore
+            .FindManyAsync(new BookmarkFilter { Name = name }, ct)
+            .ConfigureAwait(false)).ToList();
+
+        if (bookmarks.Count == 0)
+        {
+            return Results.NotFound(new { error = "bookmark_not_found", bookmark = name });
+        }
+        if (bookmarks.Count > 1)
+        {
+            logger.LogError(
+                "Ambiguous deploy-approval bookmark {Bookmark}: {Count} live instances — refusing to locate an arbitrary one",
+                name, bookmarks.Count);
+            return Results.Conflict(new { error = "ambiguous_bookmark", bookmark = name, count = bookmarks.Count });
+        }
+
+        var bookmark = bookmarks[0];
+        return Results.Ok(new
+        {
+            found = true,
+            workflowInstanceId = bookmark.WorkflowInstanceId,
+            correlationId = string.IsNullOrWhiteSpace(bookmark.CorrelationId)
+                ? bookmark.WorkflowInstanceId
+                : bookmark.CorrelationId,
+        });
+    }
+
     public static async Task<IResult> Resume(
         [FromBody] ResumeRequest request,
         [FromServices] IBookmarkStore bookmarkStore,

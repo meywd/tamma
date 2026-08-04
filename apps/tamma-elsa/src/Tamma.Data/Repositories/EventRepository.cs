@@ -589,6 +589,41 @@ public class EventRepository(
         return (rows, total);
     }
 
+    /// <inheritdoc />
+    public async Task<int> CountByTypePrefixSinceAsync(
+        Guid? tenantId, string typePrefix, DateTime sinceUtc)
+    {
+        if (string.IsNullOrEmpty(typePrefix))
+        {
+            return 0;
+        }
+
+        var like = typePrefix + "%";
+
+        // Tenant-scoped: count in the tenant's domain_events schema.
+        if (tenantId is Guid tid)
+        {
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            return await db.DomainEvents
+                .Where(e => e.TenantId == tid
+                    && e.CreatedAt >= sinceUtc
+                    && EF.Functions.Like(e.Type, like))
+                .CountAsync();
+        }
+
+        // Single-user / platform plane (null tenant): the mediation families live
+        // on platform_events. Without a platform repo there is no source — the
+        // reader renders "no data", which is the honest answer.
+        if (platformEvents is null)
+        {
+            return 0;
+        }
+
+        var rows = await platformEvents.QueryAsync(
+            typePrefix: typePrefix, since: sinceUtc, limit: 1000);
+        return rows.Count;
+    }
+
     /// <summary>Map the <c>outcome</c> filter (<c>success|failed|partial</c>) to
     /// the terminal <c>AGENT.TASK.*</c> event type. Returns <c>null</c> when no
     /// (or an unrecognized) outcome is supplied — the caller then does not

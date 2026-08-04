@@ -55,12 +55,57 @@ public class ToolNameAliasesTests
 
     [TestCase("Frobnicate")]
     [TestCase("")]
-    [TestCase("mcp__server__tool")]
+    [TestCase("mcp_not_the_prefix")]
     public void An_unknown_name_returns_false_and_does_not_throw(string name)
     {
+        // `mcp__server__tool` was a case here until 2026-07-30; it now resolves —
+        // see The_mcp_prefix_family_resolves_to_the_one_coarse_effect_member. The
+        // near-miss `mcp_not_the_prefix` (single underscore) is kept as a case so
+        // the prefix rule cannot silently widen into "anything starting with mcp".
         var act = () => ToolNameAliases.TryResolve(name, out _);
         act.Should().NotThrow();
         ToolNameAliases.TryResolve(name, out _).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The MCP governance decision (2026-07-30): <c>mcp__&lt;server&gt;__&lt;tool&gt;</c>
+    /// is the ONE alias family that leaves the <c>tool:</c> plane, resolving to
+    /// <c>effect:mcp.tool.invoke</c>.
+    ///
+    /// <para>It is a PREFIX rule rather than a map entry because the member set is
+    /// unbounded and lives in another process — which is the same fact that makes
+    /// MCP the one family epic D2's "unmergeable in CI" guarantee cannot cover,
+    /// and therefore the one family that must not sail through the gate as
+    /// <c>uncatalogued</c>.</para>
+    /// </summary>
+    [TestCase("mcp__server__tool")]
+    [TestCase("mcp__github__create_pull_request")]
+    [TestCase("MCP__SERVER__TOOL")]
+    [TestCase("mcp__")]
+    public void The_mcp_prefix_family_resolves_to_the_one_coarse_effect_member(string name)
+    {
+        ToolNameAliases.IsMcpToolName(name).Should().BeTrue();
+        ToolNameAliases.TryResolve(name, out var key).Should().BeTrue();
+        key.Should().Be(new ActionKey(ActionNamespace.Effect, ExternalEffect.McpToolInvoke.ToWire()));
+        ActionCatalog.TryGet(key, out _).Should().BeTrue();
+    }
+
+    [Test]
+    public void The_mcp_prefix_family_is_deliberately_absent_from_the_exact_name_map()
+    {
+        // `All` is what the startup validator iterates for the two FINITE
+        // vocabularies. An unbounded family cannot be enumerated there, and the
+        // validator's resolution checks call TryResolve, which does see it.
+        ToolNameAliases.All.Keys.Should().NotContain(
+            k => k.StartsWith(ToolNameAliases.McpToolNamePrefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("Read")]
+    public void IsMcpToolName_is_false_for_everything_else(string? name)
+    {
+        ToolNameAliases.IsMcpToolName(name).Should().BeFalse();
     }
 
     [Test]
@@ -114,6 +159,8 @@ public class ToolNameAliasesTests
     [Test]
     public void Every_alias_target_is_a_catalogued_tool_member()
     {
+        // Scoped to the EXACT-NAME map (`All`) — the mcp__ prefix family is
+        // deliberately outside it and deliberately outside the tool plane.
         foreach (var (name, key) in ToolNameAliases.All)
         {
             key.Ns.Should().Be(ActionNamespace.Tool, $"alias '{name}' must map into the tool plane");

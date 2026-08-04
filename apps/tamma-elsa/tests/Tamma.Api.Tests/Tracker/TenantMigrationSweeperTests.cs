@@ -123,7 +123,7 @@ public class TenantMigrationSweeperTests
         resolver.Map(tenantA, CsFor(tenantA)).Map(tenantB, CsFor(tenantB));
         var sweeper = NewSweeper(resolver);
 
-        var result = await sweeper.SweepAsync();
+        var result = await sweeper.SweepAsync(dryRun: false);
 
         result.Total.Should().Be(2);
         result.Failed.Should().Be(0);
@@ -137,7 +137,7 @@ public class TenantMigrationSweeperTests
             .Should().Be(3, "the pre-provisioned tenant gains the tracker tables");
 
         // Idempotence: a second sweep is a fleet-wide no-op.
-        var again = await sweeper.SweepAsync();
+        var again = await sweeper.SweepAsync(dryRun: false);
         again.Migrated.Should().Be(0);
         again.AlreadyCurrent.Should().Be(2);
     }
@@ -154,7 +154,7 @@ public class TenantMigrationSweeperTests
         resolver.Map(healthy, CsFor(healthy));
         var sweeper = NewSweeper(resolver);
 
-        var result = await sweeper.SweepAsync();
+        var result = await sweeper.SweepAsync(dryRun: false);
 
         result.Total.Should().Be(2);
         result.Tenants.Single(t => t.TenantId == healthy).Outcome
@@ -185,7 +185,7 @@ public class TenantMigrationSweeperTests
             .Should().Be(0, "dryRun must apply NOTHING — no tables, no history");
 
         // And the real run afterwards applies exactly what dryRun predicted.
-        var applied = await sweeper.SweepAsync();
+        var applied = await sweeper.SweepAsync(dryRun: false);
         applied.Tenants.Single().Outcome.Should().Be(TenantMigrationSweep.OutcomeMigrated);
         applied.Tenants.Single().PendingBefore.Should().Be(entry.PendingBefore);
     }
@@ -211,7 +211,7 @@ public class TenantMigrationSweeperTests
             resolver.Map(id, CsFor(id));
         var sweeper = NewSweeper(resolver);
 
-        var result = await sweeper.SweepAsync();
+        var result = await sweeper.SweepAsync(dryRun: false);
 
         result.Total.Should().Be(count);
         result.Failed.Should().Be(0,
@@ -223,7 +223,7 @@ public class TenantMigrationSweeperTests
 
         // The cap is process-global — the original defect made every LATER
         // sweep in the same process fail for uncached tenants forever.
-        var again = await sweeper.SweepAsync();
+        var again = await sweeper.SweepAsync(dryRun: false);
         again.Failed.Should().Be(0);
         again.AlreadyCurrent.Should().Be(count);
     }
@@ -249,7 +249,7 @@ public class TenantMigrationSweeperTests
             resolver,
             new OcePoisonedMigrator(TenantNaming.SchemaName(poisoned)));
 
-        var result = await sweeper.SweepAsync();
+        var result = await sweeper.SweepAsync(dryRun: false);
 
         result.Total.Should().Be(3);
         result.Failed.Should().Be(1);

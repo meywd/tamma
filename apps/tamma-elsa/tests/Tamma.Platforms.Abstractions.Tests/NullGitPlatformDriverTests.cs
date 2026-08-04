@@ -55,6 +55,31 @@ public sealed class NullGitPlatformDriverTests
     }
 
     [Test]
+    public async Task NewPrLifecycleVerbs_ReturnCapabilityUnsupported()
+    {
+        // Story 31-13 — a driver without PrLifecycle answers the six verbs with a
+        // capability_unsupported FAILURE, never a throw (the no-throw contract).
+        var c = NullGitPlatformDriver.Instance.Client;
+
+        void AssertUnsupported(PlatformResult<PullRequest> r)
+        {
+            var failed = r.Should().BeOfType<PlatformResult<PullRequest>.Failed>().Subject;
+            failed.Error.Should().BeOfType<PlatformError.InvalidRequest>()
+                .Which.Code.Should().Be("capability_unsupported");
+        }
+
+        AssertUnsupported(await c.ClosePullRequestAsync("o", "r", "1"));
+        AssertUnsupported(await c.ReopenPullRequestAsync("o", "r", "1"));
+        AssertUnsupported(await c.RequestReviewersAsync(
+            new RequestReviewersRequest("o", "r", "1", new[] { "alice" })));
+        AssertUnsupported(await c.AddPullRequestLabelsAsync(
+            new AddPullRequestLabelsRequest("o", "r", "1", new[] { "bug" })));
+        AssertUnsupported(await c.RemovePullRequestLabelAsync("o", "r", "1", "bug"));
+        AssertUnsupported(await c.SetDraftAsync(
+            new SetPullRequestDraftRequest("o", "r", "1", Draft: true)));
+    }
+
+    [Test]
     public void Kind_is_overridable_via_init()
     {
         var driver = new NullGitPlatformDriver { Kind = PlatformKind.Bitbucket };

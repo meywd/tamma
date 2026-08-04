@@ -38,6 +38,7 @@ namespace Tamma.ElsaServer.Workflows;
 public class TestCaseCreationWorkflow : WorkflowBase
 {
     private const string TestSpecDocumentType = "test-spec";
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -54,6 +55,10 @@ public class TestCaseCreationWorkflow : WorkflowBase
         var tenantId        = builder.WithVariable<string>("TenantId", "");
         var issueId         = builder.WithVariable<string>("IssueId", "");
         var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── 39-10 re-entry position (D8) ───────────────────────────────
         var reEntryPositionJson = builder.WithVariable<string>();
@@ -123,33 +128,55 @@ public class TestCaseCreationWorkflow : WorkflowBase
         };
         readPositionStage.SetDisplayText("Read Position Stage");
 
+        // ── Story 39-25 (leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Fail-closed: no accepted assessment for this run's anchor ⇒ Found=false ⇒ the
+        // ambiguityScore dispatch key below is OMITTED (never a fabricated 0.0).
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment", Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 3: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["documentType"]          = TestSpecDocumentType,
-                ["producerRole"]          = AgentRole.Tester.ToWire(),
-                ["producerAction"]        = AgentAction.WriteTests.ToWire(),
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    ["tasksJson"]  = tasksJson.Get(ctx) ?? "[]",
-                    ["contextIds"] = contextIds.Get(ctx) ?? "[]",
-                    ["repository"] = repository.Get(ctx) ?? "",
-                    ["branchName"] = branchName.Get(ctx) ?? "",
-                }),
-                // 39-6 D11 — repair/revise notes land in the DECLARED testTarget carrier
-                // (write-tests.md declares {{testTarget}}).
-                ["feedbackVariableName"] = "testTarget",
-                // D3 — the consumed task breakdown is the cross-document validation context; VALIDATE
-                // forwards it to TestSpecDocumentType.ValidateWithContext (task-ID binding ring).
-                ["validationContextJson"] = CreationBindingHelper.BuildTaskIdContext(tasksJson.Get(ctx)),
-                ["issueId"]             = issueId.Get(ctx) ?? "",
-                ["correlationId"]       = issueId.Get(ctx) ?? "",
-                ["tenantId"]            = tenantId.Get(ctx) ?? "",
-                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                    ["documentType"]          = TestSpecDocumentType,
+                    ["producerRole"]          = AgentRole.Tester.ToWire(),
+                    ["producerAction"]        = AgentAction.WriteTests.ToWire(),
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["tasksJson"]  = tasksJson.Get(ctx) ?? "[]",
+                        ["contextIds"] = contextIds.Get(ctx) ?? "[]",
+                        ["repository"] = repository.Get(ctx) ?? "",
+                        ["branchName"] = branchName.Get(ctx) ?? "",
+                    }),
+                    // 39-6 D11 — repair/revise notes land in the DECLARED testTarget carrier
+                    // (write-tests.md declares {{testTarget}}).
+                    ["feedbackVariableName"] = "testTarget",
+                    // D3 — the consumed task breakdown is the cross-document validation context; VALIDATE
+                    // forwards it to TestSpecDocumentType.ValidateWithContext (task-ID binding ring).
+                    ["validationContextJson"] = CreationBindingHelper.BuildTaskIdContext(tasksJson.Get(ctx)),
+                    ["issueId"]             = issueId.Get(ctx) ?? "",
+                    ["correlationId"]       = issueId.Get(ctx) ?? "",
+                    ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                    ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                };
+                // 39-25 — thread the accepted assessment's score; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -202,13 +229,15 @@ public class TestCaseCreationWorkflow : WorkflowBase
             Activities =
             {
                 readInputs, computeReEntry, readPositionStage,
-                dispatchLifecycle, readLifecycleExit, exposeOutput,
+                fetchAmbiguityAssessment, dispatchLifecycle, readLifecycleExit, exposeOutput,
             },
             Connections =
             {
                 new(readInputs, computeReEntry),
                 new(computeReEntry, readPositionStage),
-                new(readPositionStage, dispatchLifecycle),
+                // 39-25 — the ambiguity fetch is the single predecessor of the dispatch.
+                new(readPositionStage, fetchAmbiguityAssessment),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, exposeOutput),
             }

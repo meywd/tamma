@@ -43,6 +43,25 @@ public interface IElsaWorkflowService
         string decision, string? feedback, string? approver);
 
     /// <summary>
+    /// Story 43-14 (D3) — LOCATE the suspended merge-approval gate (find its
+    /// bookmark + run correlation) WITHOUT running it, so the caller can mint the
+    /// merge-composite correlation-standing grant against the run correlation
+    /// BEFORE resuming (the engine resume runs the merge synchronously, so a mint
+    /// after would 409 the merge). Returns <see cref="ApprovalGateLocation.Found"/>
+    /// = false when no gate is suspended.
+    /// </summary>
+    Task<ApprovalGateLocation> LocateMergeApprovalGateAsync(
+        int issueNumber, int prNumber, string? tenantId, string? repository);
+
+    /// <summary>
+    /// Story 43-14 (D3) — LOCATE the suspended production-deploy approval gate
+    /// (bookmark + run correlation) WITHOUT running, so the deploy-tail grants are
+    /// minted before resume.
+    /// </summary>
+    Task<ApprovalGateLocation> LocateDeploymentApprovalGateAsync(
+        int issueNumber, string? tenantId, string? repository, string? mergeSha);
+
+    /// <summary>
     /// Completeness audit P0 item 3 — resume the <c>deployment-pipeline</c>
     /// production-approval human gate suspended on the tenant+repo+SHA-scoped
     /// bookmark <c>adl-deploy-prod-approval-{tenant}-{repo}-{issue}-{mergeSha}</c>,
@@ -143,6 +162,17 @@ public sealed record MergeApprovalResumeResult(
     bool Resumed,
     bool GateNotFound,
     string? WorkflowInstanceId);
+
+/// <summary>
+/// Story 43-14 (D3) — the located gate: its instance id and the RUN correlation
+/// its mediated calls carry, so the caller mints against
+/// <c>CorrelationId ?? WorkflowInstanceId</c>. <see cref="Found"/> false = no gate
+/// suspended (the resume would 404), so nothing is minted.
+/// </summary>
+public sealed record ApprovalGateLocation(
+    bool Found,
+    string? WorkflowInstanceId,
+    string? CorrelationId);
 
 /// <summary>
 /// Workflow status information

@@ -107,5 +107,67 @@ public static class GitEndpoints
         return result.ToHttpResult();
     }
 
+    // ================================================================
+    // Story 31-13 — the 7 PR-lifecycle verbs. Each mirrors the ops above:
+    // delegate to IGitMediationService (guard → token → platform → one event),
+    // project the typed key-free GitMediationResult via ToHttpResult().
+    // ================================================================
+
+    public static async Task<IResult> ClosePullRequest(
+        string owner, string repo, int n, ClosePrRequest body,
+        ITenantContext tenantContext, IGitMediationService git, CancellationToken ct)
+    {
+        var result = await git.ClosePullRequestAsync(tenantContext.TenantId, Repo(owner, repo), n, body, ct).ConfigureAwait(false);
+        return result.ToHttpResult();
+    }
+
+    public static async Task<IResult> ReopenPullRequest(
+        string owner, string repo, int n, ReopenPrRequest body,
+        ITenantContext tenantContext, IGitMediationService git, CancellationToken ct)
+    {
+        var result = await git.ReopenPullRequestAsync(tenantContext.TenantId, Repo(owner, repo), n, body, ct).ConfigureAwait(false);
+        return result.ToHttpResult();
+    }
+
+    public static async Task<IResult> PostPullRequestComment(
+        string owner, string repo, int n, PrCommentRequest body,
+        ITenantContext tenantContext, IGitMediationService git, CancellationToken ct)
+    {
+        var result = await git.CommentOnPullRequestAsync(tenantContext.TenantId, Repo(owner, repo), n, body, ct).ConfigureAwait(false);
+        return result.ToHttpResult();
+    }
+
+    public static async Task<IResult> PostPullRequestReviewComment(
+        string owner, string repo, int n, PrReviewCommentRequest body,
+        ITenantContext tenantContext, IGitMediationService git, CancellationToken ct)
+    {
+        var result = await git.ReviewCommentOnPullRequestAsync(tenantContext.TenantId, Repo(owner, repo), n, body, ct).ConfigureAwait(false);
+        return result.ToHttpResult();
+    }
+
+    public static async Task<IResult> RequestReviewers(
+        string owner, string repo, int n, PrReviewersRequest body,
+        ITenantContext tenantContext, IGitMediationService git, CancellationToken ct)
+    {
+        var result = await git.RequestPullRequestReviewersAsync(tenantContext.TenantId, Repo(owner, repo), n, body, ct).ConfigureAwait(false);
+        return result.ToHttpResult();
+    }
+
+    public static async Task<IResult> SetPullRequestLabels(
+        string owner, string repo, int n, PrLabelsRequest body,
+        ITenantContext tenantContext, IGitMediationService git, CancellationToken ct)
+    {
+        var result = await git.UpdatePullRequestLabelsAsync(tenantContext.TenantId, Repo(owner, repo), n, body, ct).ConfigureAwait(false);
+        return result.ToHttpResult();
+    }
+
+    public static async Task<IResult> SetPullRequestDraft(
+        string owner, string repo, int n, PrDraftRequest body,
+        ITenantContext tenantContext, IGitMediationService git, CancellationToken ct)
+    {
+        var result = await git.SetPullRequestDraftAsync(tenantContext.TenantId, Repo(owner, repo), n, body, ct).ConfigureAwait(false);
+        return result.ToHttpResult();
+    }
+
     private static string Repo(string owner, string repo) => $"{owner}/{repo}";
 }

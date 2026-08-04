@@ -66,6 +66,29 @@ public class ActionAuthorization
     /// cover a second run.</summary>
     public DateTime? ConsumedAtUtc { get; set; }
 
+    /// <summary>
+    /// Story 43-14 (Amendment 2-A) — the grant's SCOPE:
+    /// <list type="bullet">
+    ///   <item><description><c>single-use</c> (default; today's semantics
+    ///   unchanged) — the grant covers exactly ONE ask in its correlation, then
+    ///   <see cref="ConsumedAtUtc"/> is stamped by the CAS consume and a second
+    ///   ask re-blocks. Every existing row keeps this value (backfill-free) and
+    ///   every existing test asserts on it verbatim.</description></item>
+    ///   <item><description><c>correlation-standing</c> — the grant is SATISFIED
+    ///   for every ask matching <c>(principal, correlation, target)</c> WITHOUT
+    ///   being consumed: <see cref="ConsumedAtUtc"/> stays NULL and the row is
+    ///   returned as covering on each ask. It dies only by expiry
+    ///   (<see cref="ExpiresAtUtc"/>) or by its correlation ending (nothing else
+    ///   carries that correlation). This is what lets one human "yes" cover a
+    ///   high-frequency action (shell per tool-call, tens per run) with ONE ask
+    ///   per run instead of one ask per call.</description></item>
+    /// </list>
+    /// A workflow approval mints correlation-standing rows; the Seam C 409 and
+    /// the per-call request path mint single-use rows.
+    /// (<c>ck_action_authorizations_scope</c>.)
+    /// </summary>
+    public string Scope { get; set; } = "single-use";
+
     /// <summary>Free-text request/decision reason.</summary>
     public string? Reason { get; set; }
 

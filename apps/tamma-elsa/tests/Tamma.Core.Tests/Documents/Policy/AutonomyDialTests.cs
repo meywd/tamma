@@ -22,6 +22,16 @@ public class AutonomyDialTests
     }
 
     [Test]
+    public void Min_is_below_the_shipped_default()
+    {
+        // Story 43-11 AC1: Min (1) and the shipped default dial
+        // (AcceptanceDefaults.DefaultAutonomyLevel = 70) are DISTINCT concepts —
+        // pinning Min strictly below the default keeps them from re-fusing (they
+        // were only incidentally equal before the widen).
+        AutonomyDial.Min.Should().BeLessThan(AcceptanceDefaults.DefaultAutonomyLevel);
+    }
+
+    [Test]
     public void AlwaysHuman_is_strictly_above_Max()
     {
         AutonomyDial.AlwaysHuman.Should().Be(AutonomyDial.Max + 1);

@@ -107,7 +107,10 @@ public class AcceptanceRulesServiceTests
         var bad = new AcceptanceRulesOverride
         {
             DocumentTypeKey = "plan",
-            RulesJson = AcceptanceRulesJson.Serialize(AcceptanceDefaults.Rules with { AutonomyLevel = 5 }),
+            // Story 43-11 AC14: 5 is now a LEGAL dial position (the range widened to
+            // [1,100]), so the corrupt-row vector must be something Validate() still
+            // rejects on read — well above Max.
+            RulesJson = AcceptanceRulesJson.Serialize(AcceptanceDefaults.Rules with { AutonomyLevel = AutonomyDial.Max + 1000 }),
             Version = 1,
         };
         _repo.Setup(r => r.GetAsync(UserId, "plan")).ReturnsAsync(bad);

@@ -16,6 +16,10 @@ public static class GitEventTypes
     public const string IssueUpdateOperation = "issue_update";
     public const string PrCommentsReadOperation = "pr_comments_read";
 
+    // Story 43-12 — read a PR's details (base branch) before the merge gate decides
+    // which per-target key (git.merge.dev|qa|main) applies. Same mediation plane.
+    public const string PrDetailsReadOperation = "pr_details_read";
+
     // Story 38 (Phase 1) — the GitHub "extra ops" the engine's context / debug /
     // integration activities call on the composite today (commits + file-changes
     // reads and the standalone branch delete). Mediated here on the same
@@ -28,6 +32,17 @@ public static class GitEventTypes
     // GitHub release/tag for the shipped version). Same guard→token→platform→
     // one-event mediation plane as the git-platform ops above.
     public const string ReleaseCreateOperation = "release_create";
+
+    // Story 31-13 — the 7 PR-lifecycle verbs (close, reopen, comment,
+    // review-comment, request-reviewers, labels, set-draft), each on the same
+    // guard→token→platform→exactly-one-terminal-event mediation plane.
+    public const string PrCloseOperation = "pr_close";
+    public const string PrReopenOperation = "pr_reopen";
+    public const string PrCommentOperation = "pr_comment";
+    public const string PrReviewCommentOperation = "pr_review_comment";
+    public const string PrReviewersRequestOperation = "pr_reviewers_request";
+    public const string PrLabelsUpdateOperation = "pr_labels_update";
+    public const string PrDraftSetOperation = "pr_draft_set";
 
     public const string BranchCreatedSuccess = "GIT.BRANCH_CREATED.SUCCESS";
     public const string BranchCreatedFailed = "GIT.BRANCH_CREATED.FAILED";
@@ -44,6 +59,9 @@ public static class GitEventTypes
     public const string PrCommentsReadSuccess = "GIT.PR_COMMENTS_READ.SUCCESS";
     public const string PrCommentsReadFailed = "GIT.PR_COMMENTS_READ.FAILED";
 
+    public const string PrDetailsReadSuccess = "GIT.PR_DETAILS_READ.SUCCESS";
+    public const string PrDetailsReadFailed = "GIT.PR_DETAILS_READ.FAILED";
+
     public const string CommitsReadSuccess = "GIT.COMMITS_READ.SUCCESS";
     public const string CommitsReadFailed = "GIT.COMMITS_READ.FAILED";
 
@@ -55,6 +73,28 @@ public static class GitEventTypes
 
     public const string ReleaseCreatedSuccess = "GIT.RELEASE_CREATED.SUCCESS";
     public const string ReleaseCreatedFailed = "GIT.RELEASE_CREATED.FAILED";
+
+    // Story 31-13 — PR-lifecycle terminal events (AGGREGATE.ACTION.STATUS, key-free).
+    public const string PrClosedSuccess = "GIT.PR_CLOSED.SUCCESS";
+    public const string PrClosedFailed = "GIT.PR_CLOSED.FAILED";
+
+    public const string PrReopenedSuccess = "GIT.PR_REOPENED.SUCCESS";
+    public const string PrReopenedFailed = "GIT.PR_REOPENED.FAILED";
+
+    public const string PrCommentedSuccess = "GIT.PR_COMMENTED.SUCCESS";
+    public const string PrCommentedFailed = "GIT.PR_COMMENTED.FAILED";
+
+    public const string PrReviewCommentedSuccess = "GIT.PR_REVIEW_COMMENTED.SUCCESS";
+    public const string PrReviewCommentedFailed = "GIT.PR_REVIEW_COMMENTED.FAILED";
+
+    public const string PrReviewersRequestedSuccess = "GIT.PR_REVIEWERS_REQUESTED.SUCCESS";
+    public const string PrReviewersRequestedFailed = "GIT.PR_REVIEWERS_REQUESTED.FAILED";
+
+    public const string PrLabelsUpdatedSuccess = "GIT.PR_LABELS_UPDATED.SUCCESS";
+    public const string PrLabelsUpdatedFailed = "GIT.PR_LABELS_UPDATED.FAILED";
+
+    public const string PrDraftSetSuccess = "GIT.PR_DRAFT_SET.SUCCESS";
+    public const string PrDraftSetFailed = "GIT.PR_DRAFT_SET.FAILED";
 }
 
 /// <summary>

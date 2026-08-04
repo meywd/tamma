@@ -41,6 +41,22 @@ public sealed class ActionGateEventsService
     public const string EvaluationFailedType = "ACTION.GATE.EVALUATION_FAILED";
     public const string AssignmentChangedType = "ACTION.GATE.ASSIGNMENT_CHANGED";
 
+    /// <summary>Story 43-14 (AC8, D9) — a workflow approval MINTED a
+    /// correlation-standing grant. Carries actor, workflow instance, chain, scope,
+    /// correlation and the target set, so a human's "yes" and the grants it
+    /// produced are one auditable fact.</summary>
+    public const string GrantMintedType = "ACTION.GATE.GRANT_MINTED";
+
+    /// <summary>
+    /// F11 — ONE row per decision that the break-glass override let through a
+    /// degraded read instead of failing closed. Distinct type, not a tag on
+    /// <see cref="AllowedType"/>: "an operator suspended the fail-closed posture
+    /// and this specific action proceeded because of it" is the fact a reviewer
+    /// after the outage needs to select on, and it must not be lost inside the
+    /// allow stream or filtered out by the volume gate.
+    /// </summary>
+    public const string BreakGlassBypassType = "ACTION.GATE.BREAK_GLASS_BYPASS";
+
     private readonly IEventRepository _events;
     private readonly ILogger<ActionGateEventsService>? _logger;
 
@@ -71,7 +87,18 @@ public sealed class ActionGateEventsService
             _ => AllowedType,
         };
 
-        if (type == AllowedType && decision.Source == ActionAssignmentSource.SystemDefault)
+        if (type == AllowedType
+            && decision.Source == ActionAssignmentSource.SystemDefault
+            // Story 43-13 (D9) — ONE carve-out: an allow whose reason is "the
+            // caller is a person" is precisely the caller-kind predicate's work
+            // product and must reach the audit stream even at SystemDefault
+            // source ("passed because human" must be distinguishable from
+            // "automated at level"). Volume risk is bounded: human traffic on
+            // enforced routes is zero today (all 16 are EngineServiceOnly).
+            // Machinery short-circuit allows deliberately keep SystemDefault
+            // source and STAY suppressed — Seam D would otherwise emit one row
+            // per actor per tick.
+            && decision.Reason != AutonomyGateEvaluator.ReasonCallerHuman)
         {
             return; // volume gate — "nothing happened" rows are noise
         }
@@ -87,6 +114,22 @@ public sealed class ActionGateEventsService
             ["assignmentSource"] = SourceWire(decision.Source),
             ["outcome"] = decision.Outcome.ToString().ToLowerInvariant(),
             ["enforced"] = decision.Enforced ? "true" : "false",
+            // F6 — a queryable "this decision was made over an unreadable policy
+            // input" tag, so a degraded window is one tag filter away rather
+            // than an inference from provenance. F11 — a break-glass bypass is
+            // ALSO a decision made over an unreadable input (it can only occur
+            // under degradation), so it sets the same tag; `assignmentSource`
+            // and the dedicated BREAK_GLASS_BYPASS row are what tell the two
+            // apart.
+            ["degraded"] = decision.Source
+                is ActionAssignmentSource.Unavailable or ActionAssignmentSource.BreakGlass
+                ? "true" : "false",
+            ["breakGlass"] =
+                decision.Source == ActionAssignmentSource.BreakGlass ? "true" : "false",
+            // Story 43-13 AC8 — WHO the decision was taken for, so the trail
+            // distinguishes "passed because human" from "automated at level"
+            // from "machinery, not dial-governed".
+            ["callerKind"] = query.Caller.ToWire(),
         };
         if (query.Role is not null) tags["role"] = query.Role;
         if (query.CorrelationId is not null) tags["correlationId"] = query.CorrelationId;
@@ -107,6 +150,66 @@ public sealed class ActionGateEventsService
             decision.Enforced && type is DeniedType or RequiresHumanType;
         await AppendAsync(type, query.Principal.TenantId, tags, data, mustNotSwallow)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// F11 — record ONE bypassed decision. <b>Deliberately on the NON-SWALLOWING
+    /// append path</b>, unlike every other allow-shaped emission here.
+    ///
+    /// <para>The F6 close reasoned that rethrowing on a failed audit append for an
+    /// ALLOW would turn an event-store blip into a second outage on a surface that
+    /// is deliberately staying open, and that reasoning still governs
+    /// <c>.ALLOWED</c>. Break-glass is the one exception, because the audit row is
+    /// not commentary on the decision — it IS the justification for having a
+    /// bypass at all. An unrecorded bypass is indistinguishable from an
+    /// unauthorised one, and "loud and audited" is the entire condition on which
+    /// this lever exists. So a bypass that cannot be recorded does not happen
+    /// quietly; the append failure propagates.</para>
+    /// </summary>
+    /// <param name="seam">Which enforcement surface bypassed (<c>tool-loop</c>,
+    /// <c>autonomy-gate</c>) — a bypass at Seam B and one at a 43-9 seam have very
+    /// different blast radii and a reviewer must be able to tell them apart.</param>
+    public Task EmitBreakGlassBypassAsync(
+        string actionKeyWire,
+        string? actionGroupWire,
+        BreakGlassState breakGlass,
+        string seam,
+        string outcome,
+        int autonomyLevel,
+        int? effectiveMinAutonomy,
+        Guid? tenantId = null,
+        Guid? userId = null,
+        string? correlationId = null,
+        string? degradedReason = null)
+    {
+        ArgumentNullException.ThrowIfNull(breakGlass);
+
+        var tags = new Dictionary<string, string?>
+        {
+            ["actionKey"] = actionKeyWire,
+            ["outcome"] = outcome,
+            ["seam"] = seam,
+            ["breakGlass"] = "true",
+            ["degraded"] = "true",
+            ["assignmentSource"] = SourceWire(ActionAssignmentSource.BreakGlass),
+            ["autonomyLevel"] = autonomyLevel.ToString(),
+            ["expiresAtUtc"] = breakGlass.ExpiresAtUtc?.ToString("O"),
+        };
+        if (actionGroupWire is not null) tags["actionGroup"] = actionGroupWire;
+        if (effectiveMinAutonomy is int m) tags["effectiveMinAutonomy"] = m.ToString();
+        if (correlationId is not null) tags["correlationId"] = correlationId;
+        if (tenantId is Guid t) tags["tenantId"] = t.ToString();
+        if (userId is Guid u) tags["userId"] = u.ToString();
+
+        return AppendAsync(
+            BreakGlassBypassType, tenantId, tags,
+            new Dictionary<string, object?>
+            {
+                ["reason"] = breakGlass.ReasonOrUnspecified,
+                ["expiresAtUtc"] = breakGlass.ExpiresAtUtc?.ToString("O"),
+                ["degradedReason"] = degradedReason,
+            },
+            mustNotSwallow: true);
     }
 
     /// <summary>SaaS request with no resolvable tenant — resolved against the
@@ -130,10 +233,16 @@ public sealed class ActionGateEventsService
 
     /// <summary>An admin changed an assignment (43-6's write path; the change
     /// itself is the durable fact — this event is best-effort).</summary>
+    /// <param name="dialAtMint">Story 43-15 (Amendment 2-E) — the dial position
+    /// when a per-action TOGGLE was minted. The toggle row itself always stores
+    /// <c>AutonomyDial.Min</c> ("automated, period"), a constant function of the
+    /// dial; the mint-time dial is provenance and lives HERE, in the audit event,
+    /// never in the arithmetic. Null for every non-toggle assignment change.</param>
     public Task EmitAssignmentChangedAsync(
         Guid? tenantId, Guid? userId, Guid? actorUserId,
         string scope, string targetKind, string targetKey,
-        string field, object? oldValue, object? newValue)
+        string field, object? oldValue, object? newValue,
+        int? dialAtMint = null)
     {
         var tags = new Dictionary<string, string?>
         {
@@ -145,12 +254,51 @@ public sealed class ActionGateEventsService
         if (tenantId is Guid t) tags["tenantId"] = t.ToString();
         if (userId is Guid u) tags["userId"] = u.ToString();
         if (actorUserId is Guid a) tags["actorUserId"] = a.ToString();
+        if (dialAtMint is int d) tags["dialAtMint"] = d.ToString();
         return AppendAsync(AssignmentChangedType, tenantId, tags,
             new Dictionary<string, object?>
             {
                 ["field"] = field,
                 ["oldValue"] = oldValue,
                 ["newValue"] = newValue,
+                ["dialAtMint"] = dialAtMint,
+            },
+            mustNotSwallow: false);
+    }
+
+    /// <summary>
+    /// Story 43-15 (D7) — SERVER-authored record that lowering the base dial left
+    /// one or more per-action toggles standing above the new dial. Emitted from
+    /// the acceptance-rules base-row write when the dial DECREASES; the surviving
+    /// toggle wires are the durable list an auditor reviews. "Declining the bulk
+    /// revoke" is then structural: this event with its list, followed — or not —
+    /// by the individual <see cref="AssignmentChangedType"/> deletions.
+    /// Best-effort, like <see cref="AssignmentChangedType"/> — the assignment
+    /// rows are the durable fact.
+    /// </summary>
+    public const string TogglesSurvivedDialLowerType =
+        "ACTION.GATE.TOGGLES_SURVIVED_DIAL_LOWER";
+
+    /// <summary>Emit the dial-lower survival record (D7).</summary>
+    public Task EmitTogglesSurvivedDialLowerAsync(
+        Guid? tenantId, Guid? userId, Guid? actorUserId,
+        int fromDial, int toDial, IReadOnlyList<string> survivingToggleWires)
+    {
+        var tags = new Dictionary<string, string?>
+        {
+            ["fromDial"] = fromDial.ToString(),
+            ["toDial"] = toDial.ToString(),
+            ["survivingCount"] = survivingToggleWires.Count.ToString(),
+        };
+        if (tenantId is Guid t) tags["tenantId"] = t.ToString();
+        if (userId is Guid u) tags["userId"] = u.ToString();
+        if (actorUserId is Guid a) tags["actorUserId"] = a.ToString();
+        return AppendAsync(TogglesSurvivedDialLowerType, tenantId, tags,
+            new Dictionary<string, object?>
+            {
+                ["fromDial"] = fromDial,
+                ["toDial"] = toDial,
+                ["survivingToggles"] = survivingToggleWires,
             },
             mustNotSwallow: false);
     }
@@ -169,6 +317,43 @@ public sealed class ActionGateEventsService
         if (userId is Guid u) tags["userId"] = u.ToString();
         return AppendAsync(AuthorizedType, tenantId, tags,
             new Dictionary<string, object?>(), mustNotSwallow: false);
+    }
+
+    /// <summary>
+    /// Story 43-14 (AC8, D9) — record that a workflow's human approval minted
+    /// correlation-standing grants for a chain's gated targets. On the SWALLOWING
+    /// path: the grant ROW is the durable record (the block-not-recorded rule of
+    /// D12/43-9 protects denials, not grants), so a mint that cannot be audited
+    /// still mints. Records actor (<paramref name="decidedByUserId"/> +
+    /// <paramref name="approver"/>), the workflow instance, chain name, scope and
+    /// the minted target set (AC8).
+    /// </summary>
+    public Task EmitGrantMintedAsync(
+        Guid? tenantId, Guid? userId,
+        string chainName, string correlationId, string? workflowInstanceId,
+        Guid decidedByUserId, string? approver,
+        IReadOnlyList<string> targetKeys)
+    {
+        var tags = new Dictionary<string, string?>
+        {
+            ["chain"] = chainName,
+            ["correlationId"] = correlationId,
+            ["scope"] = "correlation-standing",
+            ["decidedByUserId"] = decidedByUserId.ToString(),
+            ["targetCount"] = targetKeys.Count.ToString(),
+        };
+        if (workflowInstanceId is not null) tags["workflowInstanceId"] = workflowInstanceId;
+        if (approver is not null) tags["approver"] = approver;
+        if (tenantId is Guid t) tags["tenantId"] = t.ToString();
+        if (userId is Guid u) tags["userId"] = u.ToString();
+        return AppendAsync(GrantMintedType, tenantId, tags,
+            new Dictionary<string, object?>
+            {
+                ["chain"] = chainName,
+                ["targets"] = targetKeys,
+                ["approver"] = approver,
+            },
+            mustNotSwallow: false);
     }
 
     /// <summary>A pending authorization was denied by a person.</summary>
@@ -193,6 +378,15 @@ public sealed class ActionGateEventsService
         ActionAssignmentSource.AlwaysEscalateLegacy => "always-escalate-legacy",
         ActionAssignmentSource.ActionOverride => "action-override",
         ActionAssignmentSource.GroupOverride => "group-override",
+        // F6 — a fail-closed decision made over an UNREADABLE policy input. It
+        // must never share a wire value with system-default: "we applied the
+        // shipped default" and "we could not read policy and refused to
+        // automate" are opposite facts about the same audit stream.
+        ActionAssignmentSource.Unavailable => "policy-unavailable",
+        // F11 — a THIRD value. It must not share a wire with `policy-unavailable`
+        // (that one means the gate REFUSED) nor with `system-default` (that one
+        // means nothing was wrong).
+        ActionAssignmentSource.BreakGlass => "break-glass",
         _ => "system-default",
     };
 

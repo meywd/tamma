@@ -678,6 +678,8 @@ POST  /api/admin/tenants/{tenantId}/deprovision
 
 ## Notes for Claude Code
 
+- **Be concise. No jargon.** Plain English, exact claims, short answers. Don't invent terms; don't pad.
+
 - **Story-driven development**: Each story in `docs/stories/` has comprehensive technical context and acceptance criteria.
 - **Test-first approach**: Write tests before implementation (TDD workflow).
 - **Event emission**: Every operation must emit events for audit trail.

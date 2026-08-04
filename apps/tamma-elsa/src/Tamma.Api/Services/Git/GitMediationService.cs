@@ -81,6 +81,10 @@ public sealed class GitMediationService : IGitMediationService
         => ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrCommentsReadOperation, GitEventTypes.PrCommentsReadFailed, correlationId, ct,
             () => GetPullRequestCommentsCoreAsync(tenantId, repo, prNumber, correlationId, ct));
 
+    public Task<GitMediationResult> GetPullRequestAsync(Guid? tenantId, string repo, int prNumber, string correlationId, CancellationToken ct = default)
+        => ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrDetailsReadOperation, GitEventTypes.PrDetailsReadFailed, correlationId, ct,
+            () => GetPullRequestCoreAsync(tenantId, repo, prNumber, correlationId, ct));
+
     public Task<GitMediationResult> GetCommitsAsync(Guid? tenantId, string repo, string branch, DateTime? since, string correlationId, CancellationToken ct = default)
         => ExecuteGuardedAsync(tenantId, repo, GitEventTypes.CommitsReadOperation, GitEventTypes.CommitsReadFailed, correlationId, ct,
             () => GetCommitsCoreAsync(tenantId, repo, branch, since, correlationId, ct));
@@ -98,6 +102,59 @@ public sealed class GitMediationService : IGitMediationService
         ArgumentNullException.ThrowIfNull(body);
         return ExecuteGuardedAsync(tenantId, repo, GitEventTypes.ReleaseCreateOperation, GitEventTypes.ReleaseCreatedFailed, body.CorrelationId, ct,
             () => CreateReleaseCoreAsync(tenantId, repo, body, ct));
+    }
+
+    // ===================================================================
+    // Story 31-13 — the 7 PR-lifecycle verbs (public wrappers)
+    // ===================================================================
+
+    public Task<GitMediationResult> ClosePullRequestAsync(Guid? tenantId, string repo, int prNumber, ClosePrRequest body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        return ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrCloseOperation, GitEventTypes.PrClosedFailed, body.CorrelationId, ct,
+            () => ClosePullRequestCoreAsync(tenantId, repo, prNumber, body, ct));
+    }
+
+    public Task<GitMediationResult> ReopenPullRequestAsync(Guid? tenantId, string repo, int prNumber, ReopenPrRequest body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        return ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrReopenOperation, GitEventTypes.PrReopenedFailed, body.CorrelationId, ct,
+            () => ReopenPullRequestCoreAsync(tenantId, repo, prNumber, body, ct));
+    }
+
+    public Task<GitMediationResult> CommentOnPullRequestAsync(Guid? tenantId, string repo, int prNumber, PrCommentRequest body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        return ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrCommentOperation, GitEventTypes.PrCommentedFailed, body.CorrelationId, ct,
+            () => CommentOnPullRequestCoreAsync(tenantId, repo, prNumber, body, ct));
+    }
+
+    public Task<GitMediationResult> ReviewCommentOnPullRequestAsync(Guid? tenantId, string repo, int prNumber, PrReviewCommentRequest body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        return ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrReviewCommentOperation, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, ct,
+            () => ReviewCommentOnPullRequestCoreAsync(tenantId, repo, prNumber, body, ct));
+    }
+
+    public Task<GitMediationResult> RequestPullRequestReviewersAsync(Guid? tenantId, string repo, int prNumber, PrReviewersRequest body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        return ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrReviewersRequestOperation, GitEventTypes.PrReviewersRequestedFailed, body.CorrelationId, ct,
+            () => RequestPullRequestReviewersCoreAsync(tenantId, repo, prNumber, body, ct));
+    }
+
+    public Task<GitMediationResult> UpdatePullRequestLabelsAsync(Guid? tenantId, string repo, int prNumber, PrLabelsRequest body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        return ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrLabelsUpdateOperation, GitEventTypes.PrLabelsUpdatedFailed, body.CorrelationId, ct,
+            () => UpdatePullRequestLabelsCoreAsync(tenantId, repo, prNumber, body, ct));
+    }
+
+    public Task<GitMediationResult> SetPullRequestDraftAsync(Guid? tenantId, string repo, int prNumber, PrDraftRequest body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        return ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrDraftSetOperation, GitEventTypes.PrDraftSetFailed, body.CorrelationId, ct,
+            () => SetPullRequestDraftCoreAsync(tenantId, repo, prNumber, body, ct));
     }
 
     /// <summary>
@@ -470,6 +527,41 @@ public sealed class GitMediationService : IGitMediationService
     }
 
     // ===================================================================
+    // Read PR details (Story 43-12) — the merge-target base-branch read
+    // ===================================================================
+
+    private async Task<GitMediationResult> GetPullRequestCoreAsync(Guid? tenantId, string repo, int prNumber, string correlationId, CancellationToken ct)
+    {
+        var op = GitEventTypes.PrDetailsReadOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrDetailsReadFailed, correlationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrDetailsReadFailed, correlationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        var res = await github.GetGitHubPullRequestAsync(repo, prNumber).ConfigureAwait(false);
+
+        if (!res.Success || res.Data is null)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrDetailsReadFailed, correlationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "Done",
+            PrNumber = res.Data.Number,
+            TargetBranch = res.Data.BaseBranch,
+            CorrelationId = correlationId,
+        };
+        await EmitAsync(GitEventTypes.PrDetailsReadSuccess, op, tenantId, repo, correlationId, cred.Source, null,
+            new { prNumber, baseBranch = res.Data.BaseBranch }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    // ===================================================================
     // GitHub extra ops (Story 38 Phase 1) — commits / file-changes reads + delete
     // ===================================================================
 
@@ -653,6 +745,242 @@ public sealed class GitMediationService : IGitMediationService
         };
         await EmitAsync(failedEventType, operation, tenantId, repo, correlationId, credentialSource, failCode, data, ct).ConfigureAwait(false);
         return fail;
+    }
+
+    // ===================================================================
+    // Story 31-13 — PR-lifecycle verb cores (guard → token → platform →
+    // exactly one terminal event). Failures route through the shared
+    // ReadFailAsync helper (key-free NOT_FOUND / PLATFORM_ERROR + one FAILED event).
+    // ===================================================================
+
+    private async Task<GitMediationResult> ClosePullRequestCoreAsync(Guid? tenantId, string repo, int prNumber, ClosePrRequest body, CancellationToken ct)
+    {
+        var op = GitEventTypes.PrCloseOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrClosedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrClosedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        var res = await github.ClosePullRequestAsync(repo, prNumber).ConfigureAwait(false);
+
+        if (!res.Success || res.Data is null)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrClosedFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "Closed",
+            PrNumber = res.Data.Number,
+            PrState = res.Data.State,
+            CorrelationId = body.CorrelationId,
+        };
+        await EmitAsync(GitEventTypes.PrClosedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+            new { prNumber, state = res.Data.State }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    private async Task<GitMediationResult> ReopenPullRequestCoreAsync(Guid? tenantId, string repo, int prNumber, ReopenPrRequest body, CancellationToken ct)
+    {
+        var op = GitEventTypes.PrReopenOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrReopenedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrReopenedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        var res = await github.ReopenPullRequestAsync(repo, prNumber).ConfigureAwait(false);
+
+        if (!res.Success || res.Data is null)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReopenedFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "Reopened",
+            PrNumber = res.Data.Number,
+            PrState = res.Data.State,
+            CorrelationId = body.CorrelationId,
+        };
+        await EmitAsync(GitEventTypes.PrReopenedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+            new { prNumber, state = res.Data.State }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    private async Task<GitMediationResult> CommentOnPullRequestCoreAsync(Guid? tenantId, string repo, int prNumber, PrCommentRequest body, CancellationToken ct)
+    {
+        var op = GitEventTypes.PrCommentOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrCommentedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrCommentedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        // A PR IS an issue on GitHub — reuse the issue-comment path with the PR number.
+        var res = await github.PostIssueCommentAsync(repo, prNumber, body.Body).ConfigureAwait(false);
+
+        if (!res.Success)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrCommentedFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "Commented",
+            PrNumber = prNumber,
+            CorrelationId = body.CorrelationId,
+        };
+        await EmitAsync(GitEventTypes.PrCommentedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+            new { prNumber }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    private async Task<GitMediationResult> ReviewCommentOnPullRequestCoreAsync(Guid? tenantId, string repo, int prNumber, PrReviewCommentRequest body, CancellationToken ct)
+    {
+        var op = GitEventTypes.PrReviewCommentOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        var res = await github.PostPullRequestReviewCommentAsync(repo, prNumber, body.Body, body.CommitId, body.Path, body.Line, body.Side).ConfigureAwait(false);
+
+        if (!res.Success || res.Data is null)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "Commented",
+            PrNumber = prNumber,
+            CommentId = res.Data.Id,
+            CorrelationId = body.CorrelationId,
+        };
+        await EmitAsync(GitEventTypes.PrReviewCommentedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+            new { prNumber, commentId = res.Data.Id }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    private async Task<GitMediationResult> RequestPullRequestReviewersCoreAsync(Guid? tenantId, string repo, int prNumber, PrReviewersRequest body, CancellationToken ct)
+    {
+        var op = GitEventTypes.PrReviewersRequestOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrReviewersRequestedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrReviewersRequestedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        var res = await github.RequestReviewersAsync(repo, prNumber, body.Reviewers).ConfigureAwait(false);
+
+        if (!res.Success)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReviewersRequestedFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "ReviewersRequested",
+            PrNumber = prNumber,
+            CorrelationId = body.CorrelationId,
+        };
+        await EmitAsync(GitEventTypes.PrReviewersRequestedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+            new { prNumber, reviewerCount = body.Reviewers.Count }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    private async Task<GitMediationResult> UpdatePullRequestLabelsCoreAsync(Guid? tenantId, string repo, int prNumber, PrLabelsRequest body, CancellationToken ct)
+    {
+        var op = GitEventTypes.PrLabelsUpdateOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrLabelsUpdatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrLabelsUpdatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+
+        // D2 — add then remove in ONE op; a PR IS an issue on GitHub (pass the PR
+        // number). The first failure surfaces a loud typed failure (no partial success).
+        if (body.AddLabels is { Count: > 0 })
+        {
+            var added = await github.AddIssueLabelsAsync(repo, prNumber, body.AddLabels.ToArray()).ConfigureAwait(false);
+            if (!added.Success)
+                return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrLabelsUpdatedFailed, body.CorrelationId, cred.Source, added.Error, new { prNumber }, ct).ConfigureAwait(false);
+        }
+
+        if (body.RemoveLabels is { Count: > 0 })
+        {
+            foreach (var label in body.RemoveLabels)
+            {
+                var removed = await github.RemoveIssueLabelAsync(repo, prNumber, label).ConfigureAwait(false);
+                if (!removed.Success)
+                    return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrLabelsUpdatedFailed, body.CorrelationId, cred.Source, removed.Error, new { prNumber }, ct).ConfigureAwait(false);
+            }
+        }
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "LabelsUpdated",
+            PrNumber = prNumber,
+            CorrelationId = body.CorrelationId,
+        };
+        await EmitAsync(GitEventTypes.PrLabelsUpdatedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+            new { prNumber }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    private async Task<GitMediationResult> SetPullRequestDraftCoreAsync(Guid? tenantId, string repo, int prNumber, PrDraftRequest body, CancellationToken ct)
+    {
+        var op = GitEventTypes.PrDraftSetOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrDraftSetFailed, body.CorrelationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrDraftSetFailed, body.CorrelationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        var res = await github.SetPullRequestDraftAsync(repo, prNumber, body.Draft).ConfigureAwait(false);
+
+        if (!res.Success || res.Data is null)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrDraftSetFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "DraftSet",
+            PrNumber = res.Data.Number,
+            IsDraft = res.Data.IsDraft,
+            CorrelationId = body.CorrelationId,
+        };
+        await EmitAsync(GitEventTypes.PrDraftSetSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+            new { prNumber, isDraft = res.Data.IsDraft }, ct).ConfigureAwait(false);
+        return ok;
     }
 
     // ===================================================================

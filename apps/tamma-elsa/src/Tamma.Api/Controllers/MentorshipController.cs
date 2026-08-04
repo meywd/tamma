@@ -1,8 +1,10 @@
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Tamma.Api.Infrastructure;
 using Tamma.Api.Models;
 using Tamma.Api.Services;
+using Tamma.Core.Actions;
 using Tamma.Core.Interfaces;
 
 namespace Tamma.Api.Controllers;
@@ -51,6 +53,13 @@ public partial class MentorshipController : ControllerBase
     /// Start a new mentorship session
     /// </summary>
     [HttpPost("start")]
+    // Story 43-8 AC1 step 2 — the [Governs] authoring shape, on the repo's only
+    // attribute-routed controller. The wire string is checked against
+    // ActionCatalog.ByKey AND against this route's own pattern (SiteKey ==
+    // "{METHOD} {RawText}") by GovernedEndpointBindingSweepTests, so a typo or a
+    // binding to somebody else's action fails the build rather than silently
+    // governing nothing. Metadata only: Story 43-9 attaches the enforcement filter.
+    [Governs(ActionNamespace.Effect, "mentorship.session.start")]
     [ProducesResponseType(typeof(MentorshipStartResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -139,6 +148,7 @@ public partial class MentorshipController : ControllerBase
     /// Pause a session
     /// </summary>
     [HttpPost("sessions/{sessionId:guid}/pause")]
+    [Governs(ActionNamespace.Effect, "mentorship.session.pause")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> PauseSession(Guid sessionId)
@@ -162,6 +172,7 @@ public partial class MentorshipController : ControllerBase
     /// Resume a paused session
     /// </summary>
     [HttpPost("sessions/{sessionId:guid}/resume")]
+    [Governs(ActionNamespace.Effect, "mentorship.session.resume")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> ResumeSession(Guid sessionId)
@@ -185,6 +196,7 @@ public partial class MentorshipController : ControllerBase
     /// Cancel a session
     /// </summary>
     [HttpPost("sessions/{sessionId:guid}/cancel")]
+    [Governs(ActionNamespace.Effect, "mentorship.session.cancel")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> CancelSession(Guid sessionId)

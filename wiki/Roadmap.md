@@ -137,7 +137,7 @@ This wave makes the platform's implicit domain language explicit and extends the
 
 ### Epic 42 — Agent Capability & Tool Layer (Planned / docs)
 
-**Layer 4** — 9 stories, backlog. Makes the coding-only tool framework first-class: a `ToolDescriptor` (category / permission class / autonomy floor / required secret / suspends) on `IToolExecutor` with deny-by-default governance, a dynamic + MCP registry seam, a two-scoping `tool_bindings` store, per-tool autonomy gating in `ResolveToolsActivity` that routes destructive/above-floor calls through the Epic 39 `AcceptanceRequest` channel, secret binding via Epic 29's `ISecretStore`, and durable `TOOL.*` DCB audit. Tool families: cloud/VPS ops, feature-flag & deploy control, authenticated HTTP, and MCP-exposed tools — the missing foundation under Epic 41's non-code task kinds.
+**Layer 4** — 9 stories, backlog. Makes the coding-only tool framework first-class: a `ToolDescriptor` (category / permission class / autonomy floor / required secret / suspends) on `IToolExecutor` with deny-by-default governance, a dynamic + MCP registry seam, a two-scoping `tool_bindings` store, per-tool autonomy gating at the tool-resolution seam (`IToolExecutorRegistry` / the API-side tool loop — **not** `ResolveToolsActivity`, which Story 43-0 deleted as dead code on 2026-07-29 and did not replace) that routes destructive/above-floor calls through the Epic 39 `AcceptanceRequest` channel, secret binding via Epic 29's `ISecretStore`, and durable `TOOL.*` DCB audit. Tool families: cloud/VPS ops, feature-flag & deploy control, authenticated HTTP, and MCP-exposed tools — the missing foundation under Epic 41's non-code task kinds.
 
 ---
 

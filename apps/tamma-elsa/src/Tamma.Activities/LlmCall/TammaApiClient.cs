@@ -5,8 +5,81 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Core.Actions;
 
 namespace Tamma.Activities.LlmCall;
+
+/// <summary>
+/// Story 43-9 <b>Seam C</b>, surfaced client-side by the 2026-08-01 review finding
+/// F5 — the parsed body of an HTTP 409 governance denial.
+///
+/// <para>A denial is NOT an outage, and the whole point of this type is that the
+/// caller can tell. An outage is transient and clears itself; a denial is a
+/// deterministic policy decision that repeats identically on every retry until a
+/// person decides the pending authorization or an admin lowers the action's
+/// threshold. Before this existed, <c>TammaApiClient</c> collapsed both into the
+/// same <c>null</c>, so tightening any enforced action handed the engine a
+/// permanent block that its <c>RetryCheck</c> / circuit-breaker logic read as a
+/// retryable platform failure.</para>
+///
+/// <para>Shape mirrors <c>AutonomyGateEnforcement.Denial</c> exactly. Fields are
+/// nullable because the fail-CLOSED wiring-fault arm
+/// (<see cref="MisconfiguredCode"/>) carries only <c>code</c> and <c>error</c>.</para>
+/// </summary>
+/// <param name="Code">
+/// <see cref="RequiresHumanCode"/> (a policy decision) or
+/// <see cref="MisconfiguredCode"/> (an enforced route with no binding / no gate —
+/// a deployment fault the engine cannot fix by retrying either).
+/// </param>
+/// <param name="Action">The catalog key wire that was refused.</param>
+/// <param name="Group">The action's group wire.</param>
+/// <param name="AutonomyLevel">The dial position the decision was taken at.</param>
+/// <param name="EffectiveMinAutonomy">The composed threshold that was applied.</param>
+/// <param name="AuthorizationId">
+/// The pending <c>action_authorizations</c> row a person can decide on, when the
+/// server minted one. Null means nobody can clear this block by approving — only
+/// a policy change can.
+/// </param>
+/// <param name="CorrelationId">The run the decision was scoped to.</param>
+/// <param name="Reason">Machine-readable decision reason.</param>
+/// <param name="AssignmentSource">Provenance wire of the winning tier.</param>
+/// <param name="Error">Human-readable remediation text from the server.</param>
+public sealed record TammaApiGovernanceDenial(
+    string? Code = null,
+    string? Action = null,
+    string? Group = null,
+    int? AutonomyLevel = null,
+    int? EffectiveMinAutonomy = null,
+    Guid? AuthorizationId = null,
+    string? CorrelationId = null,
+    string? Reason = null,
+    string? AssignmentSource = null,
+    string? Error = null)
+{
+    /// <summary>A policy decision: the system may not do this without a person.</summary>
+    public const string RequiresHumanCode = "ACTION.GATE.REQUIRES_HUMAN";
+
+    /// <summary>The fail-CLOSED static-wiring-fault arm.</summary>
+    public const string MisconfiguredCode = "ACTION.GATE.MISCONFIGURED";
+
+    /// <summary>
+    /// True only for the two codes the gate actually mints. Keeps an unrelated 409
+    /// (optimistic concurrency, duplicate resource) from being mistaken for a
+    /// governance refusal.
+    /// </summary>
+    public bool IsGovernanceDenial =>
+        string.Equals(Code, RequiresHumanCode, StringComparison.Ordinal)
+        || string.Equals(Code, MisconfiguredCode, StringComparison.Ordinal);
+
+    /// <summary>
+    /// True when a human CAN clear this block by deciding the pending row. False
+    /// means retrying and waiting are both pointless — only a policy or wiring
+    /// change moves it.
+    /// </summary>
+    public bool IsClearableByAHuman =>
+        string.Equals(Code, RequiresHumanCode, StringComparison.Ordinal)
+        && AuthorizationId is not null;
+}
 
 /// <summary>
 /// Story 9-11: Shared HTTP client for calling the Tamma API (Fastify in TS,
@@ -66,6 +139,91 @@ public class TammaApiClient
     /// <summary>Base URL in use (test hook).</summary>
     public string BaseUrl => _baseUrl;
 
+    // ----- Governance denials (2026-08-01 review finding F5) -------------
+
+    /// <summary>
+    /// The Seam C governance denial observed by the MOST RECENT call on this client
+    /// instance, or <c>null</c> if that call was not refused by the autonomy gate.
+    ///
+    /// <para><b>Why this exists.</b> Every method here collapses a non-2xx into
+    /// <c>null</c>, so the HTTP 409 that Story 43-9 introduced was indistinguishable
+    /// from a 503 or a socket reset. The two could not be more different: an outage
+    /// is transient and clears itself, a governance denial is a PERMANENT,
+    /// deterministic refusal that repeats identically on every retry until a person
+    /// grants the pending authorization or an admin lowers the action's threshold.
+    /// An activity that treats a denial as a retryable outage burns its whole retry
+    /// budget and then reports a platform failure for what is a policy decision. The
+    /// irony is recorded in <c>AutonomyGateEnforcement</c>: D7 chose 409 over 202
+    /// BECAUSE this client "discriminates on nothing but IsSuccessStatusCode" — the
+    /// same sentence is why the denial then arrived as an outage.</para>
+    ///
+    /// <para><b>Contract.</b> Cleared at the START of every request this client
+    /// makes, so it can never be read stale: after any call, a non-null value means
+    /// THAT call was governance-denied. It is deliberately additive — every existing
+    /// method keeps returning <c>null</c> on a 409 and no caller changes shape.</para>
+    ///
+    /// <para><b>Lifetime.</b> <c>AddHttpClient&lt;TammaApiClient&gt;()</c> registers
+    /// the typed client TRANSIENT, so each <c>GetService&lt;TammaApiClient&gt;()</c>
+    /// in an activity gets its own instance and this reads unambiguously. It is NOT
+    /// safe to interleave concurrent calls on ONE instance and then read this — if a
+    /// future caller does that, it must capture the denial per call instead.</para>
+    /// </summary>
+    public TammaApiGovernanceDenial? LastGovernanceDenial { get; private set; }
+
+    /// <summary>
+    /// Clear the denial slot at the start of a request, so a stale denial from an
+    /// earlier call can never be attributed to this one.
+    /// </summary>
+    private void BeginRequest() => LastGovernanceDenial = null;
+
+    /// <summary>
+    /// Recognise a Seam C denial on a non-2xx response and record it. Returns true
+    /// when the response WAS a governance denial (the caller still returns null —
+    /// this only makes the refusal legible).
+    ///
+    /// <para>Narrow on purpose: ONLY an HTTP 409 whose body carries one of the two
+    /// <c>ACTION.GATE.*</c> codes counts. Any other 409 (an optimistic-concurrency
+    /// conflict, a duplicate-resource refusal) is left exactly as it was, and an
+    /// unparseable body degrades to "not a governance denial" rather than throwing
+    /// inside an error path.</para>
+    /// </summary>
+    private async Task<bool> TryRecordGovernanceDenialAsync(
+        HttpResponseMessage response, CancellationToken ct)
+    {
+        if (response.StatusCode != HttpStatusCode.Conflict) return false;
+
+        TammaApiGovernanceDenial? denial = null;
+        try
+        {
+            denial = await response.Content
+                .ReadFromJsonAsync<TammaApiGovernanceDenial>(JsonOpts, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            // A 409 with a body we cannot read is not a governance denial we can
+            // describe; fall through and let it stay an ordinary non-2xx.
+            _logger.LogDebug(ex, "Tamma API 409 body was not a governance denial envelope");
+        }
+
+        if (denial is null || !denial.IsGovernanceDenial) return false;
+
+        LastGovernanceDenial = denial;
+
+        // A DISTINCT log line. "returned 409" in a sea of transport warnings is how
+        // an operator spends an hour looking for an outage that is really a policy
+        // row somebody changed this morning.
+        _logger.LogWarning(
+            "Tamma API refused a governed action: {Code} for {Action} (group {Group}); "
+            + "autonomyLevel={AutonomyLevel} < effectiveMinAutonomy={EffectiveMin}; "
+            + "authorizationId={AuthorizationId}. This is a POLICY DECISION, not an outage — "
+            + "retrying will fail identically until a person decides or the threshold changes.",
+            denial.Code, denial.Action, denial.Group,
+            denial.AutonomyLevel, denial.EffectiveMinAutonomy, denial.AuthorizationId);
+
+        return true;
+    }
+
     // ----- Agent Resolution --------------------------------------------
 
     public Task<AgentResolveResult?> ResolveAgentAsync(
@@ -106,6 +264,7 @@ public class TammaApiClient
     /// <c>null</c> per the existing contract; the shim treats that as a transient
     /// (httpStatusCode 0) failure so the workflow's RetryCheck advances.</para>
     /// </summary>
+    [PerformsEffect(ExternalEffect.LlmCall)]
     public Task<LlmCallApiResponse?> CallLlmAsync(
         LlmCallApiRequest request,
         string? tenantId = null,
@@ -125,6 +284,7 @@ public class TammaApiClient
     /// 401 / transport), which the thin activity maps to its Error outcome
     /// (fail-closed). The token is resolved + used server-side; it never travels here.
     /// </summary>
+    [PerformsEffect(ExternalEffect.GitBranchCreate)]
     public Task<GitCallResponse?> CreateBranchAsync(
         string repo, GitCreateBranchRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -133,6 +293,7 @@ public class TammaApiClient
     }
 
     /// <summary>Story 38-1 (AC5) — <c>POST /api/v1/git/{owner}/{repo}/pull-requests</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestCreate)]
     public Task<GitCallResponse?> CreatePullRequestAsync(
         string repo, GitCreatePrRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -140,7 +301,13 @@ public class TammaApiClient
         return PostAsync<GitCallResponse>(url, request, tenantId, ct);
     }
 
-    /// <summary>Story 38-1 (AC5) — <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge</c>.</summary>
+    /// <summary>Story 38-1 (AC5) — <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge</c>.
+    /// Story 43-12: the coarse effect:git.pull-request.merge is retired; this ONE method
+    /// performs one of the per-target merge keys (chosen at the gate by the PR base
+    /// branch), so it carries all three [PerformsEffect] attributes.</summary>
+    [PerformsEffect(ExternalEffect.GitMergeDev)]
+    [PerformsEffect(ExternalEffect.GitMergeQa)]
+    [PerformsEffect(ExternalEffect.GitMergeMain)]
     public Task<GitCallResponse?> MergePullRequestAsync(
         string repo, int prNumber, GitMergePrRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -148,7 +315,79 @@ public class TammaApiClient
         return SendJsonAsync<GitCallResponse>(HttpMethod.Put, url, request, tenantId, ct);
     }
 
+    // ----- Story 31-13 — the 7 PR-lifecycle verbs (close / reopen / comment /
+    //       review-comment / reviewers / labels / draft). Each is one governed
+    //       git write on the /api/v1/git/{owner}/{repo}/pull-requests/{n}/…
+    //       mediation plane; the per-tenant token is resolved + used server-side.
+    //       Return null on any non-2xx (guard 403 / token 503 / auth 401 /
+    //       transport / a governance 409), which the thin activity maps to its
+    //       Error edge (fail-closed). ----------------------------------------
+
+    /// <summary>Story 31-13 — <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/close</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestClose)]
+    public virtual Task<GitCallResponse?> ClosePullRequestAsync(
+        string repo, int prNumber, GitClosePrRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/close";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reopen</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestReopen)]
+    public virtual Task<GitCallResponse?> ReopenPullRequestAsync(
+        string repo, int prNumber, GitReopenPrRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/reopen";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestComment)]
+    public virtual Task<GitCallResponse?> CommentOnPullRequestAsync(
+        string repo, int prNumber, GitPrCommentRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/comments";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/review-comments</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestReviewComment)]
+    public virtual Task<GitCallResponse?> ReviewCommentOnPullRequestAsync(
+        string repo, int prNumber, GitPrReviewCommentRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/review-comments";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reviewers</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestRequestReviewers)]
+    public virtual Task<GitCallResponse?> RequestPullRequestReviewersAsync(
+        string repo, int prNumber, GitPrReviewersRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/reviewers";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/labels</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestLabel)]
+    public virtual Task<GitCallResponse?> SetPullRequestLabelsAsync(
+        string repo, int prNumber, GitPrLabelsRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/labels";
+        return SendJsonAsync<GitCallResponse>(HttpMethod.Put, url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/draft</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestSetDraft)]
+    public virtual Task<GitCallResponse?> SetPullRequestDraftAsync(
+        string repo, int prNumber, GitPrDraftRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/draft";
+        return SendJsonAsync<GitCallResponse>(HttpMethod.Put, url, request, tenantId, ct);
+    }
+
     /// <summary>Story 38-1 (AC5) — <c>PATCH /api/v1/git/{owner}/{repo}/issues/{n}</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitIssuePatch)]
     public Task<GitCallResponse?> UpdateIssueStatusAsync(
         string repo, int issueNumber, GitUpdateIssueRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -164,6 +403,7 @@ public class TammaApiClient
     /// any non-2xx / transport failure (the thin activity maps it to its Error edge,
     /// fail-closed).
     /// </summary>
+    [PerformsEffect(ExternalEffect.GitReleaseCreate)]
     public virtual Task<GitCallResponse?> CreateReleaseAsync(
         string repo, GitCreateReleaseRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -214,20 +454,28 @@ public class TammaApiClient
     /// <c>DELETE /api/v1/git/{owner}/{repo}/branches?branch=&amp;correlationId=</c>. The
     /// branch name (may carry a slash) travels as a query param. Write op — fail-closed
     /// (null on any non-2xx / transport failure).</summary>
+    [PerformsEffect(ExternalEffect.GitBranchDelete)]
     public virtual async Task<GitCallResponse?> DeleteBranchAsync(
         string repo, string branchName, string? correlationId = null, string? tenantId = null, CancellationToken ct = default)
     {
         var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/branches?branch={Uri.EscapeDataString(branchName ?? string.Empty)}";
         if (!string.IsNullOrWhiteSpace(correlationId))
             url += $"&correlationId={Uri.EscapeDataString(correlationId)}";
+        BeginRequest();
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Delete, url);
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                // F5 — this route (DELETE /api/v1/git/{owner}/{repo}/branches) is
+                // one of the opted-in enforced set, so it can genuinely answer 409.
+                if (await TryRecordGovernanceDenialAsync(response, ct).ConfigureAwait(false))
+                    return null;
+
                 _logger.LogWarning("Tamma API DELETE returned {Status}", (int)response.StatusCode);
                 return null;
             }
@@ -246,6 +494,7 @@ public class TammaApiClient
     /// <summary>Story 38 (Phase 1) — trigger the CI workflow on a branch via
     /// <c>POST /api/v1/ci/{owner}/{repo}/test-runs</c>. The per-tenant git token is
     /// resolved + used server-side; it never travels here.</summary>
+    [PerformsEffect(ExternalEffect.CiTestsTrigger)]
     public virtual Task<Models.CiCallResponse?> TriggerTestsAsync(
         string repo, Models.CiTriggerTestsRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -280,6 +529,7 @@ public class TammaApiClient
 
     /// <summary>Story 38 (Phase 1) — update a JIRA ticket (status + comment) via
     /// <c>PATCH /api/v1/jira/tickets/{ticketId}</c>.</summary>
+    [PerformsEffect(ExternalEffect.JiraTicketPatch)]
     public virtual Task<Models.JiraCallResponse?> UpdateJiraTicketAsync(
         string ticketId, Models.JiraUpdateTicketRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -297,6 +547,7 @@ public class TammaApiClient
     /// transport), which the thin phase service maps to its failure result (fail-closed).
     /// The per-repo installation token is minted + used server-side; it never travels here.
     /// </summary>
+    [PerformsEffect(ExternalEffect.AgentDispatchRun)]
     public virtual Task<Models.AgentDispatchRunApiResponse?> DispatchAgentRunAsync(
         string repo, Models.AgentDispatchRunApiRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -383,6 +634,7 @@ public class TammaApiClient
     /// failed" (the workflow continues; a missing Slack post must not break a
     /// mentorship session). The Slack token never travels here.
     /// </summary>
+    [PerformsEffect(ExternalEffect.NotifySlackQueue)]
     public virtual Task<bool> QueueSlackNotificationAsync(
         Models.SlackNotificationRequest request,
         string? tenantId = null,
@@ -400,11 +652,48 @@ public class TammaApiClient
     /// missing notification does not break the workflow. Returns null on transport /
     /// 5xx failure.
     /// </summary>
+    [PerformsEffect(ExternalEffect.NotifyEmailSend)]
     public virtual Task<Models.EmailCallResponse?> SendEmailAsync(
         Models.EmailSendRequest request, string? tenantId = null, CancellationToken ct = default)
     {
         var url = $"{_baseUrl}/api/v1/notifications/email";
         return PostAsync<Models.EmailCallResponse>(url, request, tenantId, ct);
+    }
+
+    // ----- Governance (Story 43-9 Seam E) --------------------------------
+
+    /// <summary>
+    /// Story 43-9 <b>Seam E</b> (AC10, D9) — ask the API whether the system may
+    /// perform a catalogued action by itself right now:
+    /// <c>POST /api/v1/governance/evaluate</c> (<c>EngineServiceOnly</c>).
+    ///
+    /// <para><b>It is a READ and mints no <c>ExternalEffect</c> member.</b> The
+    /// route is deliberately UNGOVERNED — the gate-evaluation endpoint cannot gate
+    /// itself without being circular — and carries that exact justification in
+    /// <c>KnownUngovernedEndpoints</c>.</para>
+    ///
+    /// <para><b>It is also the one method that had to widen a strictly-decreasing
+    /// ratchet</b> (Story 43-9 Decision D17). <c>KnownNonEffectClientMethods</c>
+    /// is count-pinned at 19 with a shrink-only history, so a genuinely read-only
+    /// new method could not be baselined without either mis-classifying it as an
+    /// effect or splitting the client so the sweep stops seeing it. It is instead
+    /// listed in a NAMED, DATED, per-method exception set that is itself
+    /// count-pinned and shrink-only — see
+    /// <c>MediationClientEffectSweepTests.ReviewedNonEffectExceptions</c>.</para>
+    ///
+    /// <para>Returns <c>null</c> on any non-2xx or transport failure, like every
+    /// other method here. The CALLER decides what null means; for
+    /// <c>CheckActionGateActivity</c> it means FAIL OPEN, because Seam E's one
+    /// adoption is an additive OR term and a control-plane blip must not stall a
+    /// deployment pipeline that would have proceeded anyway.</para>
+    /// </summary>
+    public Task<Policy.GovernanceEvaluateResponse?> EvaluateGovernanceAsync(
+        Policy.GovernanceEvaluateRequest request,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/governance/evaluate";
+        return PostAsync<Policy.GovernanceEvaluateResponse>(url, request, tenantId, ct);
     }
 
     // ----- Provider Health ---------------------------------------------
@@ -497,6 +786,7 @@ public class TammaApiClient
         {
             using var request = new HttpRequestMessage(HttpMethod.Delete, url);
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
@@ -527,6 +817,7 @@ public class TammaApiClient
     /// pipes the observed response into the shared health monitor exactly
     /// like every other call site.</para>
     /// </summary>
+    [PerformsEffect(ExternalEffect.EngineEventsAppend)]
     public async Task<bool> AppendEventsAsync(
         IReadOnlyList<Models.EngineEventRecord> events,
         Guid? tenantId = null,
@@ -537,6 +828,7 @@ public class TammaApiClient
 
         var url = $"{_baseUrl}/api/engine/events";
         var body = new Models.AppendEventsRequest(events);
+        BeginRequest();
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, url)
@@ -544,12 +836,18 @@ public class TammaApiClient
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
             AddTenantHeader(request, tenantId?.ToString());
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                // F5 — this is an enforced route; a governance refusal is permanent
+                // and must not be retried as though the drain hit an outage.
+                if (await TryRecordGovernanceDenialAsync(response, ct).ConfigureAwait(false))
+                    return false;
+
                 _logger.LogWarning(
                     "Tamma API POST /api/engine/events returned {Status} for {Count} events",
                     (int)response.StatusCode, events.Count);
@@ -576,22 +874,28 @@ public class TammaApiClient
     /// lifecycle's product, not telemetry; the caller (persist activity) must fault,
     /// not swallow.</para>
     /// </summary>
+    [PerformsEffect(ExternalEffect.EngineDocumentPersist)]
     public async Task PersistDocumentAsync(
         Models.PersistDocumentRequest request,
         string? tenantId = null,
         CancellationToken ct = default)
     {
         var url = $"{_baseUrl}/api/engine/documents";
+        BeginRequest();
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = JsonContent.Create(request, options: JsonOpts),
         };
         AddTenantHeader(httpRequest, tenantId);
+        AddCorrelationHeader(httpRequest);
         using var response = await _httpClient.SendAsync(httpRequest, ct).ConfigureAwait(false);
         await RecordHealthAsync(
             response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
+            // F5 — record the denial before the fail-loud throw, so a caller that
+            // catches the HttpRequestException can still tell policy from outage.
+            await TryRecordGovernanceDenialAsync(response, ct).ConfigureAwait(false);
             var body = await SafeReadBodyAsync(response, ct).ConfigureAwait(false);
             _logger.LogWarning(
                 "Tamma API POST /api/engine/documents returned {Status}: {Body}",
@@ -606,6 +910,7 @@ public class TammaApiClient
     /// <c>POST /api/engine/documents/{documentId}/status</c>
     /// (<c>EngineServiceOnly</c>). FAIL-LOUD (non-2xx / transport throws).
     /// </summary>
+    [PerformsEffect(ExternalEffect.EngineDocumentSetStatus)]
     public async Task SetDocumentStatusAsync(
         Guid documentId,
         string status,
@@ -615,16 +920,20 @@ public class TammaApiClient
     {
         var url = $"{_baseUrl}/api/engine/documents/{documentId}/status";
         var body = new Models.SetDocumentStatusRequest(status, correlatingEventId);
+        BeginRequest();
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = JsonContent.Create(body, options: JsonOpts),
         };
         AddTenantHeader(httpRequest, tenantId);
+        AddCorrelationHeader(httpRequest);
         using var response = await _httpClient.SendAsync(httpRequest, ct).ConfigureAwait(false);
         await RecordHealthAsync(
             response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
+            // F5 — see PersistDocumentAsync.
+            await TryRecordGovernanceDenialAsync(response, ct).ConfigureAwait(false);
             var responseBody = await SafeReadBodyAsync(response, ct).ConfigureAwait(false);
             _logger.LogWarning(
                 "Tamma API POST /api/engine/documents/{Id}/status returned {Status}: {Body}",
@@ -660,6 +969,7 @@ public class TammaApiClient
     /// recoverable via the suspended bookmark). It never throws — the caller
     /// (<c>EngineChannelPublisher</c>) logs ERROR and continues.</para>
     /// </summary>
+    [PerformsEffect(ExternalEffect.EngineChannelOutboxEnqueue)]
     public virtual async Task<bool> PostChannelOutboxAsync(
         string envelopeJson, string? tenantId = null, CancellationToken ct = default)
     {
@@ -667,6 +977,7 @@ public class TammaApiClient
 
         var url = $"{_baseUrl}/api/engine/channel/outbox";
         var body = new { envelopeJson };
+        BeginRequest();
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, url)
@@ -674,11 +985,16 @@ public class TammaApiClient
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                // F5 — enforced route; see AppendEventsAsync.
+                if (await TryRecordGovernanceDenialAsync(response, ct).ConfigureAwait(false))
+                    return false;
+
                 _logger.LogWarning(
                     "Tamma API POST /api/engine/channel/outbox returned {Status}", (int)response.StatusCode);
                 return false;
@@ -707,6 +1023,7 @@ public class TammaApiClient
     /// travels per-event in the body, and <c>EngineServiceOnly</c> auth is
     /// satisfied by the service Bearer token the client already attaches.</para>
     /// </summary>
+    [PerformsEffect(ExternalEffect.EnginePlatformEventsAppend)]
     public async Task<bool> AppendPlatformEventsAsync(
         IReadOnlyList<Models.PlatformEventRecord> events,
         CancellationToken ct = default)
@@ -716,18 +1033,24 @@ public class TammaApiClient
 
         var url = $"{_baseUrl}/api/engine/platform-events";
         var body = new Models.AppendPlatformEventsRequest(events);
+        BeginRequest();
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                // F5 — enforced route; see AppendEventsAsync.
+                if (await TryRecordGovernanceDenialAsync(response, ct).ConfigureAwait(false))
+                    return false;
+
                 _logger.LogWarning(
                     "Tamma API POST /api/engine/platform-events returned {Status} for {Count} events",
                     (int)response.StatusCode, events.Count);
@@ -750,16 +1073,24 @@ public class TammaApiClient
         string? tenantId,
         CancellationToken ct) where T : class
     {
+        BeginRequest();
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                // F5 — a governance 409 gets its own, unmistakable log line and is
+                // recorded on LastGovernanceDenial. The return value stays null so
+                // no existing caller changes shape.
+                if (await TryRecordGovernanceDenialAsync(response, ct).ConfigureAwait(false))
+                    return null;
+
                 // URL is intentionally omitted — the path carries interpolated
                 // identifiers (tenant/budget-owner/provider-handle/etc.), and
                 // the rotating warn log on the VPS is the wrong plane for per-
@@ -790,6 +1121,7 @@ public class TammaApiClient
         string? tenantId,
         CancellationToken ct) where T : class
     {
+        BeginRequest();
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, url)
@@ -797,12 +1129,18 @@ public class TammaApiClient
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                // F5 — see GetAsync. A governance denial is a policy decision, not
+                // an outage, and must not read to the caller as one.
+                if (await TryRecordGovernanceDenialAsync(response, ct).ConfigureAwait(false))
+                    return null;
+
                 _logger.LogWarning(
                     "Tamma API POST returned {Status}",
                     (int)response.StatusCode);
@@ -840,6 +1178,7 @@ public class TammaApiClient
         string? tenantId,
         CancellationToken ct) where T : class
     {
+        BeginRequest();
         try
         {
             using var request = new HttpRequestMessage(method, url)
@@ -847,12 +1186,18 @@ public class TammaApiClient
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                // F5 — see GetAsync. PUT/PATCH carry enforced routes
+                // (git merge {dev,qa,main}, git issue patch, jira ticket patch).
+                if (await TryRecordGovernanceDenialAsync(response, ct).ConfigureAwait(false))
+                    return null;
+
                 _logger.LogWarning(
                     "Tamma API {Method} returned {Status}",
                     method.Method, (int)response.StatusCode);
@@ -876,6 +1221,7 @@ public class TammaApiClient
         string? tenantId,
         CancellationToken ct)
     {
+        BeginRequest();
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, url)
@@ -883,12 +1229,19 @@ public class TammaApiClient
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                // F5 — carries the enforced POST /api/v1/notifications/slack route,
+                // whose `false` return is otherwise identical for an outage and a
+                // governance refusal.
+                if (await TryRecordGovernanceDenialAsync(response, ct).ConfigureAwait(false))
+                    return false;
+
                 _logger.LogWarning(
                     "Tamma API POST returned {Status}",
                     (int)response.StatusCode);
@@ -923,4 +1276,45 @@ public class TammaApiClient
             request.Headers.TryAddWithoutValidation("X-Tenant-Id", tenantId);
         }
     }
+
+    /// <summary>
+    /// Story 43-14 (AC4) — stamp the RUN correlation (<c>X-Tamma-Correlation-Id</c>)
+    /// on every mediation call so Seam C
+    /// (<c>GovernanceEnforcement.ResolveCorrelationId</c>) sees the SAME
+    /// correlation the human's approval-minted grant is keyed by, and a chain's
+    /// calls all present one correlation instead of each deriving its own
+    /// <c>route:</c> value. The value is <see cref="RunCorrelation.Current"/> —
+    /// null outside a workflow run, in which case the header is absent and Seam C's
+    /// route-derived fallback stands.
+    ///
+    /// <para>Bounded to the ledger column width the same way Seam C bounds it
+    /// (<c>GovernanceEnforcement.Bounded</c>: over-long collapses to a
+    /// <c>sha256:</c> digest, never truncates) so both ends agree on the key.</para>
+    /// </summary>
+    private static void AddCorrelationHeader(HttpRequestMessage request)
+    {
+        var correlation = Tamma.Activities.Core.RunCorrelation.Current;
+        if (!string.IsNullOrWhiteSpace(correlation))
+        {
+            request.Headers.TryAddWithoutValidation(
+                CorrelationHeaderName, BoundCorrelation(correlation!));
+        }
+    }
+
+    /// <summary>Seam C's <c>GovernanceEnforcement.CorrelationHeader</c> — kept in
+    /// sync as a literal here to avoid a Tamma.Activities → Tamma.Api reference.</summary>
+    internal const string CorrelationHeaderName = "X-Tamma-Correlation-Id";
+
+    /// <summary>The ledger column width Seam C bounds to
+    /// (<c>GovernanceEnforcement.MaxCorrelationLength</c>).</summary>
+    private const int MaxCorrelationLength = 200;
+
+    /// <summary>Mirror of <c>GovernanceEnforcement.Bounded</c> so an over-long
+    /// correlation produces the identical key on both ends.</summary>
+    private static string BoundCorrelation(string value) =>
+        value.Length <= MaxCorrelationLength
+            ? value
+            : "sha256:" + Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 }

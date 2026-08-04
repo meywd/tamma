@@ -50,7 +50,7 @@ public class ResolverBackedToolLoopGateTests
         Dictionary<string, ActionAssignmentValue>? platformGroups = null,
         Dictionary<string, ActionAssignmentValue>? principalActions = null,
         Dictionary<string, ActionAssignmentValue>? principalGroups = null)
-        => new(
+        => GovernancePolicySnapshot.FromSuccessfulRead(
             platformActions ?? new(StringComparer.Ordinal),
             platformGroups ?? new(StringComparer.Ordinal),
             principalActions ?? new(StringComparer.Ordinal),
@@ -78,7 +78,9 @@ public class ResolverBackedToolLoopGateTests
         a.Should().Be(b,
             "with zero assignment rows the ladder returns every shipped default — "
             + "the 43-5 data-source swap must change nothing on day one");
-        a.Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
+        // NB: the outcome itself is no longer uniformly Allowed (Story 43-11 —
+        // shell_execute sits at 80, above the default dial of 70, so it and its
+        // alias `Bash` are Denied here); the byte-identical PARITY is the pin.
     }
 
     // ── Assignment rows now bite on the tool loop ───────────────────────────
@@ -157,6 +159,47 @@ public class ResolverBackedToolLoopGateTests
             "policy must be resolved for the ambient principal, never a global scope");
     }
 
+    // ── F6 (2026-07-30): the LIVE seam fails closed on a snapshot that has
+    //    never loaded, and says so with its own reason ────────────────────────
+
+    /// <summary>
+    /// Seam B is the one gate that already enforces in production, so the F6
+    /// posture has to hold here or it holds nowhere. A never-loaded snapshot
+    /// used to be indistinguishable from an empty table — every tool call sailed
+    /// through on shipped defaults while the admin's tightenings sat unread.
+    /// </summary>
+    [Test]
+    public void AnUnavailableSnapshot_DeniesEveryCatalogedTool_WithItsOwnReason()
+    {
+        var gate = Gate(GovernancePolicySnapshot.Unavailable);
+
+        foreach (var toolName in new[] { "file_read", "file_write", "shell_execute", "run_tests" })
+        {
+            var decision = gate.Evaluate(toolName, "{}");
+            decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied,
+                $"'{toolName}' must not ride shipped defaults when the policy table has "
+                + "never been read (43-5 F6)");
+            decision.Reason.Should().Be(
+                AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable,
+                "the reason must NOT be 'below-min-autonomy' — this is an outage of the "
+                + "governance surface, not a policy decision");
+        }
+
+        // The loaded-and-empty table is the opposite answer, unchanged.
+        Gate(GovernancePolicySnapshot.Empty).Evaluate("file_write", "{}")
+            .Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
+    }
+
+    [Test]
+    public void AnUnavailableSnapshot_StillAllowsUncataloguedNames_EpicD2()
+    {
+        // Exemplar changed from `mcp__server__tool` on 2026-07-30 — MCP names are
+        // catalogued now (see the MCP section below). D2 itself is unchanged.
+        Gate(GovernancePolicySnapshot.Unavailable).Evaluate("frobnicate_the_widget", "{}")
+            .Outcome.Should().Be(ToolLoopGateOutcome.Allowed,
+                "a catalog gap is still never a production stall (epic D2)");
+    }
+
     [Test]
     public void UncataloguedNames_StayAllowed_UnderTheResolverBackedGate()
     {
@@ -165,9 +208,207 @@ public class ResolverBackedToolLoopGateTests
             ["model-invocation"] = new(AutonomyDial.AlwaysHuman, null, null, null),
         });
 
-        var decision = Gate(snapshot).Evaluate("mcp__server__tool", "{}");
+        var decision = Gate(snapshot).Evaluate("frobnicate_the_widget", "{}");
 
         decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
         decision.Reason.Should().Be("uncatalogued");
+    }
+
+    // ── The MCP governance decision (2026-07-30) through the resolver ────────
+
+    /// <summary>
+    /// An <c>mcp__*</c> name now resolves to <c>effect:mcp.tool.invoke</c>, which
+    /// ships <see cref="AutonomyDial.AlwaysHuman"/>, so the live seam refuses it
+    /// by default instead of passing it as uncatalogued.
+    ///
+    /// <para><b>Nothing that worked stops working:</b> no MCP
+    /// <c>IToolExecutor</c> is registered, so before this change such a call ran
+    /// to <c>ToolExecutorRegistry.GetExecutor</c> → null → "Unknown tool" fed back
+    /// to the model. It is still a rejection fed back to the model; only the
+    /// rejection's provenance changed, from "the registry has never heard of this"
+    /// to "governance says a person decides".</para>
+    /// </summary>
+    [Test]
+    public void AnMcpToolName_IsDeniedByDefault_AndCarriesTheMcpEffectKey()
+    {
+        var decision = Gate(GovernancePolicySnapshot.Empty).Evaluate("mcp__server__tool", "{}");
+
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied,
+            "mcp.tool.invoke sits at 80 (unbounded-execution zone), above the default dial of 70");
+        decision.Reason.Should().Be("below-min-autonomy");
+        decision.ActionKey.Should().Be(
+            new ActionKey(ActionNamespace.Effect, ExternalEffect.McpToolInvoke.ToWire()));
+    }
+
+    /// <summary>
+    /// <b>Review LOW-6 (2026-07-31).</b> The gate guarded
+    /// <c>IsNullOrWhiteSpace</c> but never TRIMMED, and both resolution routes are
+    /// exact matches — <c>IsMcpToolName</c> is a <c>StartsWith</c>. So
+    /// <c>" mcp__server__tool"</c> resolved to nothing and came back
+    /// Allowed/uncatalogued while the identical name without the space was Denied:
+    /// a governance pin one leading space walked around. Nothing was reachable
+    /// through it (no MCP executor is registered, so the call would still have
+    /// died at the registry), but a pin that whitespace evades is not a pin.
+    /// </summary>
+    [TestCase(" mcp__server__tool")]
+    [TestCase("mcp__server__tool ")]
+    [TestCase("\tmcp__server__tool\n")]
+    public void AnMcpToolName_IsStillDenied_WhenTheModelPadsItWithWhitespace(string emitted)
+    {
+        var decision = Gate(GovernancePolicySnapshot.Empty).Evaluate(emitted, "{}");
+
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied,
+            "the trimmed name is the name; whitespace is not a namespace");
+        decision.Reason.Should().Be("below-min-autonomy");
+        decision.ActionKey.Should().Be(
+            new ActionKey(ActionNamespace.Effect, ExternalEffect.McpToolInvoke.ToWire()));
+    }
+
+    /// <summary>The same trim on an ordinary registry name, so the fix is not
+    /// MCP-shaped: a padded <c>shell_execute</c> is graded, not waved through.</summary>
+    [Test]
+    public void APaddedRegistryName_StillResolvesToItsCatalogMember()
+    {
+        var snapshot = With(principalActions: new(StringComparer.Ordinal)
+        {
+            ["tool:shell_execute"] = new(AutonomyDial.AlwaysHuman, null, null, null),
+        });
+
+        Gate(snapshot).Evaluate("  shell_execute  ", "{}")
+            .Outcome.Should().Be(ToolLoopGateOutcome.Denied);
+    }
+
+    /// <summary>
+    /// And a single admin row at the floor re-opens the whole family — the
+    /// reversibility the decision rests on, proved through the real assignment
+    /// ladder rather than the rehearsal seam.
+    /// </summary>
+    [Test]
+    public void AnActionRowAtTheFloor_ReOpensMcp()
+    {
+        var snapshot = With(principalActions: new(StringComparer.Ordinal)
+        {
+            ["effect:mcp.tool.invoke"] = new(AutonomyDial.Min, null, null, null),
+        });
+
+        Gate(snapshot).Evaluate("mcp__server__tool", "{}")
+            .Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
+    }
+
+    /// <summary>A platform ceiling still wins, exactly as for any other member —
+    /// the MCP default is an ordinary catalog default, not a special case.</summary>
+    [Test]
+    public void APlatformCeiling_StillBinds_WhenAPrincipalRowReOpensMcp()
+    {
+        var snapshot = With(
+            platformActions: new(StringComparer.Ordinal)
+            {
+                ["effect:mcp.tool.invoke"] = new(AutonomyDial.AlwaysHuman, null, null, null),
+            },
+            principalActions: new(StringComparer.Ordinal)
+            {
+                ["effect:mcp.tool.invoke"] = new(AutonomyDial.Min, null, null, null),
+            });
+
+        Gate(snapshot).Evaluate("mcp__server__tool", "{}")
+            .Outcome.Should().Be(ToolLoopGateOutcome.Denied);
+    }
+
+    // ── F11 (2026-07-30): the break-glass override at the ONE live seam ──────
+
+    private sealed class FixedBreakGlass(BreakGlassState state) : IGovernanceBreakGlass
+    {
+        public BreakGlassState Current() => state;
+    }
+
+    private static CatalogDefaultToolLoopAutonomyGate GateWithBreakGlass(
+        GovernancePolicySnapshot snapshot, BreakGlassState state)
+        => new(new FixedSnapshots(snapshot), new FixedTenantContext(null), null,
+            new FixedBreakGlass(state));
+
+    private static readonly BreakGlassState EngagedOverride =
+        BreakGlassState.Engaged(DateTimeOffset.UtcNow.AddHours(1), "control plane unreachable");
+
+    /// <summary>
+    /// The gap F11 recorded, closed: a never-loaded snapshot denied EVERY
+    /// catalogued tool, in single-user deployments as well as SaaS, with no
+    /// operator lever. With the override engaged the loop keeps working, and the
+    /// decision is labelled as a bypass rather than as a healthy allow.
+    /// </summary>
+    [Test]
+    public void BreakGlassEngaged_OverADegradedSnapshot_AllowsAndCarriesTheBypassState()
+    {
+        var gate = GateWithBreakGlass(GovernancePolicySnapshot.Unavailable, EngagedOverride);
+
+        // Tools whose shipped level is AT/BELOW the default dial (70): break-glass
+        // falls back to the shipped default and permits them. shell_execute (80) is
+        // deliberately excluded — it is above the default dial, so it stays denied
+        // even under the override (Story 43-11 OQ1).
+        foreach (var toolName in new[] { "file_read", "file_write", "run_tests", "search_code" })
+        {
+            var decision = gate.Evaluate(toolName, "{}");
+
+            decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed, toolName);
+            decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonBreakGlassBypass);
+            decision.IsBreakGlassBypass.Should().BeTrue(
+                "the runner emits the ACTION.GATE.BREAK_GLASS_BYPASS audit row off this");
+            decision.BreakGlass!.ExpiresAtUtc.Should().Be(EngagedOverride.ExpiresAtUtc);
+            decision.BreakGlass!.Reason.Should().Be("control plane unreachable");
+        }
+    }
+
+    /// <summary>
+    /// THE anti-backdoor pin at Seam B. Break-glass falls back to the SHIPPED
+    /// DEFAULT, not to "allow" — so a member the catalog itself pins to a human
+    /// (here <c>effect:mcp.tool.invoke</c>) is still refused while the override is
+    /// engaged.
+    /// </summary>
+    [Test]
+    public void BreakGlassEngaged_DoesNotOpenAnAboveDialShippedDefault()
+    {
+        // Break-glass falls back to the SHIPPED DEFAULT, not to "allow" — so a
+        // member whose shipped level (mcp.tool.invoke = 80) is above the default
+        // dial (70) is still refused while the override is engaged.
+        var decision = GateWithBreakGlass(GovernancePolicySnapshot.Unavailable, EngagedOverride)
+            .Evaluate("mcp__server__tool", "{}");
+
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied);
+        decision.Reason.Should().Be("below-min-autonomy");
+    }
+
+    /// <summary>
+    /// The other anti-backdoor half: an override cannot reach a policy row,
+    /// because the bypass is sited inside the never-loaded branch and a
+    /// never-loaded snapshot provably carries no rows. Proved positively — with a
+    /// READ snapshot the override changes nothing, denial included.
+    /// </summary>
+    [Test]
+    public void BreakGlassEngaged_ChangesNothing_WhenTheSnapshotWasRead()
+    {
+        var snapshot = With(principalActions: new(StringComparer.Ordinal)
+        {
+            ["tool:shell_execute"] = new(AutonomyDial.AlwaysHuman, null, null, null),
+        });
+
+        var denied = GateWithBreakGlass(snapshot, EngagedOverride).Evaluate("shell_execute", "{}");
+        denied.Outcome.Should().Be(ToolLoopGateOutcome.Denied,
+            "a successfully-read policy row is not degradation and is not bypassable");
+        denied.IsBreakGlassBypass.Should().BeFalse();
+
+        GateWithBreakGlass(snapshot, EngagedOverride).Evaluate("file_read", "{}")
+            .Should().Be(Gate(snapshot).Evaluate("file_read", "{}"),
+                "on a healthy read the override is inert, byte for byte");
+    }
+
+    [Test]
+    public void BreakGlassNotEngaged_LeavesTheF6PostureExactlyAsItWas()
+    {
+        var decision = GateWithBreakGlass(
+                GovernancePolicySnapshot.Unavailable, BreakGlassState.NotEngaged)
+            .Evaluate("file_write", "{}");
+
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied);
+        decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable);
+        decision.IsBreakGlassBypass.Should().BeFalse();
     }
 }

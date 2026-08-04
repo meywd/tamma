@@ -365,6 +365,46 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
             WorkflowInstanceId: result?.WorkflowInstanceId);
     }
 
+    /// <inheritdoc />
+    public async Task<ApprovalGateLocation> LocateMergeApprovalGateAsync(
+        int issueNumber, int prNumber, string? tenantId, string? repository)
+    {
+        await EnsureHealthyAsync();
+        var payload = new { issueNumber, prNumber, tenantId, repository, decision = "locate" };
+        var response = await _httpClient.PostAsJsonAsync(
+            "/elsa/api/adl/merge-approval/locate", payload, JsonOptions);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return new ApprovalGateLocation(Found: false, WorkflowInstanceId: null, CorrelationId: null);
+        }
+        response.EnsureSuccessStatusCode();
+        var located = await response.Content.ReadFromJsonAsync<EngineLocateResponse>(JsonOptions);
+        return new ApprovalGateLocation(
+            Found: located?.Found ?? true,
+            WorkflowInstanceId: located?.WorkflowInstanceId,
+            CorrelationId: located?.CorrelationId);
+    }
+
+    /// <inheritdoc />
+    public async Task<ApprovalGateLocation> LocateDeploymentApprovalGateAsync(
+        int issueNumber, string? tenantId, string? repository, string? mergeSha)
+    {
+        await EnsureHealthyAsync();
+        var payload = new { issueNumber, tenantId, repository, mergeSha, decision = "locate" };
+        var response = await _httpClient.PostAsJsonAsync(
+            "/elsa/api/adl/deploy-approval/locate", payload, JsonOptions);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return new ApprovalGateLocation(Found: false, WorkflowInstanceId: null, CorrelationId: null);
+        }
+        response.EnsureSuccessStatusCode();
+        var located = await response.Content.ReadFromJsonAsync<EngineLocateResponse>(JsonOptions);
+        return new ApprovalGateLocation(
+            Found: located?.Found ?? true,
+            WorkflowInstanceId: located?.WorkflowInstanceId,
+            CorrelationId: located?.CorrelationId);
+    }
+
     /// <summary>
     /// Completeness audit P0 item 3 — forward a deployment-pipeline
     /// production-approval gate resume to the engine's in-process resume endpoint,
@@ -609,6 +649,13 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
     {
         public bool Resumed { get; set; }
         public string? WorkflowInstanceId { get; set; }
+    }
+
+    private sealed class EngineLocateResponse
+    {
+        public bool Found { get; set; }
+        public string? WorkflowInstanceId { get; set; }
+        public string? CorrelationId { get; set; }
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()

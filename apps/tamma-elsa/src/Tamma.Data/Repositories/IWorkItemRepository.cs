@@ -37,6 +37,26 @@ public sealed record WorkItemQuery
     /// <summary>Case-insensitive substring match over the title.</summary>
     public string? TitleContains { get; init; }
 
+    /// <summary>
+    /// Story 44-2 — the external-linked filter: true keeps only items carrying
+    /// an <c>ExternalRefJson</c> (imported, 44-8's plane), false keeps only
+    /// native items, null does not filter. Expressed here rather than as a
+    /// post-query filter in the API so it composes with the keyset cursor —
+    /// filtering a page after the fact makes <c>nextCursor</c> lie.
+    /// </summary>
+    public bool? ExternalLinked { get; init; }
+
+    /// <summary>
+    /// Story 44-2 (review MINOR-9, 2026-07-29) — the estimate-presence filter:
+    /// true keeps only items carrying an <c>Estimate</c>, false only those
+    /// without, null does not filter. Exists so the PROJECT write can enforce
+    /// the same estimate/scale coherence rule the work-item write already
+    /// enforces: setting a project's scale to <c>not_used</c> while it holds
+    /// estimated items would otherwise leave stored estimates that no work-item
+    /// write could have created.
+    /// </summary>
+    public bool? HasEstimate { get; init; }
+
     public string? AfterRank { get; init; }
     public string? AfterKey { get; init; }
     public int Limit { get; init; } = 100;
@@ -94,7 +114,15 @@ public interface IWorkItemRepository
     /// <see cref="RekeyAsync"/>), <c>Status</c> (<see cref="SetStatusAsync"/>),
     /// or the rank columns (<see cref="SetRanksAsync"/>).
     /// </summary>
-    Task<WorkItemEntity?> UpdateAsync(WorkItemEntity item);
+    /// <param name="expectedVersion">
+    /// The caller's <c>If-Match</c> precondition, applied ATOMICALLY with the
+    /// write as <c>WHERE "Version" = @expected</c> (44-2 review 2026-07-29 —
+    /// the service check and this write happen in DIFFERENT contexts, so a
+    /// service-level check alone leaves a real lost-update window). A mismatch
+    /// raises the typed, retryable <c>TRACKER.CONCURRENCY_CONFLICT</c>. Null
+    /// means "no precondition".
+    /// </param>
+    Task<WorkItemEntity?> UpdateAsync(WorkItemEntity item, int? expectedVersion = null);
 
     /// <summary>
     /// Transition status (wire string, validated). Stamps
@@ -102,7 +130,8 @@ public interface IWorkItemRepository
     /// (derived via <c>WorkItemStatus.IsTerminal()</c> — never a set literal)
     /// and clears it on reopen.
     /// </summary>
-    Task<WorkItemEntity?> SetStatusAsync(Guid id, string statusWire);
+    /// <param name="expectedVersion">See <see cref="UpdateAsync"/>.</param>
+    Task<WorkItemEntity?> SetStatusAsync(Guid id, string statusWire, int? expectedVersion = null);
 
     /// <summary>
     /// Move the item in either ordering axis. A drag is ONE UPDATE (44-0 D7).
@@ -132,7 +161,8 @@ public interface IWorkItemRepository
     /// Delete an item. Children RESTRICT the parent FK (44-2 maps to 409);
     /// the item's relation edges cascade away.
     /// </summary>
-    Task<bool> DeleteAsync(Guid id);
+    /// <param name="expectedVersion">See <see cref="UpdateAsync"/>.</param>
+    Task<bool> DeleteAsync(Guid id, int? expectedVersion = null);
 
     // ── Relations (44-0 AC14; stored canonical — D8) ──
 

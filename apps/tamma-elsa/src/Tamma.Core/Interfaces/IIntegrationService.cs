@@ -139,6 +139,52 @@ public interface IGitHubIntegrationService
     /// <c>Fail</c> (never a fabricated success) so the ADL pipeline can branch on it.
     /// </summary>
     Task<IntegrationResult<GitHubReleaseResult>> CreateGitHubReleaseAsync(string repository, ReleaseCreationRequest request);
+
+    /// <summary>
+    /// Story 31-13 — close an open pull request (PATCH state=closed). Backs
+    /// <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n}/close</c>. Reversible
+    /// via <see cref="ReopenPullRequestAsync"/> (close↔reopen invert). Returns the
+    /// updated PR detail on success; a platform error surfaces via <c>Fail</c>
+    /// (status-prefixed body) rather than a fabricated state.
+    /// </summary>
+    Task<IntegrationResult<GitHubPullRequestDetail>> ClosePullRequestAsync(string repository, int pullRequestNumber);
+
+    /// <summary>
+    /// Story 31-13 — reopen a closed pull request (PATCH state=open). Backs
+    /// <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n}/reopen</c>. The inverse
+    /// of <see cref="ClosePullRequestAsync"/>.
+    /// </summary>
+    Task<IntegrationResult<GitHubPullRequestDetail>> ReopenPullRequestAsync(string repository, int pullRequestNumber);
+
+    /// <summary>
+    /// Story 31-13 — post a review comment anchored to a diff line
+    /// (<c>POST /repos/{o}/{r}/pulls/{n}/comments</c>; <c>body</c>, <c>commit_id</c>,
+    /// <c>path</c>, <c>line</c>, <c>side</c>). Backs
+    /// <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n}/review-comments</c>. When
+    /// <paramref name="commitId"/> is null/empty the PR head SHA is resolved from the
+    /// PR. A stale anchor (GitHub 422) surfaces via <c>Fail</c> (status-prefixed body),
+    /// never a throw, so the review flow inherits a typed failure.
+    /// </summary>
+    Task<IntegrationResult<GitHubReviewComment>> PostPullRequestReviewCommentAsync(string repository, int pullRequestNumber, string body, string? commitId, string path, int line, string side = "RIGHT");
+
+    /// <summary>
+    /// Story 31-13 — request reviewers for a pull request
+    /// (<c>POST /repos/{o}/{r}/pulls/{n}/requested_reviewers</c>). Backs
+    /// <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n}/reviewers</c>. Promoted
+    /// from the private best-effort create-PR side effect to a first-class governed
+    /// verb: the failure is SURFACED (<c>Fail("{status}: {body}")</c>), not swallowed.
+    /// </summary>
+    Task<IntegrationResult<bool>> RequestReviewersAsync(string repository, int pullRequestNumber, IReadOnlyList<string> reviewers);
+
+    /// <summary>
+    /// Story 31-13 — toggle a pull request's draft state. GitHub REST cannot do this,
+    /// so this uses the GraphQL <c>convertPullRequestToDraft</c> (draft=true) /
+    /// <c>markPullRequestReadyForReview</c> (draft=false) mutation keyed by the PR
+    /// <c>node_id</c> (fetched via REST). Backs
+    /// <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/draft</c>. A non-2xx or a
+    /// GraphQL <c>errors</c> array surfaces via <c>Fail</c>.
+    /// </summary>
+    Task<IntegrationResult<GitHubPullRequestDetail>> SetPullRequestDraftAsync(string repository, int pullRequestNumber, bool draft);
 }
 
 /// <summary>
@@ -259,6 +305,21 @@ public interface IIntegrationService
     /// <summary>Create a GitHub release (and its tag) for a shipped version
     /// (Epic 38 follow-up #21 — deployment-pipeline release step).</summary>
     Task<GitHubReleaseResult> CreateGitHubReleaseAsync(string repository, ReleaseCreationRequest request);
+
+    /// <summary>Story 31-13 — close an open pull request (PATCH state=closed).</summary>
+    Task<GitHubPullRequestDetail> ClosePullRequestAsync(string repository, int pullRequestNumber);
+
+    /// <summary>Story 31-13 — reopen a closed pull request (PATCH state=open).</summary>
+    Task<GitHubPullRequestDetail> ReopenPullRequestAsync(string repository, int pullRequestNumber);
+
+    /// <summary>Story 31-13 — post a review comment anchored to a diff line.</summary>
+    Task<GitHubReviewComment> PostPullRequestReviewCommentAsync(string repository, int pullRequestNumber, string body, string? commitId, string path, int line, string side = "RIGHT");
+
+    /// <summary>Story 31-13 — request reviewers for a pull request (failure surfaced, not swallowed).</summary>
+    Task<bool> RequestReviewersAsync(string repository, int pullRequestNumber, IReadOnlyList<string> reviewers);
+
+    /// <summary>Story 31-13 — toggle a pull request's draft state (GraphQL-backed).</summary>
+    Task<GitHubPullRequestDetail> SetPullRequestDraftAsync(string repository, int pullRequestNumber, bool draft);
 }
 
 // ============================================
@@ -403,6 +464,13 @@ public class GitHubPullRequestDetail
     public string? MergeableState { get; set; }
 
     public bool IsDraft { get; set; }
+
+    /// <summary>
+    /// The PR's base/target branch (GitHub <c>base.ref</c> — the branch being merged
+    /// into). Story 43-12 reads this so the merge gate can resolve the per-target
+    /// key (<c>git.merge.dev|qa|main</c>). Empty when the platform response omitted it.
+    /// </summary>
+    public string BaseBranch { get; set; } = string.Empty;
 }
 
 /// <summary>

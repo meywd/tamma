@@ -144,6 +144,20 @@ README's new-types table:
    > unmitigated-high-risk ⇒ escalation rule rather than dodging it, and the cell is classified in
    > `TemplateExampleConformanceTests.ConformingUnboundCells` until 41-19 binds it. Every rule the
    > template's "Rules:" list states was checked to be a rule the validator actually enforces.
+   > **First graduation (2026-07-29, Story 41-2).** `PendingProducerCells` is **6 → 5**:
+   > `(product_owner, define-acceptance-criteria)` graduated exactly as designed — 41-2's
+   > `AcceptanceCriteriaAuthoringWorkflow` now dispatches the pair, so
+   > `EveryPendingProducerCell_IsUndispatched_AndClassifiedNowhereElse` would have failed on a
+   > surviving entry, and its `IntendedContract` (10 token groups) moved into `Bindings`
+   > **verbatim** — the promise held, with no token renegotiated. The template rewrite the
+   > amendment above assigned to 41-2 landed in the same change (version 1 → 2; its worked example
+   > validates against `AcceptanceCriteriaDocumentType` with zero violations), so its
+   > `KnownNonConformingTemplates` baseline is gone and the count pin moved **16 → 15** — the first
+   > time that ratchet has turned the direction it was built to turn. `Bindings` is 16 → 17 (41-2)
+   > → 18 (41-9's `(architect, write-adr)` → `prose`), which does not disturb this AC's "no existing
+   > `Bindings` entry is edited" clause: both are additions. Still pending: `prioritize-backlog`
+   > (41-3), `plan-test-strategy` (41-13), `threat-model` (41-19), `plan-sprint` (41-6),
+   > `author-ui-spec` (41-27).
    > **Note — the shared-contract hazard.** `RenderContract` is per *document type*, not per producing
    > cell (`IDocumentType.cs:47-50`; `Plan.cs:135` returns one `Contract` const for both `plan`
    > producers). Any new type with two producing cells inherits the same constraint, so each of the six

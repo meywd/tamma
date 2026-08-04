@@ -13,6 +13,7 @@ namespace Tamma.Activities.LlmCall.Tools;
 public class RunTestsTool : IToolExecutor
 {
     private readonly ILogger<RunTestsTool> _logger;
+    private readonly IConfiguration _configuration;
     private readonly string _workspaceRoot;
     private readonly string _defaultTestCommand;
     private readonly int _timeoutSeconds;
@@ -49,6 +50,7 @@ public class RunTestsTool : IToolExecutor
     public RunTestsTool(ILogger<RunTestsTool> logger, IConfiguration configuration)
     {
         _logger = logger;
+        _configuration = configuration;
         _workspaceRoot = configuration["ToolExecution:WorkspaceRoot"]
                          ?? Environment.CurrentDirectory;
         _defaultTestCommand = configuration["ToolExecution:TestCommand"] ?? "dotnet test";
@@ -122,6 +124,10 @@ public class RunTestsTool : IToolExecutor
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+
+            // Story 42-10 (AC1, D1): same env leak as ShellExecuteTool — identical
+            // ProcessStartInfo/bash shape — so the same unconditional strip applies.
+            ProcessEnvironmentAllowlist.Apply(psi, _configuration);
 
             if (isWindows)
             {

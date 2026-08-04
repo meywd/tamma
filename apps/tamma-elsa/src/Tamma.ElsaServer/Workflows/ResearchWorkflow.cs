@@ -36,6 +36,7 @@ namespace Tamma.ElsaServer.Workflows;
 public class ResearchWorkflow : WorkflowBase
 {
     private const string FindingsDocumentType = "findings";
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -57,6 +58,10 @@ public class ResearchWorkflow : WorkflowBase
         // ── Context (consumes side) ────────────────────────────────────
         var researchContext = builder.WithVariable<string>();
         var contextIds      = builder.WithVariable<string>("[]");
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── 39-10 re-entry position ────────────────────────────────────
         var reEntryPositionJson = builder.WithVariable<string>();
@@ -190,26 +195,48 @@ public class ResearchWorkflow : WorkflowBase
         };
         emitContextGathered.SetDisplayText("Emit Context Gathered");
 
+        // ── Story 39-25 (leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Fail-closed: no accepted assessment for this run's anchor ⇒ Found=false ⇒ the
+        // ambiguityScore dispatch key below is OMITTED (never a fabricated 0.0).
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment", Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 4: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["documentType"]          = FindingsDocumentType,
-                ["producerRole"]          = AgentRole.ProductOwner.ToWire(),
-                ["producerAction"]        = AgentAction.Research.ToWire(),
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    ["workItemJson"] = BuildWorkItem(topic.Get(ctx), workItemJson.Get(ctx), issueId.Get(ctx)),
-                    ["findings"]     = researchContext.Get(ctx) ?? "",
-                    ["conventions"]  = "",
-                }),
-                ["issueId"]             = issueId.Get(ctx) ?? "",
-                ["correlationId"]       = issueId.Get(ctx) ?? "",
-                ["tenantId"]            = tenantId.Get(ctx) ?? "",
-                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                    ["documentType"]          = FindingsDocumentType,
+                    ["producerRole"]          = AgentRole.ProductOwner.ToWire(),
+                    ["producerAction"]        = AgentAction.Research.ToWire(),
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["workItemJson"] = BuildWorkItem(topic.Get(ctx), workItemJson.Get(ctx), issueId.Get(ctx)),
+                        ["findings"]     = researchContext.Get(ctx) ?? "",
+                        ["conventions"]  = "",
+                    }),
+                    ["issueId"]             = issueId.Get(ctx) ?? "",
+                    ["correlationId"]       = issueId.Get(ctx) ?? "",
+                    ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                    ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                };
+                // 39-25 — thread the accepted assessment's score; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -301,7 +328,7 @@ public class ResearchWorkflow : WorkflowBase
             {
                 readInputs, computeReEntry, readPositionStage, freshRun,
                 emitStarted, gatherContext, storeContextResult, emitContextGathered,
-                dispatchLifecycle, readLifecycleExit,
+                fetchAmbiguityAssessment, dispatchLifecycle, readLifecycleExit,
                 lifecycleAcceptedGate, wasCompleteReEntry, emitCompleted, emitFailed,
                 exposeOutput,
             },
@@ -315,8 +342,11 @@ public class ResearchWorkflow : WorkflowBase
                 new(emitStarted, gatherContext),
                 new(gatherContext, storeContextResult),
                 new(storeContextResult, emitContextGathered),
-                new(emitContextGathered, dispatchLifecycle),
-                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
+                // 39-25 — the ambiguity fetch is the single predecessor of the dispatch,
+                // so it runs on every path that actually dispatches (fresh + re-entry).
+                new(emitContextGathered, fetchAmbiguityAssessment),
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(fetchAmbiguityAssessment)),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
 
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, lifecycleAcceptedGate),

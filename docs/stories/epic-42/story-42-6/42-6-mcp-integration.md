@@ -49,7 +49,8 @@ the seam; **Part B** is its first consumer.
 
 ### Existing MCP surfaces (prior art — a decision per item)
 
-**(a) `packages/mcp-client/` — a hand-rolled TS MCP client, orphaned.** 7,865 LOC of non-test source:
+**(a) `packages/mcp-client/` — a hand-rolled TS MCP client, orphaned.** 9,662 LOC of non-test source
+(*corrected 2026-07-30 — this said 7,865; measured over `src/**/*.ts`, 15,121 including `__tests__`*):
 `MCPClient implements IMCPClient` (`client.ts` L85 / `types.ts` L251), `StdioTransport` /
 `SSETransport` / `WebSocketTransport`, `ToolRegistry` / `ResourceRegistry` / `PromptRegistry`
 (`registry.ts` L45/200/349), `RateLimiter` + `PathValidator` + `ResourceMonitor` + `OutputCollector`
@@ -95,19 +96,48 @@ not a tool consumer and does not need governing, but whatever client §0 lands s
 
 ## Scope
 
-### §0 — Decide the client: **port or adopt** (epic Open Question 3; blocks Part B's estimate)
+### §0 — Decide the client: **port or adopt** — **DECIDED 2026-07-30: adopt the C# SDK**
+
+> **RESOLUTION — 2026-07-30.** Recorded in
+> `.dev/decisions/story-42-6-mcp-client-port-vs-adopt.md`. **Adopt the official C# SDK — the
+> `ModelContextProtocol.Core` package — behind an `IMcpTransport` / `IMcpConnectionPool` seam, and
+> delete `packages/mcp-client/` outright** (it is the behavioural reference for the security layers we
+> re-implement; git history preserves it). Epic Open Question 3 closes; Part B's estimate is now keyed
+> to "SDK + our security layer", not to a port.
+>
+> Four facts the earlier framing did not have:
+> 1. **The LOC figure below was wrong** — `packages/mcp-client/src/**/*.ts` is **9,662** lines of
+>    non-test source (15,121 with tests), not 7,865. Every port-side cost keyed on 7,865 understated it
+>    by ~23%. Corrected throughout this file.
+> 2. **The right package is `ModelContextProtocol.Core`**, not the umbrella `ModelContextProtocol` —
+>    `.Core` is the minimal-dependency client package; the umbrella adds hosting/DI sugar and
+>    `.AspNetCore` is for *hosting* a server. Verified 2026-07-30: 2.0.0 (2026-07-28) stable, last 1.x
+>    1.4.1 (2026-07-09), **net8.0** among its target frameworks.
+> 3. **One of the TS client's three transports is not in the spec.** MCP's transports are stdio and
+>    Streamable HTTP (which replaced legacy HTTP+SSE); its 246-line WebSocket transport has no current
+>    counterpart. A faithful port would port a transport the protocol no longer defines.
+> 4. **Adopting the SDK forces a major-version bump underneath Elsa — this gates the dependency.** On
+>    net8.0 both 1.4.1 and 2.0.0 require the **10.x** `Microsoft.Extensions.AI.Abstractions` /
+>    `Logging.Abstractions` / `System.IO.Pipelines` line; `Tamma.Api` resolves **9.x** today, via
+>    `Tamma.Activities` → `Elsa.Agents.Core 3.5.3` → `Microsoft.SemanticKernel 1.57.0` →
+>    `Microsoft.Extensions.AI 9.5.0`. Elsa.Agents is load-bearing (`ResolveAgentConfigActivity`,
+>    `AgentSeeder`), so the chain cannot be dropped; no older SDK avoids it; and a separate assembly
+>    does **not** avoid it either (one process, one dependency graph). **The package reference does not
+>    merge until a full unfiltered `Tamma.Api.Tests` run proves Semantic Kernel still loads under 10.x**
+>    — a filtered run is not acceptable evidence, and neither is a successful build, because the failure
+>    mode is at type load. Fallbacks, in order, are in the decision record.
 
 Three options with materially different costs. **Proxying through the TS sidecar is ruled out on
 evidence**: it would put tool execution behind an HTTP hop on the far side of the process the tool
 envelope does not cover, re-creating in Part B exactly the bypass Part A deletes, and it keeps a second
-governance path alive permanently. The live choice is **port the 7,865-LOC TS client to C#** vs
-**adopt an MCP C# SDK**. Decide on: transport coverage actually needed (stdio vs SSE/streamable HTTP),
+governance path alive permanently. The live choice was **port the 9,662-LOC TS client to C#** vs
+**adopt an MCP C# SDK**. Decided on: transport coverage actually needed (stdio vs SSE/streamable HTTP),
 protocol-version maintenance burden, and whether the TS client's extras (rate limiter, path validator,
 audit log, connection pool) are still needed once tools run inside the 42-1–42-5 envelope — several of
-them duplicate it. Record the decision (and the rejected options) in `.dev/decisions/` before Part B
-starts; the effort estimate below is not meaningful until then. Whatever is chosen, **`packages/mcp-client/`
+them duplicate it. Whatever is chosen, **`packages/mcp-client/`
 must not be left orphaned**: either it becomes the port's source of truth (then delete it once ported)
-or it is deleted outright — a 7,865-LOC unbuilt package that looks live is a trap for the next reader.
+or it is deleted outright — a 9,662-LOC unbuilt package that looks live is a trap for the next reader.
+Per the resolution above it is **deleted outright**, when Part B lands.
 
 ### Part A — govern or retire the already-live invoke surface (no dependency on Waves 0–1)
 
@@ -262,10 +292,13 @@ Part A emits nothing — it deletes a surface.
 - **Part B:** **42-1** (dynamic `Register`/`Unregister`, `ToolCategory.Mcp`, deny-by-default descriptor,
   and the platform-only registration constraint), **42-2** (bindings), **42-3** (two-stage gating),
   **42-4** (secret binding), **42-5** (audit) — the full envelope MCP tools inherit.
-- **The MCP client is a §0 decision, not an external given.** *Corrected: an earlier draft listed
-  "External: an MCP client library / SDK for the chosen transport" as if the choice were made.* The
-  real options are port `packages/mcp-client/` to C# or adopt an MCP C# SDK; proxying via the sidecar is
-  rejected (see §0). No MCP package is referenced anywhere in `apps/tamma-elsa` today.
+- **The MCP client was a §0 decision, not an external given — and §0 is now decided.** *Corrected: an
+  earlier draft listed "External: an MCP client library / SDK for the chosen transport" as if the choice
+  were made; it then was not, and as of 2026-07-30 it is.* The options were port `packages/mcp-client/`
+  to C# or adopt an MCP C# SDK; proxying via the sidecar is rejected (see §0). **Resolved: adopt
+  `ModelContextProtocol.Core`** — so this becomes a genuine external dependency, subject to §0's P1
+  (the 10.x `Microsoft.Extensions.AI.Abstractions` bump under Semantic Kernel 1.57.0). No MCP package is
+  referenced anywhere in `apps/tamma-elsa` today.
 - **Adjacent, not depended on:** `zen-mcp-provider` (MCP-as-LLM-transport) and `MCPSource` (MCP
   resources). Neither blocks this story; both should converge on §0's client later.
 - **`Tamma.Activities` holds no external credential** and carries the `TAMMA001` analyzer; no
@@ -298,7 +331,10 @@ Part A emits nothing — it deletes a surface.
 ## Estimated Effort
 
 - **Part A: Small — ~0.5–1 day.** Deletions plus the invariant tests and the dashboard cleanup.
-- **Part B: Large, and not estimable until §0.** Adopting an SDK: ~4–6 days (adapter + lifecycle/refresh
-  + classification flow + tenancy). Porting `packages/mcp-client/`: materially more, since 7,865 LOC of
-  transports/registries/pool would have to be re-implemented and then tested against real servers. The
-  estimate is deliberately withheld pending §0 rather than averaged.
+- **Part B: Large — ~4–6 days**, now that §0 is decided (adopt the SDK): adapter + lifecycle/refresh +
+  classification flow + tenancy. *Was withheld pending §0 rather than averaged.* Porting
+  `packages/mcp-client/` would have been materially more, since 9,662 LOC of transports/registries/pool
+  would have to be re-implemented and then tested against real servers. **Add ~0.5 day for §0's P1** —
+  proving Semantic Kernel still loads under the 10.x Extensions line the SDK drags in — and note that
+  if P1 fails, the fallback (an Elsa upgrade, or a narrow stdio + Streamable-HTTP client behind the
+  same seam) is a separate cost not carried here.

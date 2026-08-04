@@ -24,6 +24,17 @@ namespace Tamma.Activities.Tests.Actions;
 [TestFixture]
 public class ActionCatalogStartupValidatorTests
 {
+    /// <summary>
+    /// Story 42-10 — compose the shell profile the way a host does, so the new
+    /// profile-consistency check in StartAsync sees an initialized profile and the
+    /// catalog's shipped shell level (80, unsandboxed default) agrees. Idempotent
+    /// for the same value, so this is safe process-wide.
+    /// </summary>
+    [OneTimeSetUp]
+    public void ComposeShellProfile() => Tamma.Core.Actions.ShellExecutionProfile.Initialize(false);
+
+    private static IConfiguration EmptyConfig() => new ConfigurationBuilder().Build();
+
     /// <summary>The production inputs, as StartAsync reads them (live sources).</summary>
     private static ValidatorInputs LiveInputs() => ValidatorInputs.Live(RealRegistry());
 
@@ -65,7 +76,7 @@ public class ActionCatalogStartupValidatorTests
     {
         // Green: the hosted service completes against the real six executors.
         var validator = new ActionCatalogStartupValidator(
-            RealRegistry(), NullLogger<ActionCatalogStartupValidator>.Instance);
+            RealRegistry(), EmptyConfig(), NullLogger<ActionCatalogStartupValidator>.Instance);
         await validator.StartAsync(CancellationToken.None);
 
         // Red: an uncatalogued executor refuses the boot AT STARTUP, and the
@@ -74,7 +85,7 @@ public class ActionCatalogStartupValidatorTests
             new IToolExecutor[] { new UncataloguedTool() },
             NullLogger<ToolExecutorRegistry>.Instance);
         var failing = new ActionCatalogStartupValidator(
-            doctored, NullLogger<ActionCatalogStartupValidator>.Instance);
+            doctored, EmptyConfig(), NullLogger<ActionCatalogStartupValidator>.Instance);
 
         var act = () => failing.StartAsync(CancellationToken.None);
         (await act.Should().ThrowAsync<TammaError>())
@@ -132,6 +143,59 @@ public class ActionCatalogStartupValidatorTests
             .Which.Detail.Should().Contain("Frobnicate").And.Contain("developer");
     }
 
+    /// <summary>
+    /// <b>Review LOW-5 (2026-07-31).</b> The <c>mcp__*</c> PREFIX rule added to
+    /// <c>ToolNameAliases.TryResolve</c> made every name beginning <c>mcp__</c>
+    /// resolve — to a real catalog member — which silently switched this check off
+    /// for that whole family: <c>("developer", "mcp__evil__anything")</c> stopped
+    /// producing a violation and Tamma.Api booted on it. Checks 1, 2 and 4 all
+    /// require <c>key.Ns == Tool</c>; check 3 did not, and that asymmetry was the
+    /// hole. An MCP name reaching the GATE at runtime is the design; an MCP name
+    /// baked into a shipped agent config is drift, and CI is the half of the D2
+    /// bargain that has to catch it.
+    /// </summary>
+    [TestCase("mcp__evil__anything")]
+    [TestCase("mcp__server__tool")]
+    [TestCase("MCP__Server__Tool")]
+    public void Boot_Throws_WhenAnAdvertisedNameIsAnMcpName(string name)
+    {
+        var inputs = LiveInputs() with
+        {
+            AdvertisedNames = LiveInputs().AdvertisedNames
+                .Append(("developer", name)).ToArray(),
+        };
+
+        var violations = ActionCatalogStartupValidator.Check(inputs);
+
+        violations.Should().ContainSingle(v => v.Code == "ACTION.CATALOG.UNRESOLVABLE_TOOL_ALIAS")
+            .Which.Detail.Should().Contain(name);
+    }
+
+    /// <summary>The same hole on the shell-tool vocabulary (LOW-5).</summary>
+    [Test]
+    public void Boot_Throws_WhenAShellToolNameIsAnMcpName()
+    {
+        var inputs = LiveInputs() with
+        {
+            ShellToolNames = LiveInputs().ShellToolNames.Append("mcp__evil__anything").ToArray(),
+        };
+
+        var violations = ActionCatalogStartupValidator.Check(inputs);
+
+        violations.Should().ContainSingle(v => v.Code == "ACTION.CATALOG.UNRESOLVABLE_TOOL_ALIAS")
+            .Which.Detail.Should().Contain("mcp__evil__anything");
+    }
+
+    /// <summary>
+    /// The control: the LIVE inputs are still clean, so restoring the strictness
+    /// did not just make the real vocabularies unbootable.
+    /// </summary>
+    [Test]
+    public void TheLiveVocabularies_StillProduceNoViolations()
+    {
+        ActionCatalogStartupValidator.Check(LiveInputs()).Should().BeEmpty();
+    }
+
     [Test]
     public void Boot_Throws_WhenAShellToolNameIsNeitherResolvableNorJustified()
     {
@@ -159,6 +223,50 @@ public class ActionCatalogStartupValidatorTests
 
         violations.Should().ContainSingle(v => v.Code == "ACTION.CATALOG.EXECUTOR_TYPE_NOT_IN_CATALOG")
             .Which.Detail.Should().Contain(nameof(UncataloguedTool));
+    }
+
+    // ── Story 42-10 (D4) — the shell-profile consistency check ──────────────
+
+    [Test]
+    public void ShellProfile_GreenWhenCatalogLevelMatchesConfig()
+    {
+        // Unsandboxed config implies 80; a catalog shipping 80 for both shell rows
+        // and an initialized profile is clean.
+        ActionCatalogStartupValidator.CheckShellProfile(
+            catalogShellLevel: 80, catalogProcessSpawnLevel: 80,
+            configSandboxed: false, profileInitialized: true)
+            .Should().BeEmpty();
+
+        // Sandboxed config implies 40.
+        ActionCatalogStartupValidator.CheckShellProfile(
+            catalogShellLevel: 40, catalogProcessSpawnLevel: 40,
+            configSandboxed: true, profileInitialized: true)
+            .Should().BeEmpty();
+    }
+
+    [Test]
+    public void ShellProfile_Throws_WhenCatalogFrozeBeforeInitialize()
+    {
+        // The ordering fault: config says sandboxed (40) but the catalog froze at
+        // the unsandboxed default (80) because it was touched before Initialize.
+        var violations = ActionCatalogStartupValidator.CheckShellProfile(
+            catalogShellLevel: 80, catalogProcessSpawnLevel: 80,
+            configSandboxed: true, profileInitialized: true);
+
+        violations.Should().OnlyContain(v => v.Code == "ACTION.CATALOG.SHELL_PROFILE_MISMATCH");
+        violations.Should().HaveCount(2, "both shell rows are checked");
+        violations.Should().Contain(v => v.Detail.Contains("tool:shell_execute"));
+        violations.Should().Contain(v => v.Detail.Contains("effect:process.spawn"));
+    }
+
+    [Test]
+    public void ShellProfile_Throws_WhenProfileWasNeverComposed()
+    {
+        var violations = ActionCatalogStartupValidator.CheckShellProfile(
+            catalogShellLevel: 80, catalogProcessSpawnLevel: 80,
+            configSandboxed: false, profileInitialized: false);
+
+        violations.Should().Contain(v => v.Code == "ACTION.CATALOG.SHELL_PROFILE_UNCOMPOSED");
     }
 
     // ── Aggregation (D7) ────────────────────────────────────────────────────

@@ -147,32 +147,71 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void SourceControlWrite_has_the_6_expected_members()
+    public void SourceControlWrite_has_the_17_expected_members()
     {
+        // 6 -> 10 (Story 43-12): the coarse effect:git.pull-request.merge is RETIRED
+        // and replaced by the per-target trio git.merge.{dev,qa,main} (+3 net +2);
+        // plus the two RESERVED source-control-write keys git.checks.bypass (50) and
+        // git.webhook.register (85, DUAL-dormant) (+2). Net 6 -> 10.
+        // 10 -> 17 (Story 31-13): +7 PR operation verbs
+        // git.pull-request.{close,reopen,comment,review-comment,request-reviewers,
+        // label,set-draft} (enforceable-but-unbound; review-comment at level 40, the
+        // rest at 35).
         WiresIn(ActionGroup.SourceControlWrite).Should().BeEquivalentTo(new[]
         {
             "tool:git_operations.write", "effect:git.branch.create", "effect:git.branch.delete",
-            "effect:git.pull-request.create", "effect:git.pull-request.merge", "effect:git.release.create",
+            "effect:git.pull-request.create",
+            "effect:git.merge.dev", "effect:git.merge.qa", "effect:git.merge.main",
+            "effect:git.release.create",
+            "effect:git.checks.bypass", "effect:git.webhook.register",
+            "effect:git.pull-request.close", "effect:git.pull-request.reopen",
+            "effect:git.pull-request.comment", "effect:git.pull-request.review-comment",
+            "effect:git.pull-request.request-reviewers", "effect:git.pull-request.label",
+            "effect:git.pull-request.set-draft",
         });
     }
 
     [Test]
-    public void IssueTracking_has_the_2_expected_members()
+    public void IssueTracking_has_the_16_expected_members()
     {
+        // 2 → 12 (Story 44-2): the NATIVE tracker's ten mutating routes join the
+        // two EXTERNAL-tracker mutations. The group's partition rule is kind of
+        // consequence AT COMPLETION, and each of these completes by changing
+        // what the tracker says the work is — including the preferences pair,
+        // which was deliberately NOT filed under platform-automation (that
+        // would bury a tenant's default project in the same lever as the outbox
+        // sweeper, invisible to anyone gating the tracker).
+        // 12 → 16 (Story 31-13): +4 formerly-ungoverned issue callbacks
+        // git.issue.{create,comment,labels.set,labels.remove} (enforceable-but-unbound,
+        // level 35) — each completes by changing an issue on the tracker.
         WiresIn(ActionGroup.IssueTracking).Should().BeEquivalentTo(new[]
         {
             "effect:git.issue.patch", "effect:jira.ticket.patch",
+            "effect:tracker.project.create", "effect:tracker.project.update",
+            "effect:tracker.project.delete",
+            "effect:tracker.work-item.create", "effect:tracker.work-item.update",
+            "effect:tracker.work-item.delete", "effect:tracker.work-item.assign",
+            "effect:tracker.work-item.set-status",
+            "effect:tracker.preferences.set", "effect:tracker.preferences.delete",
+            "effect:git.issue.create", "effect:git.issue.comment",
+            "effect:git.issue.labels.set", "effect:git.issue.labels.remove",
         });
     }
 
     [Test]
-    public void DeployControl_has_the_6_expected_members()
+    public void DeployControl_has_the_10_expected_members()
     {
         // implement-infrastructure is deliberately NOT here (43-3 D5.1).
+        // 6 -> 10 (Story 43-12): the coarse effect:deploy.promote-prod is RETIRED and
+        // replaced by the per-target quintet deploy.{dev,qa,uat,staging,prod}
+        // (dev+staging RESERVED — no pipeline stage exists). Net 6 -> 10.
         WiresIn(ActionGroup.DeployControl).Should().BeEquivalentTo(new[]
         {
             "agent-action:plan-deployment", "agent-action:configure-cicd", "agent-action:deploy",
-            "agent-action:rollback", "effect:deploy.promote-prod", "effect:deploy.rollback",
+            "agent-action:rollback",
+            "effect:deploy.dev", "effect:deploy.qa", "effect:deploy.uat",
+            "effect:deploy.staging", "effect:deploy.prod",
+            "effect:deploy.rollback",
         });
     }
 
@@ -186,22 +225,33 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void ModelInvocation_has_the_3_expected_members()
+    public void ModelInvocation_has_the_7_expected_members()
     {
+        // 3 -> 7 (Story 43-8, 2026-07-30): the four mentorship-session lifecycle
+        // effects. The 43-3 D1 partition rule is KIND OF CONSEQUENCE AT COMPLETION,
+        // and each of these completes by leaving an autonomous, LLM-driven agent run
+        // started / suspended / resumed / terminated — the same consequence as
+        // effect:agent-dispatch.run, which already sits here. REJECTED alternative:
+        // platform-automation "because it starts a workflow", which is HOUSEKEEPING
+        // (engine mediation writes, sweepers, platform tasks) and would bury an
+        // agent-run control in the same admin lever as the outbox sweeper.
         WiresIn(ActionGroup.ModelInvocation).Should().BeEquivalentTo(new[]
         {
             "effect:llm.call", "effect:mcp.tool.invoke", "effect:agent-dispatch.run",
+            "effect:mentorship.session.start", "effect:mentorship.session.pause",
+            "effect:mentorship.session.resume", "effect:mentorship.session.cancel",
         });
     }
 
     [Test]
-    public void Secrets_has_the_4_expected_members()
+    public void Secrets_has_the_5_expected_members()
     {
         // audit-secrets sits here, not planning-and-analysis: subject dominates
-        // verb for this group (43-3 D5.4).
+        // verb for this group (43-3 D5.4). 42-10 added effect:secret.read (level
+        // 90) — the LLM value-read — alongside the machinery reveal.
         WiresIn(ActionGroup.Secrets).Should().BeEquivalentTo(new[]
         {
-            "agent-action:audit-secrets", "effect:secret.reveal",
+            "agent-action:audit-secrets", "effect:secret.reveal", "effect:secret.read",
             "automation:secret-auto-rotation-scheduler", "automation:retire-sweep",
         });
     }
@@ -233,8 +283,20 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void The_per_group_counts_sum_to_183()
+    public void The_per_group_counts_sum_to_217()
     {
+        // 206 → 217 (Story 31-13): source-control-write 10 → 17 (+7 PR ops) and
+        // issue-tracking 12 → 16 (+4 issue callbacks) — nothing else moves.
+        // 205 → 206 (Story 42-10): +1 in secrets — effect:secret.read (level 90),
+        // the LLM value-read alongside the machinery reveal; nothing else moves.
+        // 197 → 205 (Story 43-12): source-control-write 6 → 10 (retire the coarse
+        // merge, add the merge trio + checks.bypass + webhook.register) and
+        // deploy-control 6 → 10 (retire promote-prod, add the deploy quintet) —
+        // nothing else moves.
+        // 193 → 197: +4 mentorship-session effects, ALL in model-invocation
+        // (Story 43-8) — the group goes 3 → 7 and nothing else moves.
+        // 183 → 193: +10 native-tracker effects, ALL in issue-tracking
+        // (Story 44-2 AC10) — the group goes 2 → 12 and nothing else moves.
         // 154 → 176: +16 agent-actions (Story 41-1a) and +6 document types
         // (Story 41-1b); 176 → 180: +3 schedule effects and +1 scheduler
         // automation member (Story 41-30); 180 → 181: +1 automation member
@@ -253,16 +315,16 @@ public class ActionGroupMembershipTests
             [ActionGroup.CommandExecution] = 2,
             [ActionGroup.CiAndTest] = 3,
             [ActionGroup.SourceControlRead] = 1,
-            [ActionGroup.SourceControlWrite] = 6,
-            [ActionGroup.IssueTracking] = 2,
-            [ActionGroup.DeployControl] = 6,
+            [ActionGroup.SourceControlWrite] = 17,
+            [ActionGroup.IssueTracking] = 16,
+            [ActionGroup.DeployControl] = 10,
             [ActionGroup.ExternalComms] = 2,
-            [ActionGroup.ModelInvocation] = 3,
-            [ActionGroup.Secrets] = 4,
+            [ActionGroup.ModelInvocation] = 7,
+            [ActionGroup.Secrets] = 5,
             [ActionGroup.PlatformAutomation] = 43,
         };
 
-        counts.Values.Sum().Should().Be(183);
+        counts.Values.Sum().Should().Be(217);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -65,10 +66,60 @@ public static class ActionCatalogGovernanceServiceCollectionExtensions
             sp.GetService<IDbContextFactory<ControlPlaneDbContext>>()));
         services.TryAddScoped<IGovernancePrincipalResolver, GovernancePrincipalResolver>();
 
+        // ── Story 43-5 F11 — the BREAK-GLASS override ───────────────────────
+        // Config-sourced and singleton BY DESIGN, not by convenience: the state
+        // is read once at construction, so engaging it requires a configuration
+        // change AND a restart. There is deliberately no endpoint and no writer
+        // — an API that can switch off a governance posture is itself a
+        // governance surface, and a compromised admin session would reach it.
+        services.TryAddSingleton<IGovernanceBreakGlass>(sp =>
+            new ConfigurationGovernanceBreakGlass(
+                sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),
+                sp.GetService<ILogger<ConfigurationGovernanceBreakGlass>>(),
+                sp.GetService<TimeProvider>()));
+
         // The audit event family (43-5 AC13) + the DB-backed IAutonomyGate
         // (scoped: IEventRepository / IAcceptanceRulesResolver are scoped).
         services.TryAddScoped<ActionGateEventsService>();
         services.TryAddScoped<IAutonomyGate, AutonomyGateService>();
+
+        // Story 43-15 (Amendment 2-H) — the dial-diff telemetry reader (fire
+        // counts off the git/agent-dispatch mediation families + approve rates
+        // from decided grants). Scoped: IEventRepository is scoped.
+        services.TryAddScoped<ActionTelemetryReader>();
+
+        // Story 43-9 AC12(c)/AC13 — the REQUEST half of the ledger, and the one
+        // reader `Tamma:Governance:AuthorizationTtlHours` has ever had. Singleton
+        // because it holds only the resolved TTL and delegates to the singleton
+        // ledger; the principal it keys a row to is passed in by the caller, never
+        // resolved here (a re-resolution without the caller's claims would key
+        // some rows to the wrong principal and the consult would never find them).
+        services.TryAddSingleton<IActionAuthorizationRequests>(sp =>
+            new ActionAuthorizationRequests(
+                sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),
+                sp.GetService<IActionAuthorizationLedger>(),
+                sp.GetService<ILogger<ActionAuthorizationRequests>>()));
+
+        // Story 43-14 — the approval-grant minter (workflow approvals mint
+        // correlation-standing grants). Scoped: it resolves the scoped principal
+        // resolver + scoped event service. Only wired when the ledger is (a CP
+        // DB factory is present) — without a ledger there is nothing to mint into.
+        if (services.Any(d => d.ServiceType == typeof(IDbContextFactory<ControlPlaneDbContext>)))
+        {
+            services.TryAddScoped<ApprovalGrantMinter>();
+            // Story 43-14 (D6) — the Seam B denial-path broker (one shell ask per
+            // run). Optional-nullable in InlineToolLoopRunner; wired only with a
+            // ledger. Scoped: resolves the scoped principal resolver.
+            services.TryAddScoped<ToolLoopAuthorizationBroker>();
+        }
+
+        // Story 43-9 Seam D — the deny-only background gate. SINGLETON, and it
+        // takes IServiceScopeFactory rather than IAutonomyGate: the gate and the
+        // principal resolver are SCOPED (they read the scoped ITenantContext /
+        // IEventRepository), and injecting a scoped service into a singleton
+        // IHostedService is a startup crash, not a test failure. Every tick makes
+        // its own scope.
+        services.TryAddSingleton<IBackgroundActionGate, BackgroundActionGate>();
 
         // ── Seam B — the tool-loop gate ─────────────────────────────────────
         // Story 43-5 data-source seam: the 43-4 gate class, now fed by the
@@ -79,7 +130,20 @@ public static class ActionCatalogGovernanceServiceCollectionExtensions
         services.TryAddScoped<IToolLoopAutonomyGate>(sp => new CatalogDefaultToolLoopAutonomyGate(
             sp.GetRequiredService<IGovernancePolicySnapshotProvider>(),
             sp.GetRequiredService<ITenantContext>(),
-            sp.GetService<ILogger<CatalogDefaultToolLoopAutonomyGate>>()));
+            sp.GetService<ILogger<CatalogDefaultToolLoopAutonomyGate>>(),
+            sp.GetService<IGovernanceBreakGlass>(),
+            // Story 42-10 (D7) — the shell secret-read screen's configurable paths.
+            sp.GetService<IConfiguration>()?.GetSection("Tools:Shell:SecretPaths").Get<string[]>()));
+
+        // ── Story 43-8 AC9 — enforcementSites ───────────────────────────────
+        // Computes, per ActionKey, the concrete bound sites (routes carrying
+        // IActionGateMetadata + TammaApiClient methods carrying [PerformsEffect])
+        // so the admin API can serialise them and the 43-7 UI can render "not
+        // enforced anywhere yet" for an EMPTY array. Singleton with a lazy first
+        // computation: endpoint building happens on the first request, so eager
+        // resolution here would capture an empty data source.
+        services.TryAddSingleton<IActionEnforcementSites>(sp =>
+            new ActionEnforcementSites(() => ActionEnforcementSites.DiscoverEndpoints(sp)));
 
         // The fail-loud startup validator (Tamma.Api host only — see class doc).
         // TryAddEnumerable keeps a repeated call from running the checks twice.

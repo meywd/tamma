@@ -14,8 +14,10 @@ namespace Tamma.Activities.LlmCall.Tools;
 public class ShellExecuteTool : IToolExecutor
 {
     private readonly ILogger<ShellExecuteTool> _logger;
+    private readonly IConfiguration _configuration;
     private readonly string _workspaceRoot;
     private readonly int _timeoutSeconds;
+    private readonly bool _sandboxed;
 
     public string ToolName => "shell_execute";
 
@@ -39,11 +41,13 @@ public class ShellExecuteTool : IToolExecutor
     public ShellExecuteTool(ILogger<ShellExecuteTool> logger, IConfiguration configuration)
     {
         _logger = logger;
+        _configuration = configuration;
         _workspaceRoot = configuration["ToolExecution:WorkspaceRoot"]
                          ?? Environment.CurrentDirectory;
         _timeoutSeconds = int.TryParse(configuration["ToolExecution:ShellTimeoutSeconds"], out var t)
             ? t
             : 60;
+        _sandboxed = configuration.GetValue("Tools:Shell:Sandboxed", false);
     }
 
     public async Task<ToolExecutionResult> ExecuteAsync(
@@ -75,6 +79,25 @@ public class ShellExecuteTool : IToolExecutor
                 return blockedResult;
             }
 
+            // Story 42-10 (AC4, D2): under the sandboxed profile, confine the
+            // command to the workspace root before it spawns. Unsandboxed is
+            // byte-identical to before (the screen is a no-op).
+            if (_sandboxed)
+            {
+                var confinement = WorkspaceConfinementScreen.GetViolation(command, _workspaceRoot);
+                if (confinement != null)
+                {
+                    _logger.LogWarning(
+                        "Shell command blocked by workspace confinement: {ToolName} {ToolCallId} reason={Reason}",
+                        ToolName, toolCallId, confinement);
+
+                    var confinedResult = new ToolExecutionResult(toolCallId, ToolName, false,
+                        $"Command blocked by workspace confinement: {confinement}", sw.ElapsedMilliseconds);
+                    LogCompletion(toolCallId, confinedResult);
+                    return confinedResult;
+                }
+            }
+
             _logger.LogDebug(
                 "Shell command execution started: {ToolName} {ToolCallId} timeout={TimeoutMs}ms",
                 ToolName, toolCallId, _timeoutSeconds * 1000);
@@ -92,6 +115,10 @@ public class ShellExecuteTool : IToolExecutor
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+
+            // Story 42-10 (AC1, D1): the child NEVER inherits the API process's
+            // secrets. Applied in both profiles — the strip is unconditional.
+            ProcessEnvironmentAllowlist.Apply(psi, _configuration);
 
             if (isWindows)
             {

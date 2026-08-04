@@ -177,6 +177,12 @@ public static class DependencyInjection
         services.TryAddSingleton<ITenantDbMigrator, EfTenantDbMigrator>();
         services.TryAddSingleton<ITenantDataSourceDbMigrator, EfTenantDbMigrator>();
         services.TryAddSingleton<ITenantMigrationSweeper, TenantMigrationSweeper>();
+        // Sweep hygiene (2026-07-30): single-flight (cluster-wide advisory
+        // lock) + background execution with a pollable run id. Singleton
+        // because the run registry and the process-local half of the gate are
+        // process state; IDisposable so shutdown cancels in-flight runs and
+        // closes the lock session.
+        services.TryAddSingleton<ITenantMigrationSweepRunner, TenantMigrationSweepRunner>();
         // Story 39-11 — the sole writer/reader of the tenant-resident
         // document_instances store (immutable revisions + supersession).
         services.AddScoped<IDocumentInstanceRepository, DocumentInstanceRepository>();

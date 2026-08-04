@@ -48,7 +48,10 @@ internal static class MediatedLlmText
             Role = string.IsNullOrWhiteSpace(role) ? "developer" : role,
             Prompt = prompt,
             EnableToolLoop = false,
-            CorrelationId = context.WorkflowExecutionContext.Id,
+            // Story 43-14 (AC4) — the RUN correlation, not the sub-workflow's id.
+            CorrelationId = string.IsNullOrWhiteSpace(context.WorkflowExecutionContext.CorrelationId)
+                ? context.WorkflowExecutionContext.Id
+                : context.WorkflowExecutionContext.CorrelationId!,
         };
 
         var response = await apiClient.CallLlmAsync(request, tenantId, ct).ConfigureAwait(false);

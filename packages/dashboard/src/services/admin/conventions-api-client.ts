@@ -82,6 +82,20 @@ export interface RegistryResponse {
   roleActions: { role: string; action: string }[];
 }
 
+/**
+ * One row of `GET /api/conventions/registry/actions` — the actions eligible for a
+ * single role. Mirrors `RoleActionsResponse(string Role, IReadOnlyList<string> Actions)`
+ * (`apps/tamma-elsa/src/Tamma.Api/Dtos/Conventions/ConventionDtos.cs`).
+ *
+ * Story 43-0 AC6: this endpoint was declared as `string[]` here, which it has never
+ * been — the first consumer to write `actions.map(a => a.toUpperCase())` would have
+ * type-checked and crashed at runtime.
+ */
+export interface RoleActions {
+  role: string;
+  actions: string[];
+}
+
 // === Tenant API ==============================================================
 
 export const conventionsApi = {
@@ -156,8 +170,12 @@ export const conventionRegistryApi = {
   /** `GET /api/conventions/registry/roles` */
   getRoles: () => fetchJSON<string[]>('/conventions/registry/roles'),
 
-  /** `GET /api/conventions/registry/actions` */
-  getActions: () => fetchJSON<string[]>('/conventions/registry/actions'),
+  /**
+   * `GET /api/conventions/registry/actions` — actions PER ROLE (`[{ role, actions[] }]`),
+   * NOT a flat action list. For a flat list read `actions` off the
+   * `/conventions/registry` aggregate (`RegistryResponse.actions`).
+   */
+  getActions: () => fetchJSON<RoleActions[]>('/conventions/registry/actions'),
 
   /** `GET /api/conventions/registry/role-actions` — eligible (role,action) pairs. */
   getRoleActions: () =>

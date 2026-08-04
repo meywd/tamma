@@ -365,21 +365,19 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     /// <summary>
     /// Best-effort reviewer assignment. Failures must not fail PR creation.
+    /// Story 31-13 — this now delegates to the promoted, first-class
+    /// <see cref="RequestReviewersAsync"/> verb and swallows its typed result here,
+    /// so the create-PR side effect keeps its "never fail the PR" posture while the
+    /// governed path surfaces failures. (<paramref name="httpClient"/> retained for
+    /// call-site compatibility; the public verb resolves its own client.)
     /// </summary>
     private async Task TryRequestReviewersAsync(HttpClient httpClient, string repository, int prNumber, List<string> reviewers)
     {
         if (reviewers is not { Count: > 0 }) return;
-        try
-        {
-            var resp = await httpClient.PostAsJsonAsync(
-                $"/repos/{repository}/pulls/{prNumber}/requested_reviewers", new { reviewers });
-            if (!resp.IsSuccessStatusCode)
-                _logger.LogWarning("Reviewer request for PR #{Number} returned {Status}", prNumber, resp.StatusCode);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to request reviewers for PR #{Number} (continuing)", prNumber);
-        }
+        var result = await RequestReviewersAsync(repository, prNumber, reviewers);
+        if (!result.Success)
+            _logger.LogWarning(
+                "Reviewer request for PR #{Number} failed: {Error} (continuing)", prNumber, result.Error);
     }
 
     public Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber)
@@ -475,12 +473,262 @@ public class GitHubIntegrationService : IGitHubIntegrationService
                 MergeableState = pr.TryGetProperty("mergeable_state", out var mst) && mst.ValueKind == JsonValueKind.String
                     ? mst.GetString() : null,
                 IsDraft = pr.TryGetProperty("draft", out var d) && d.ValueKind == JsonValueKind.True,
+                // Story 43-12 — the base/target branch, for merge-target key selection.
+                BaseBranch = pr.TryGetProperty("base", out var b) && b.ValueKind == JsonValueKind.Object
+                             && b.TryGetProperty("ref", out var br) && br.ValueKind == JsonValueKind.String
+                    ? br.GetString() ?? string.Empty : string.Empty,
             };
             return IntegrationResult<GitHubPullRequestDetail>.Ok(detail);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to read GitHub PR #{Number} in {Repo}", pullRequestNumber, repository);
+            return IntegrationResult<GitHubPullRequestDetail>.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Parse a GitHub PR JSON object into <see cref="GitHubPullRequestDetail"/> —
+    /// the same field parsing <see cref="GetGitHubPullRequestAsync"/> uses (State,
+    /// Number, Merged, IsDraft from <c>draft</c>, BaseBranch from <c>base.ref</c>).
+    /// Shared by the Story 31-13 close/reopen verbs.
+    /// </summary>
+    private static GitHubPullRequestDetail ParsePullRequestDetail(JsonElement pr, int fallbackNumber)
+        => new()
+        {
+            Number = pr.TryGetProperty("number", out var n) && n.ValueKind == JsonValueKind.Number
+                ? n.GetInt32() : fallbackNumber,
+            State = pr.TryGetProperty("state", out var st) ? st.GetString() ?? "open" : "open",
+            Merged = pr.TryGetProperty("merged", out var mg) && mg.ValueKind == JsonValueKind.True,
+            MergeCommitSha = pr.TryGetProperty("merge_commit_sha", out var ms) && ms.ValueKind == JsonValueKind.String
+                ? ms.GetString() : null,
+            Mergeable = pr.TryGetProperty("mergeable", out var ma)
+                ? ma.ValueKind switch
+                {
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    _ => (bool?)null,
+                }
+                : null,
+            MergeableState = pr.TryGetProperty("mergeable_state", out var mst) && mst.ValueKind == JsonValueKind.String
+                ? mst.GetString() : null,
+            IsDraft = pr.TryGetProperty("draft", out var d) && d.ValueKind == JsonValueKind.True,
+            BaseBranch = pr.TryGetProperty("base", out var b) && b.ValueKind == JsonValueKind.Object
+                         && b.TryGetProperty("ref", out var br) && br.ValueKind == JsonValueKind.String
+                ? br.GetString() ?? string.Empty : string.Empty,
+        };
+
+    /// <summary>Story 31-13 — close an open pull request via PATCH state=closed.</summary>
+    public Task<IntegrationResult<GitHubPullRequestDetail>> ClosePullRequestAsync(string repository, int pullRequestNumber)
+        => PatchPullRequestStateAsync(repository, pullRequestNumber, "closed");
+
+    /// <summary>Story 31-13 — reopen a closed pull request via PATCH state=open.</summary>
+    public Task<IntegrationResult<GitHubPullRequestDetail>> ReopenPullRequestAsync(string repository, int pullRequestNumber)
+        => PatchPullRequestStateAsync(repository, pullRequestNumber, "open");
+
+    private async Task<IntegrationResult<GitHubPullRequestDetail>> PatchPullRequestStateAsync(
+        string repository, int pullRequestNumber, string state)
+    {
+        var httpClient = CreateGitHubClient();
+
+        try
+        {
+            _logger.LogInformation(
+                "Setting PR #{Number} in {Repo} state to {State}", pullRequestNumber, repository, state);
+
+            var response = await httpClient.PatchAsJsonAsync(
+                $"/repos/{repository}/pulls/{pullRequestNumber}", new { state });
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to set PR #{Number} state to {State} in {Repo}: {Status} {Body}",
+                    pullRequestNumber, state, repository, (int)response.StatusCode, body);
+                return IntegrationResult<GitHubPullRequestDetail>.Fail($"{(int)response.StatusCode}: {body}");
+            }
+
+            var pr = await response.Content.ReadFromJsonAsync<JsonElement>();
+            return IntegrationResult<GitHubPullRequestDetail>.Ok(
+                ParsePullRequestDetail(pr, pullRequestNumber));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to set GitHub PR #{Number} state to {State}", pullRequestNumber, state);
+            return IntegrationResult<GitHubPullRequestDetail>.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>Story 31-13 — post a diff-anchored review comment (with head-SHA fallback).</summary>
+    public async Task<IntegrationResult<GitHubReviewComment>> PostPullRequestReviewCommentAsync(
+        string repository, int pullRequestNumber, string body, string? commitId, string path, int line, string side = "RIGHT")
+    {
+        var httpClient = CreateGitHubClient();
+
+        try
+        {
+            // Resolve the head commit SHA when the caller omits it — the review
+            // comment must be anchored to a commit.
+            if (string.IsNullOrWhiteSpace(commitId))
+            {
+                var prResponse = await httpClient.GetAsync($"/repos/{repository}/pulls/{pullRequestNumber}");
+                if (!prResponse.IsSuccessStatusCode)
+                {
+                    var prBody = await prResponse.Content.ReadAsStringAsync();
+                    return IntegrationResult<GitHubReviewComment>.Fail(
+                        $"{(int)prResponse.StatusCode}: {prBody}");
+                }
+
+                var pr = await prResponse.Content.ReadFromJsonAsync<JsonElement>();
+                commitId = pr.TryGetProperty("head", out var head) && head.ValueKind == JsonValueKind.Object
+                           && head.TryGetProperty("sha", out var sha) && sha.ValueKind == JsonValueKind.String
+                    ? sha.GetString() : null;
+
+                if (string.IsNullOrWhiteSpace(commitId))
+                    return IntegrationResult<GitHubReviewComment>.Fail(
+                        $"invalid_anchor: could not resolve head commit for PR #{pullRequestNumber}");
+            }
+
+            var payload = new { body, commit_id = commitId, path, line, side };
+            var response = await httpClient.PostAsJsonAsync(
+                $"/repos/{repository}/pulls/{pullRequestNumber}/comments", payload);
+            if (!response.IsSuccessStatusCode)
+            {
+                // A stale anchor (path/line no longer in the diff) surfaces as 422 —
+                // surface it as a typed Fail, never a throw, so the review flow reacts.
+                var respBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to post review comment on PR #{Number} in {Repo}: {Status} {Body}",
+                    pullRequestNumber, repository, (int)response.StatusCode, respBody);
+                return IntegrationResult<GitHubReviewComment>.Fail($"{(int)response.StatusCode}: {respBody}");
+            }
+
+            var comment = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var result = new GitHubReviewComment
+            {
+                Id = comment.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.Number ? id.GetInt32() : 0,
+                Body = comment.TryGetProperty("body", out var bd) ? bd.GetString() ?? "" : "",
+                Path = comment.TryGetProperty("path", out var p) ? p.GetString() : null,
+                Line = comment.TryGetProperty("line", out var l) && l.ValueKind == JsonValueKind.Number ? l.GetInt32() : null,
+                Author = comment.TryGetProperty("user", out var u) && u.ValueKind == JsonValueKind.Object
+                         && u.TryGetProperty("login", out var login) ? login.GetString() ?? "" : "",
+                CreatedAt = comment.TryGetProperty("created_at", out var ca) && ca.ValueKind == JsonValueKind.String
+                    ? ca.GetDateTime() : default,
+            };
+            return IntegrationResult<GitHubReviewComment>.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to post review comment on GitHub PR #{Number}", pullRequestNumber);
+            return IntegrationResult<GitHubReviewComment>.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Story 31-13 — first-class reviewer request. Unlike the best-effort create-PR
+    /// side effect, the failure is SURFACED (status-prefixed body), not swallowed.
+    /// </summary>
+    public async Task<IntegrationResult<bool>> RequestReviewersAsync(
+        string repository, int pullRequestNumber, IReadOnlyList<string> reviewers)
+    {
+        var httpClient = CreateGitHubClient();
+
+        try
+        {
+            var response = await httpClient.PostAsJsonAsync(
+                $"/repos/{repository}/pulls/{pullRequestNumber}/requested_reviewers", new { reviewers });
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to request reviewers for PR #{Number} in {Repo}: {Status} {Body}",
+                    pullRequestNumber, repository, (int)response.StatusCode, body);
+                return IntegrationResult<bool>.Fail($"{(int)response.StatusCode}: {body}");
+            }
+            return IntegrationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to request reviewers for GitHub PR #{Number}", pullRequestNumber);
+            return IntegrationResult<bool>.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Story 31-13 — toggle draft state. GitHub REST cannot do this; use GraphQL
+    /// (<c>convertPullRequestToDraft</c> / <c>markPullRequestReadyForReview</c>) keyed
+    /// by the PR <c>node_id</c>, resolved via REST first.
+    /// </summary>
+    public async Task<IntegrationResult<GitHubPullRequestDetail>> SetPullRequestDraftAsync(
+        string repository, int pullRequestNumber, bool draft)
+    {
+        var httpClient = CreateGitHubClient();
+
+        try
+        {
+            // 1) Resolve the PR node_id (GraphQL global id) via REST.
+            var prResponse = await httpClient.GetAsync($"/repos/{repository}/pulls/{pullRequestNumber}");
+            if (!prResponse.IsSuccessStatusCode)
+            {
+                var prBody = await prResponse.Content.ReadAsStringAsync();
+                return IntegrationResult<GitHubPullRequestDetail>.Fail($"{(int)prResponse.StatusCode}: {prBody}");
+            }
+
+            var pr = await prResponse.Content.ReadFromJsonAsync<JsonElement>();
+            var nodeId = pr.TryGetProperty("node_id", out var nid) && nid.ValueKind == JsonValueKind.String
+                ? nid.GetString() : null;
+            if (string.IsNullOrWhiteSpace(nodeId))
+                return IntegrationResult<GitHubPullRequestDetail>.Fail(
+                    $"invalid_request: could not resolve node_id for PR #{pullRequestNumber}");
+
+            // 2) Run the draft-toggle GraphQL mutation. The "github" client's
+            // BaseAddress is https://api.github.com, so the GraphQL endpoint is the
+            // relative "/graphql".
+            var mutation = draft
+                ? "mutation($pullRequestId: ID!) { convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) { pullRequest { isDraft state number } } }"
+                : "mutation($pullRequestId: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) { pullRequest { isDraft state number } } }";
+
+            var gqlResponse = await httpClient.PostAsJsonAsync(
+                "/graphql", new { query = mutation, variables = new { pullRequestId = nodeId } });
+            var gqlBody = await gqlResponse.Content.ReadAsStringAsync();
+            if (!gqlResponse.IsSuccessStatusCode)
+            {
+                _logger.LogError(
+                    "Failed to set draft for PR #{Number} in {Repo}: {Status} {Body}",
+                    pullRequestNumber, repository, (int)gqlResponse.StatusCode, gqlBody);
+                return IntegrationResult<GitHubPullRequestDetail>.Fail($"{(int)gqlResponse.StatusCode}: {gqlBody}");
+            }
+
+            using var doc = JsonDocument.Parse(gqlBody);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array
+                && errors.GetArrayLength() > 0)
+            {
+                _logger.LogError(
+                    "GraphQL errors setting draft for PR #{Number} in {Repo}: {Body}",
+                    pullRequestNumber, repository, gqlBody);
+                return IntegrationResult<GitHubPullRequestDetail>.Fail($"graphql_errors: {gqlBody}");
+            }
+
+            // data.<mutationName>.pullRequest { isDraft state number }
+            var mutationName = draft ? "convertPullRequestToDraft" : "markPullRequestReadyForReview";
+            var detail = new GitHubPullRequestDetail { Number = pullRequestNumber, IsDraft = draft };
+            if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object
+                && data.TryGetProperty(mutationName, out var mut) && mut.ValueKind == JsonValueKind.Object
+                && mut.TryGetProperty("pullRequest", out var prNode) && prNode.ValueKind == JsonValueKind.Object)
+            {
+                if (prNode.TryGetProperty("isDraft", out var isDraft) && isDraft.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    detail.IsDraft = isDraft.GetBoolean();
+                if (prNode.TryGetProperty("number", out var num) && num.ValueKind == JsonValueKind.Number)
+                    detail.Number = num.GetInt32();
+                if (prNode.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.String)
+                    // GraphQL PR state is OPEN|CLOSED|MERGED; normalise to the REST lowercase vocabulary.
+                    detail.State = (state.GetString() ?? "open").ToLowerInvariant();
+            }
+            return IntegrationResult<GitHubPullRequestDetail>.Ok(detail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to set draft for GitHub PR #{Number}", pullRequestNumber);
             return IntegrationResult<GitHubPullRequestDetail>.Fail(ex.Message);
         }
     }

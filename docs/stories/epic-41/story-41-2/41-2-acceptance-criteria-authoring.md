@@ -1,6 +1,6 @@
 # Story 41-2: Acceptance-Criteria Authoring Workflow
 
-Status: drafted
+Status: done (2026-07-29) — `AcceptanceCriteriaAuthoringWorkflow` (`DefinitionId = acceptance-criteria-authoring`) ships as a thin binding over `document-lifecycle`; the `define-acceptance-criteria` template was rewritten from the task-breakdown (Plan) wire to the `AcceptanceCriteria` wire (version 1 → 2) and its example validates with **zero** violations; the cell GRADUATED from `ContractBindingTests.PendingProducerCells` (6 → 5) into `Bindings` (16 → 17) with its intended contract adopted verbatim, and its `TemplateExampleConformanceTests.KnownNonConformingTemplates` baseline was deleted (pin 16 → 15). Claim boundary per the plan's Correction 6: this story ships the *workflow* half — 39-17/39-19 have not landed, so nothing decides at the accept gate end-to-end. See the dated amendments below.
 
 ## User Story
 
@@ -60,6 +60,10 @@ role (or the initiator) can accept in the Task View or by asking the orchestrato
    `DocumentInstance` carries a single `ParentDocumentId`, so the parent is the accepted Clarification when
    one exists (else the Findings, else null); the other consumed document ids ride the
    `ACCEPTANCE_CRITERIA.DRAFTED` event payload.
+   *(This was NOT true of the tree as first landed — the parent was computed after the lifecycle
+   returned and exposed as a workflow output only, while the persisted row's parent stayed null. Made
+   true 2026-07-29 by threading an optional `parentDocumentId` through the lifecycle dispatch into
+   `MintDraft`. See amendment 9.)*
 4. 41-15 can read the latest accepted `AcceptanceCriteria` for an issue via the 39-11 store.
 5. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
    inside the dispatched `document-lifecycle` child); passes the 39-10 structural test with no allowlist
@@ -74,3 +78,150 @@ role (or the initiator) can accept in the Task View or by asking the orchestrato
 ## Estimated Effort
 
 3–4 days
+
+## Amendments from the implementation pass (2026-07-29)
+
+1. **AC5's `[ResumeBehavior(Both)]` reads `LatestStateReEntry` in the tree** — the plan's Correction 1,
+   applied. A thin binding owns no canonical suspend node, so `Both` fails clause (b) of
+   `ResumableStandardStructuralTests`; the accept gate suspends inside the dispatched
+   `document-lifecycle` child, which the parent awaits with `WaitForCompletion = true`. The story text
+   above already reads `LatestStateReEntry`. No allowlist entry was added — the workflow declares.
+
+2. **AC1's "greenfield binding" is what landed.** Nothing dispatched
+   `(product_owner, define-acceptance-criteria)` before this story, so there is no legacy event family,
+   no parser to delete and no `IntentionallyUnbound` entry to move. The `Bindings` entry is purely
+   additive, and the `PendingProducerCells` entry 41-1b minted for this cell graduated on schedule —
+   its `IntendedContract` (10 token groups) moved into `Bindings` **verbatim**, exactly as that table
+   promised.
+
+3. **The template rewrite was load-bearing, not cosmetic.** The shipped body carried **1 of its 10**
+   required tokens (it instructed `{"tasks":[{id, description, files, dependencies, complexity,
+   testing}], totalComplexity, estimatedDuration}` — the `Plan` wire with criteria smuggled into each
+   task's `testing` string). Bound unchanged it would have failed VALIDATE on every produce. Front
+   matter `variables`/`enableTools`/`maxTokens` are byte-identical (so the convention-seed keyset and
+   the `PromptFileLoader` grid are untouched); only `version` moved 1 → 2, matching the 39-15 D7 /
+   41-1b `threat-model` rewrite precedent.
+
+4. **Acceptance posture: 41-1b chose the 7-role PANEL, not the plan's single product_owner reviewer.**
+   The implementation plan's D8 *stated the required row* as a single-reviewer `product_owner` arm.
+   41-1b had already landed a different, deliberate answer —
+   `AcceptanceDefaults.For(AcceptanceCriteria) => s_panelRules`, with the recorded reason "it is the
+   merge gate's definition of done and 41-15 verifies against it — the same breadth plan/review get".
+   That arm was **not** touched: it is 41-1b's file and 41-1b's D1 decision. The executing assertion
+   moved with it — the structure suite pins the LANDED panel row and, more importantly, pins that the
+   type does **not** reach the `_ => Rules` catch-all, which is the failure mode D8 exists to prevent.
+
+5. **A third `FlowDecision` exists (`DocumentDrafted`), against the plan's "exactly
+   `{FreshRun, LifecycleAccepted}` — no third gate".** The `.DRAFTED` member of the event family the
+   story names has to fire when — and only when — the lifecycle actually minted a document; the
+   binding knows that from the typed exit's `documentId`. Routing it is a decision over a TYPED
+   lifecycle value (39-12 D2's rule), not a parse-derived branch, and the epic README's checkable
+   "thin" clauses (a)–(f) place no constraint on `FlowDecision` count. The structure suite pins the
+   decision set exactly, so the shape is still a build gate rather than a free hand.
+
+6. **Test-coverage boundary — no new Testcontainers execution suite.** The plan's
+   `AcceptanceCriteriaLifecycleExecutionTests` (a)–(f) was NOT written. Every landed lifecycle
+   execution fixture in the tree is `[Explicit]`, no CI job passes a filter that selects `[Explicit]`
+   fixtures, and 41-1c's follow-up F1 established that under the bare-provider harness such a fixture
+   fails deterministically (the lifecycle suspends forever on its first `ActivityKind.Task` node with
+   no bookmark to resume). Adding a sixth fixture that nothing runs would have recorded coverage that
+   does not exist. Following F1's precedent, the executing coverage is
+   `AcceptanceCriteriaAuthoringWorkflowStructureTests` (**15** tests) +
+   `AcceptanceCriteriaBindingHelperTests` (**18** cases) + the two drift gates.
+   *(Counts corrected 2026-07-29, adversarial review F8: this amendment originally read "13 tests
+   + 19 cases"; the tree held 14 + 18, recounted per fixture with `dotnet test --filter`. The
+   structure suite moved 14 → 15 in the same pass, when follow-up F7 added
+   `DispatchLifecycle_ThreadsASessionId_AndTheBindingExposesIt`. These are the numbers a reader
+   uses to judge the no-execution-fixture redirect, so they are measured, not estimated.)*
+   **What that leaves
+   unproven by THIS story:** AC3's persisted-lineage assertion and AC4's 41-15 read-back are carried
+   by 41-1b's `NewDocumentTypeStoreRoundTripTests` — a real Postgres 17 Testcontainer sweep that
+   already takes `acceptance-criteria` through envelope → `DocumentInstanceRepository.InsertAsync` →
+   `ListByIssueAsync` + the production lineage handler — not by a run of this workflow. The
+   repair/revise ring and the crash re-entry short-circuit are proven generically by the 39-6/39-10
+   suites over `DocumentLifecycleWorkflow`, which this binding dispatches unmodified.
+
+7. **Shared emitter (plan D7) landed here:**
+   `Tamma.Activities/Documents/EmitDomainLifecycleEventActivity.cs` — one activity for the whole Epic
+   41 producer batch, with the event family as an input and the status derived from the type suffix
+   (`.FAILED`/`.REJECTED`/`.ESCALATED` ⇒ error, `.STARTED` ⇒ started, else success). 41-9 consumed it
+   in the same wave rather than carrying the near-identical `EmitAdrEventActivity` copy its own
+   plan's D6 called for.
+   *(Tense corrected 2026-07-29, conformance round: this amendment originally read "41-3/41-4/41-5/
+   41-6 **now ship** only a constants file". Those four stories have **not landed** — nothing of
+   theirs is in the tree. The emitter is built so that when they do land, each needs only a
+   constants file; that is INTENT for those stories, not a description of the tree. The only
+   landed consumers today are 41-2 (`AcceptanceCriteriaEvents`) and 41-9 (`AdrEvents`).)*
+
+8. **`sessionId` is threaded and exposed (added 2026-07-29, adversarial review F7).** As first
+   landed, this binding dispatched `document-lifecycle` with **no `sessionId` key** and exposed no
+   `sessionId` output — unlike every other lifecycle binding (`AdrAuthoringWorkflow.cs:245`/`:332`,
+   `DesignProposalWorkflow.cs:157`/`:247`, `DocumentLifecycleWorkflow.cs:653`). It never crashed,
+   because `DocumentLifecycleWorkflow` mints a UUIDv7 when the input is `Guid.Empty` — which is
+   exactly why nothing caught it: the accept decision was correlatable only to an id the child
+   invented and no caller ever saw. The binding now mints-or-accepts a `sessionId` in `ReadInputs`
+   (`AdrAuthoringWorkflow:118`'s shape verbatim), passes it into the dispatched lifecycle and
+   exposes it as an output. This is not cosmetic: 39-17/39-19 correlate decisions by session
+   handle. Pinned by `DispatchLifecycle_ThreadsASessionId_AndTheBindingExposesIt`.
+   *(Novelty claim narrowed 2026-07-29, conformance round. This originally read "the **first** such
+   pin in the tree — zero hits across the three `*WorkflowStructureTests` files". Both halves were
+   imprecise: the tree holds **19** `*WorkflowStructureTests` files, not three, and **2** of them
+   mention `sessionId` —
+   `DocumentLifecycleWorkflowStructureTests.cs:211` already pins `sessionId` as a lifecycle OUTPUT
+   name. The accurate claim is narrower: no other **binding's** structure suite pins a `sessionId`
+   on its lifecycle **dispatch**, so there was nothing to copy for the input half, and the other
+   bindings remain unpinned on it. The test's own doc-comment was corrected to match.)*
+
+9. **AC3's persisted parent was NOT real as first landed — it is now (added 2026-07-29, conformance
+   round F9).** AC3 (above) states that `DocumentInstance` carries a single `ParentDocumentId` "so
+   the parent is the accepted Clarification when one exists (else the Findings, else null)". That
+   was **false of the tree**: `AcceptanceCriteriaAuthoringWorkflow.cs:273` computed the parent
+   inside `ReadLifecycleExit` — i.e. AFTER the lifecycle had already minted and persisted the
+   document — and `:342` exposed it as a WORKFLOW OUTPUT only. The persisted row's parent was never
+   set, because `DocumentLifecycleWorkflow.cs:1196` → `DocumentLifecycleHelper.MintDraft` called
+   `DocumentEnvelope.CreateDraft` **without** `parentDocumentId` (defaulting null,
+   `DocumentEnvelope.cs:90`), and that was the ONLY `MintDraft` call site in `src/`. The
+   Review→document edge WAS real (`DocumentLifecycleWorkflow.cs:1231`,
+   `parentDocumentId: state.Current?.Id`), and the redirect target
+   `NewDocumentTypeStoreRoundTripTests` held **zero** `ParentDocumentId` assertions, so nothing
+   caught it.
+
+   **Resolution: the claim was made true rather than weakened.** An optional `parentDocumentId` is
+   now threaded through the lifecycle dispatch:
+
+   - `DocumentLifecycleHelper.LifecycleState` gains `ParentDocumentId` (`Guid?`, JSON member
+     `parentDocumentId`, defaulted — so a state serialized before this change rehydrates to null).
+   - `DocumentLifecycleHelper.Init(...)` gains a **trailing optional** `Guid? parentDocumentId =
+     null`; every pre-existing call site is unchanged, argument-for-argument.
+   - `DocumentLifecycleHelper.MintDraft` passes `state.ParentDocumentId` into `CreateDraft`, so the
+     produce draft **and** every repair/revise draft of the same run carry the edge (the upstream
+     document the run descends from does not change between rounds; the supersession edge is
+     untouched and orthogonal).
+   - `DocumentLifecycleWorkflow`'s Init reads the new optional `parentDocumentId` dispatch input via
+     `DocumentLifecycleHelper.ParseParentDocumentId` — blank / unparseable / all-zero ⇒ `null`,
+     never a throw: a lineage hint must not be able to fail a produce.
+   - `AcceptanceCriteriaAuthoringWorkflow` now hands `ChooseParentDocumentId(clarification,
+     findings)` to the lifecycle **at dispatch**, before the produce. The `parentDocumentId` output
+     stays and now mirrors an edge that was actually persisted.
+
+   Every other producer that dispatches `document-lifecycle` supplies no key and keeps persisting a
+   null parent — asserted in both directions, not assumed. New coverage:
+   `AcceptanceCriteriaParentLineageTests` (8 tests, `Tamma.Activities.Tests`) proves the real chain
+   `ChooseParentDocumentId → ParseParentDocumentId → Init → MintDraft → envelope`, the
+   produce/repair/revise inheritance, the state-serialization round trip, the pre-change-state
+   rehydration, and the decomposition pilot's untouched null;
+   `AcceptanceCriteriaAuthoringWorkflowStructureTests.DispatchLifecycle_HandsTheParentDocumentIdBeforeTheProduce_NotOnlyOnTheWayOut`
+   pins the dispatch key so the fix cannot regress to an output-only claim; and
+   `NewDocumentTypeStoreRoundTripTests` gains
+   `AcceptanceCriteria_PersistsAndReadsBackItsParentDocumentEdge` +
+   `ADocumentMintedWithoutAParent_PersistsANullParentDocumentId` — the redirect target's first
+   `ParentDocumentId` assertions, against a real Postgres 17 container, read back through both
+   `ListByIssueAsync` and the 39-11 lineage projection. `Tamma.Core.Tests` (959),
+   `Tamma.Activities.Tests` (3251, unfiltered) and the filtered `Tamma.Api.Tests` document/sweep run
+   (177) are all green after the change.
+
+   **What is still NOT proven by an executing run:** no fixture runs the acceptance-criteria
+   lifecycle end-to-end (amendment 6's boundary is unchanged), so "the AC row the WORKFLOW produced
+   has the Clarification as its parent" is carried by the composition of the two halves above — the
+   binding's dispatch input (pinned structurally) and the helper chain + store (both executing) —
+   not by a single end-to-end assertion.

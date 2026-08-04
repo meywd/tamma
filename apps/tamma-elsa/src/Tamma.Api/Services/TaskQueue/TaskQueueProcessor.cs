@@ -90,10 +90,18 @@ public sealed class TaskQueueProcessor : BackgroundService
         {
             try
             {
-                var processed = await ProcessOnceAsync(stoppingToken);
-                if (processed > 0)
+                // Seam D (Story 43-9 AC9) — ONE gate call per tick, deny-only.
+                if (await Tamma.Api.Services.Actions.BackgroundActionGateAccessor
+                        .MayRunTickAsync(
+                            _serviceProvider,
+                            Tamma.Core.Actions.BackgroundActor.TaskQueueProcessor,
+                            tenantId: null, stoppingToken).ConfigureAwait(false))
                 {
-                    _logger.LogDebug("TaskQueueProcessor processed {Count} tasks this cycle", processed);
+                    var processed = await ProcessOnceAsync(stoppingToken);
+                    if (processed > 0)
+                    {
+                        _logger.LogDebug("TaskQueueProcessor processed {Count} tasks this cycle", processed);
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

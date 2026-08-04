@@ -35,7 +35,7 @@ public class TrackerPreferenceRepository(
     }
 
     public async Task<(TrackerPreference Entity, bool WasCreated)> UpsertAsync(
-        TrackerPreference preference, Guid? actingUserId = null)
+        TrackerPreference preference, Guid? actingUserId = null, int? expectedVersion = null)
     {
         ArgumentNullException.ThrowIfNull(preference);
         if (preference.UserId is null || preference.TenantId is not null)
@@ -45,10 +45,10 @@ public class TrackerPreferenceRepository(
 
         var tid = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(tid);
-        return await UpsertInternal(db, preference, actingUserId);
+        return await UpsertInternal(db, preference, actingUserId, expectedVersion);
     }
 
-    public async Task<bool> DeleteAsync(Guid? userId)
+    public async Task<bool> DeleteAsync(Guid? userId, int? expectedVersion = null)
     {
         var tid = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(tid);
@@ -57,7 +57,8 @@ public class TrackerPreferenceRepository(
         if (row is null)
             return false;
         db.TrackerPreferences.Remove(row);
-        await db.SaveChangesAsync();
+        PinExpectedVersion(db, row, expectedVersion);
+        await SaveGuardingVersionAsync(db, row);
         return true;
     }
 
@@ -74,7 +75,7 @@ public class TrackerPreferenceRepository(
     }
 
     public async Task<(TrackerPreference Entity, bool WasCreated)> UpsertForTenantAsync(
-        TrackerPreference preference, Guid? actingUserId = null)
+        TrackerPreference preference, Guid? actingUserId = null, int? expectedVersion = null)
     {
         ArgumentNullException.ThrowIfNull(preference);
         if (preference.TenantId is null || preference.UserId is not null)
@@ -84,10 +85,10 @@ public class TrackerPreferenceRepository(
 
         var ambient = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(ambient);
-        return await UpsertInternal(db, preference, actingUserId);
+        return await UpsertInternal(db, preference, actingUserId, expectedVersion);
     }
 
-    public async Task<bool> DeleteByTenantAsync(Guid tenantId)
+    public async Task<bool> DeleteByTenantAsync(Guid tenantId, int? expectedVersion = null)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
@@ -98,15 +99,55 @@ public class TrackerPreferenceRepository(
         if (row is null)
             return false;
         db.TrackerPreferences.Remove(row);
-        await db.SaveChangesAsync();
+        PinExpectedVersion(db, row, expectedVersion);
+        await SaveGuardingVersionAsync(db, row);
         return true;
+    }
+
+    /// <summary>
+    /// Make the caller's <c>If-Match</c> precondition ATOMIC with the DELETE
+    /// (44-2 conformance round, 2026-07-29 — the same shape
+    /// <see cref="ApplyUpdateAsync"/> uses for the UPDATE branch and
+    /// <c>ProjectRepository.PinExpectedVersion</c> uses for both). Without it
+    /// the handler's version check and the repository's own re-read sit in
+    /// different contexts, so the interleaving
+    /// <c>W2.read(v1) → W1 upserts(v2) → W2.repo-read(v2) → W2 deletes</c>
+    /// passes the check and silently discards W1's edit. Pinning the
+    /// concurrency token's ORIGINAL value puts <c>WHERE "Version" = @expected</c>
+    /// in the DELETE itself: rowcount 0 → <c>DbUpdateConcurrencyException</c> →
+    /// the typed, retryable conflict.
+    ///
+    /// <para>No convergence loop here, unlike the opted-out upsert: a delete
+    /// that asserted a version is asking to remove exactly THAT row, and
+    /// re-reading and deleting the winner's newer row would destroy the very
+    /// edit the precondition exists to protect. An absent precondition keeps
+    /// the unconditional delete (<c>TryReadIfMatch</c>: no header means no
+    /// precondition).</para>
+    /// </summary>
+    private static void PinExpectedVersion(
+        TenantDbContext db, TrackerPreference row, int? expectedVersion)
+    {
+        if (expectedVersion is int expected)
+            db.Entry(row).Property(p => p.Version).OriginalValue = expected;
+    }
+
+    private static async Task SaveGuardingVersionAsync(TenantDbContext db, TrackerPreference row)
+    {
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw Conflict(row, ex);
+        }
     }
 
     // Match on BOTH keys so the two planes cannot collide; the principal_xor
     // CHECK guarantees exactly one predicate picks the existing row (the
     // AcceptanceRulesRepository.UpsertInternal shape).
     private static async Task<(TrackerPreference Entity, bool WasCreated)> UpsertInternal(
-        TenantDbContext db, TrackerPreference preference, Guid? actingUserId)
+        TenantDbContext db, TrackerPreference preference, Guid? actingUserId, int? expectedVersion = null)
     {
         // Wire-boundary validation (the "typed TammaError, never a DB CHECK
         // surprise" posture): DefaultKind must be a WorkItemKind wire string
@@ -119,7 +160,7 @@ public class TrackerPreferenceRepository(
         var existing = await db.TrackerPreferences.FirstOrDefaultAsync(p =>
             p.UserId == preference.UserId && p.TenantId == preference.TenantId);
         if (existing is not null)
-            return (await ApplyUpdateAsync(db, existing, preference, actingUserId), false);
+            return (await ApplyUpdateAsync(db, existing, preference, actingUserId, expectedVersion), false);
 
         preference.CreatedAt = DateTime.UtcNow;
         preference.UpdatedAt = preference.CreatedAt;
@@ -145,12 +186,90 @@ public class TrackerPreferenceRepository(
             db.Entry(preference).State = EntityState.Detached;
             var winner = await db.TrackerPreferences.FirstAsync(p =>
                 p.UserId == preference.UserId && p.TenantId == preference.TenantId);
-            return (await ApplyUpdateAsync(db, winner, preference, actingUserId), false);
+            return (await ApplyUpdateAsync(db, winner, preference, actingUserId, expectedVersion), false);
         }
     }
 
+    /// <summary>
+    /// Apply the incoming body to the winner row and save under the
+    /// <c>Version</c> concurrency token.
+    ///
+    /// <para><b>Two behaviours, keyed on whether the caller asserted a
+    /// precondition</b> (44-2 review 2026-07-29). <c>Version</c> became a real EF
+    /// concurrency token in that round, because AC9's "every mutation returns 409
+    /// on mismatch" was FALSE here: two concurrent PUTs both carrying
+    /// <c>If-Match: 1</c> both returned 200 and one write vanished.</para>
+    ///
+    /// <list type="bullet">
+    ///   <item><b><paramref name="expectedVersion"/> supplied</b> — the caller
+    ///   asserted "I am writing on top of exactly version N". The token's ORIGINAL
+    ///   value is pinned to N, so the UPDATE carries
+    ///   <c>WHERE "Version" = N</c> and a stale writer matches no row and loses
+    ///   with the typed, retryable conflict. This is the guard that makes the
+    ///   precondition ATOMIC with the write rather than merely checked against an
+    ///   earlier read in another context.</item>
+    ///   <item><b>No <paramref name="expectedVersion"/></b> — the caller OPTED OUT
+    ///   of the precondition (<c>TrackerEndpoints.TryReadIfMatch</c>: an absent
+    ///   <c>If-Match</c> means "no precondition"). Turning that into a 409 would
+    ///   be a regression, and it would break this method's documented UPSERT
+    ///   contract: an upsert converges. So a lost race here is RETRIED ONCE
+    ///   against the winner's current row — the same posture, for the same
+    ///   reason, as the 23505 retry in <see cref="UpsertInternal"/> one level up.
+    ///   A second consecutive loss is a real failure and surfaces typed.</item>
+    /// </list>
+    ///
+    /// <para>Note the contrast with <c>WorkItemRepository</c>, which is strict in
+    /// BOTH cases: a work-item write that silently lost could drop
+    /// <c>PreviousKeys</c> history, so it has no convergent reading. A preference
+    /// row is whole-body configuration and does.</para>
+    /// </summary>
     private static async Task<TrackerPreference> ApplyUpdateAsync(
-        TenantDbContext db, TrackerPreference existing, TrackerPreference incoming, Guid? actingUserId)
+        TenantDbContext db, TrackerPreference existing, TrackerPreference incoming,
+        Guid? actingUserId, int? expectedVersion = null)
+    {
+        Apply(existing, incoming, actingUserId);
+        if (expectedVersion is int expected)
+            db.Entry(existing).Property(p => p.Version).OriginalValue = expected;
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await db.SaveChangesAsync();
+                return existing;
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                // A caller that ASSERTED a version never converges — losing is
+                // the answer it asked for.
+                if (expectedVersion is not null || attempt >= ConvergenceAttempts)
+                    throw Conflict(existing, ex);
+
+                // Opted-out caller: converge on the winner's current row. The
+                // loop (rather than a single retry) is required because the race
+                // is n-way, not two-way — with k concurrent writers a retry can
+                // itself lose. Bounded, so a pathological hot row fails loud
+                // instead of spinning.
+                await db.Entry(existing).ReloadAsync();
+                if (db.Entry(existing).State == EntityState.Detached)
+                {
+                    // The winner DELETED the row mid-flight; there is nothing to
+                    // converge on, and re-inserting would resurrect config the
+                    // other writer deliberately reset.
+                    throw Conflict(existing, ex);
+                }
+                Apply(existing, incoming, actingUserId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// How many times an opted-out upsert re-reads and re-applies before giving
+    /// up. Sized for realistic contention on a single per-principal config row.
+    /// </summary>
+    private const int ConvergenceAttempts = 16;
+
+    private static void Apply(TrackerPreference existing, TrackerPreference incoming, Guid? actingUserId)
     {
         existing.DefaultProjectId = incoming.DefaultProjectId;
         existing.DefaultKind = incoming.DefaultKind;
@@ -158,7 +277,19 @@ public class TrackerPreferenceRepository(
         existing.UpdatedAt = DateTime.UtcNow;
         existing.Version += 1;
         existing.UpdatedBy = actingUserId ?? incoming.UserId;
-        await db.SaveChangesAsync();
-        return existing;
     }
+
+    private static Tamma.Core.TammaError Conflict(TrackerPreference row, DbUpdateConcurrencyException ex) => new(
+        "TRACKER.CONCURRENCY_CONFLICT",
+        "The tracker preferences were modified by another writer while this write "
+        + "was in flight (optimistic-concurrency Version mismatch). Re-read the "
+        + "preferences and retry against their current state.",
+        new Dictionary<string, object?>
+        {
+            ["userId"] = row.UserId,
+            ["tenantId"] = row.TenantId,
+            ["conflictEntries"] = ex.Entries.Count,
+        },
+        retryable: true,
+        severity: Tamma.Core.TammaErrorSeverity.Medium);
 }

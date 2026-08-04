@@ -44,8 +44,70 @@ public interface IScheduledTriggerRepository
     /// <c>true</c> = this caller owns the window; <c>false</c> = another pod
     /// (or an earlier run of this pod) already did — across pods, restarts
     /// and clock skew, because Postgres arbitrates the unique index.
+    ///
+    /// <para><b>The unit of at-most-once is the TRIGGER ROW, not the
+    /// definition</b> (LOW-7, decided 2026-07-30 — option (b), keep the
+    /// per-trigger key). A trigger row IS a schedule: its
+    /// <c>(TenantId, DefinitionId, Name)</c> natural key exists precisely so
+    /// one tenant can run the same definition on two different cadences with
+    /// two different <c>InputJson</c> payloads. Folding <c>DefinitionId</c>
+    /// into this key would make one of those schedules silently swallow the
+    /// other whenever their windows coincide — dropping configured work, which
+    /// is worse than the duplicate it prevents. Consumers get
+    /// <c>triggerId</c> as a dispatch input and can scope their idempotency
+    /// per schedule (<c>triggerId</c> + <c>windowKey</c>) or per definition
+    /// (<c>tenantId</c> + <c>definitionId</c> + <c>windowKey</c>, treating the
+    /// second call as a replay) — both discriminators are on the wire.</para>
     /// </summary>
     Task<bool> TryClaimFireAsync(ScheduledTriggerFire fire, CancellationToken ct = default);
+
+    /// <summary>
+    /// MODERATE-5 fix (2026-07-30) — the ledger's current
+    /// <see cref="ScheduledTriggerFire.Outcome"/> for a
+    /// <c>(trigger, window)</c>, or <c>null</c> when no row exists.
+    ///
+    /// <para>The tick calls this BEFORE taking the advisory lock so a window
+    /// that already reached a TERMINAL outcome (<c>dispatched</c> /
+    /// <c>failed</c>) is re-observed <b>silently</b>. Without it, a burnt
+    /// window kept recomputing as due for the rest of its cadence (the trigger
+    /// row's <c>LastFiredAt</c> only advances on SUCCESS), so every 60-second
+    /// tick on every pod re-took the lock, lost the claim and wrote another
+    /// <c>SCHEDULE.FIRE.SUPPRESSED</c> row — up to ~1440 duplicate audit rows
+    /// per day per pod for ONE failed window. Correctness was never at risk
+    /// (the ledger row is what refuses the re-dispatch); the audit trail was.
+    /// </para>
+    /// </summary>
+    Task<string?> GetFireOutcomeAsync(
+        Guid triggerId, string windowKey, CancellationToken ct = default);
+
+    /// <summary>
+    /// LOW-8 fix (2026-07-30) — the stale-claim sweep's feed: ledger rows
+    /// still <c>Outcome = 'claimed'</c> whose <c>ClaimedAt</c> predates
+    /// <paramref name="claimedBeforeUtc"/>, oldest first, at most
+    /// <paramref name="limit"/> rows. These are fires whose owning pod died
+    /// between the claim commit and the outcome stamp (or, for a manual fire,
+    /// after the dispatch CAS). Bounded and cheap by construction — the read
+    /// is a partial scan of a table that is empty of such rows in the normal
+    /// case. NOT a claim: the sweeper must win
+    /// <see cref="TryMarkFireAbandonedAsync"/> per row.
+    /// </summary>
+    Task<IReadOnlyList<ScheduledTriggerFire>> ListStaleClaimedFiresAsync(
+        DateTime claimedBeforeUtc, int limit, CancellationToken ct = default);
+
+    /// <summary>
+    /// LOW-8 fix (2026-07-30) — burn a stale claim: a conditional CAS that
+    /// stamps <c>Outcome = 'failed'</c> with
+    /// <paramref name="detail"/> only while the row is still <c>claimed</c>
+    /// (<c>DispatchedAt</c> is deliberately left untouched, so a burnt
+    /// manual fire keeps its CAS marker). Exactly one pod's sweep gets
+    /// <c>true</c> for a given row; every other pod gets <c>false</c> and does
+    /// not emit. Stamping a terminal outcome is what makes the sweep
+    /// emit-once rather than a per-tick drip, and it is explicitly NOT a
+    /// retry: at-most-once means the window is burnt, and the next window is
+    /// the recovery path.
+    /// </summary>
+    Task<bool> TryMarkFireAbandonedAsync(
+        Guid fireId, string detail, CancellationToken ct = default);
 
     /// <summary>
     /// Stamp the claimed row's outcome (<c>dispatched</c> / <c>failed</c>)

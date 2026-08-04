@@ -16,13 +16,15 @@ namespace Tamma.Core.Actions;
 /// <param name="Title">One-line UI title (43-7 renders it; empty is a boot failure).</param>
 /// <param name="Summary">One-line UI summary (empty is a boot failure).</param>
 /// <param name="DefaultMinAutonomy">
-/// The shipped default threshold: automated iff <c>currentDial &gt;= DefaultMinAutonomy</c>.
-/// Range <c>[AutonomyDial.Min, AutonomyDial.AlwaysHuman]</c> — ALWAYS written as
-/// <see cref="AutonomyDial"/> named constants, NEVER literals (a literal would
-/// not move when the dial does, and would collide with 43-1's drift guard).
-/// Shipped values reproduce today's behaviour exactly (epic decision D1): the
-/// only <see cref="AutonomyDial.AlwaysHuman"/> member is
-/// <c>document-type:design</c>.
+/// The shipped zone level: a DIAL-GOVERNED action is automated iff
+/// <c>currentDial &gt;= DefaultMinAutonomy</c>. Range <c>[AutonomyDial.Min, AutonomyDial.Max]</c>
+/// — a LEVEL, not a threshold; <see cref="AutonomyDial.AlwaysHuman"/> is NOT a
+/// legal descriptor value any more (Story 43-11 M6). Written as a plain integer
+/// literal per action (Story 43-11 D2 — a level of 45 means forty-five and must
+/// NOT move when <see cref="AutonomyDial.Min"/> moves), pinned by
+/// <c>ActionCatalogLevelTests</c>. For a MACHINERY row (<see cref="IsMachinery"/>)
+/// this field is NOT-APPLICABLE: the evaluator short-circuits before the dial
+/// comparison, so the value (left at <see cref="AutonomyDial.Min"/>) is inert.
 /// </param>
 /// <param name="SiteKey">
 /// The performing site in code (route + method, executor class, hosted-service
@@ -55,6 +57,18 @@ namespace Tamma.Core.Actions;
 /// 2026-07-25: reading a secret never requires a human — the catalog row is
 /// informational, and no admin-raised threshold on it may ever be enforced).
 /// </param>
+/// <param name="IsMachinery">
+/// Story 43-13 (43-11 Amendment 4 + the caller-kind re-audit's machinery
+/// inventory): TRUE for the 42 rows that are deterministic machinery — all 29
+/// <c>automation:*</c>, all 8 <c>platform-task:*</c>, and the 5 plumbing-only
+/// effects (<c>engine.events.append</c>, <c>engine.platform-events.append</c>,
+/// <c>engine.document.persist</c>, <c>engine.document.set-status</c>,
+/// <c>secret.reveal</c>). These rows keep key/group/risk/site for audit and
+/// drift but carry NO level semantics: the evaluator never resolves them through
+/// the dial (terminal <c>ReasonMachineryNotDialGoverned</c>), and the 43-6 API
+/// rejects threshold writes on them. <c>enabled = false</c>, role restrictions
+/// and the fail-closed unreadable-policy posture still apply.
+/// </param>
 public sealed record ActionDescriptor(
     ActionKey Key,
     ActionGroup Group,
@@ -66,4 +80,5 @@ public sealed record ActionDescriptor(
     string SiteKey,
     string? SensitiveActionCode = null,
     bool EscalatableToHuman = true,
-    bool Enforceable = true);
+    bool Enforceable = true,
+    bool IsMachinery = false);

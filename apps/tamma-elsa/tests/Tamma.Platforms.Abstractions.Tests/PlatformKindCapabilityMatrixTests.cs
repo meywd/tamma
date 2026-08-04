@@ -97,6 +97,23 @@ public sealed class PlatformKindCapabilityMatrixTests
     }
 
     [Test]
+    public void PrLifecycle_IsAdvertisedByGitHubOnly()
+    {
+        // Story 31-13 — GitHub is the only driver that performs the full PR
+        // lifecycle today; every other kind must NOT advertise it (they return
+        // capability_unsupported).
+        PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitHub)
+            .Should().Contain(PlatformCapability.PrLifecycle);
+
+        foreach (var kind in Enum.GetValues<PlatformKind>().Where(k => k != PlatformKind.GitHub))
+        {
+            PlatformKindCapabilityMatrix.DefaultsFor(kind)
+                .Should().NotContain(PlatformCapability.PrLifecycle,
+                    $"{kind} does not yet perform the PR lifecycle verbs");
+        }
+    }
+
+    [Test]
     public void Returned_set_is_read_only()
     {
         var set = PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitHub);

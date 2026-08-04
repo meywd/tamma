@@ -175,10 +175,16 @@ public class TrackerPreferenceRepositoryTests
 
         var final = await _repository.GetAsync(userId);
         final.Should().NotBeNull();
-        // NOTE: no Version == 8 assertion — Version is not yet a concurrency
-        // token (adversarial-review finding 3, deferred to the model-config
-        // lane), so concurrent updates can lose increments. Row-singularity
-        // and the typed contract are what THIS fix owns.
+        // NOTE UPDATED 2026-07-29 (44-2 review MAJOR-2): Version IS now an EF
+        // concurrency token — the "deferred to the model-config lane" note this
+        // comment used to carry has been actioned. Convergence still holds and
+        // NOTHING here throws, because these racers pass NO expectedVersion:
+        // a caller that opted out of the precondition gets the documented
+        // upsert semantics (retry once against the winner's row), not a 409.
+        // Version can still be < 8 — a retried racer re-reads and re-bumps, so
+        // increments are not one-per-call. What a supplied precondition does
+        // instead is pinned by
+        // TrackerEndpointsTests.Concurrent_preference_puts_with_the_same_if_match_produce_exactly_one_winner.
         final!.Version.Should().BeGreaterThanOrEqualTo(1);
     }
 

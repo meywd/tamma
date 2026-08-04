@@ -242,6 +242,76 @@ public class NewDocumentTypeStoreRoundTripTests
             "every type's latest revision is accepted");
     }
 
+    // ── 41-2 AC3 (added 2026-07-29, conformance follow-up F9) — the PERSISTED parent ──
+
+    /// <summary>
+    /// Story 41-2 AC3 claims the accepted AcceptanceCriteria is "persisted with lineage:
+    /// Issue → Clarification? → AcceptanceCriteria", carried by the single
+    /// <c>ParentDocumentId</c> slot. This suite was the story's stated redirect for that
+    /// claim, and it held ZERO <c>ParentDocumentId</c> assertions — every case above mints
+    /// with <c>EnvelopeFor</c>, which never sets a parent. It does now: an
+    /// <c>acceptance-criteria</c> row whose parent is a real accepted <c>clarification</c>
+    /// row in the same issue, read back through BOTH <c>ListByIssueAsync</c> and the 39-11
+    /// lineage projection.
+    ///
+    /// <para>The producing half — that
+    /// <c>AcceptanceCriteriaAuthoringWorkflow</c> hands the chosen parent to
+    /// <c>document-lifecycle</c> and that <c>MintDraft</c> puts it on the envelope — is
+    /// pinned by <c>AcceptanceCriteriaParentLineageTests</c> (Tamma.Activities.Tests),
+    /// which cannot reach a database. Together the two cover the whole edge.</para>
+    /// </summary>
+    [Test]
+    public async Task AcceptanceCriteria_PersistsAndReadsBackItsParentDocumentEdge()
+    {
+        const string issueId = "issue-41-2-parent-lineage";
+
+        var clarification = await _repo.InsertAsync(
+            _tenant,
+            EnvelopeFor(DocumentTypeKey.Clarification.ToWire(), issueId, DocumentState.Accepted),
+            null, CancellationToken.None);
+
+        var criteria = EnvelopeFor(
+            DocumentTypeKey.AcceptanceCriteria.ToWire(), issueId, DocumentState.Accepted,
+            parent: clarification.Id);
+        var written = await _repo.InsertAsync(_tenant, criteria, null, CancellationToken.None);
+
+        written.ParentDocumentId.Should().Be(clarification.Id,
+            "the store persists the envelope's parent verbatim — this is the column AC3's " +
+            "lineage claim lives in");
+
+        var listed = await _repo.ListByIssueAsync(_tenant, issueId, null, CancellationToken.None);
+        listed.Single(r => r.DocumentType == DocumentTypeKey.AcceptanceCriteria.ToWire())
+            .ParentDocumentId.Should().Be(clarification.Id,
+                "a lineage edge that does not survive the read-back is not lineage");
+
+        var lineage = await CaptureJson(await DocumentEndpoints.GetIssueLineage(
+            issueId, _repo, _tenantContext, CancellationToken.None));
+        var entry = FindEntry(lineage, written.Id);
+        entry.Should().NotBeNull();
+        entry!.Value.GetProperty("parentDocumentId").GetGuid().Should().Be(clarification.Id,
+            "the 39-11 lineage projection surfaces the Issue → Clarification → AcceptanceCriteria edge");
+    }
+
+    /// <summary>
+    /// The other direction of 41-2's threading: a producer that supplies no parent still
+    /// persists a null one. Guards the "every existing producer is unchanged" half of the
+    /// optional-parameter fix at the STORE, where a regression would actually be visible.
+    /// </summary>
+    [Test]
+    public async Task ADocumentMintedWithoutAParent_PersistsANullParentDocumentId()
+    {
+        const string issueId = "issue-41-2-no-parent";
+
+        var written = await _repo.InsertAsync(
+            _tenant,
+            EnvelopeFor(DocumentTypeKey.AcceptanceCriteria.ToWire(), issueId, DocumentState.Accepted),
+            null, CancellationToken.None);
+
+        written.ParentDocumentId.Should().BeNull();
+        (await _repo.ListByIssueAsync(_tenant, issueId, null, CancellationToken.None))
+            .Should().ContainSingle().Which.ParentDocumentId.Should().BeNull();
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -253,7 +323,7 @@ public class NewDocumentTypeStoreRoundTripTests
         type.Examples.First(e => e.IsValid).PayloadJson;
 
     private static DocumentEnvelope EnvelopeFor(
-        string typeKey, string issueId, DocumentState state, Guid? supersedes = null)
+        string typeKey, string issueId, DocumentState state, Guid? supersedes = null, Guid? parent = null)
     {
         var type = DocumentTypeRegistry.Resolve(typeKey);
         var draft = DocumentEnvelope.CreateDraft(
@@ -266,6 +336,7 @@ public class NewDocumentTypeStoreRoundTripTests
             // against the other.
             DocumentProducer.Create("senior_developer", "decompose-issue", "issue-decomposition"),
             DocumentTestData.Payload(ValidExampleJson(type)),
+            parentDocumentId: parent,
             supersedesDocumentId: supersedes);
         return state == DocumentState.Draft ? draft : draft with { State = state };
     }

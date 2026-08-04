@@ -1,0 +1,446 @@
+using System.Reflection;
+using System.Text.Json;
+using FluentAssertions;
+using NUnit.Framework;
+using Tamma.Api.Services.PromptStore;
+using Tamma.ElsaServer.Workflows.Helpers;
+
+namespace Tamma.Activities.Tests.Workflows;
+
+/// <summary>
+/// Story 41-3 — the pure core of the <c>backlog-prioritization</c> binding, and the
+/// SHARED-CONTRACT gate for <see cref="BacklogBindingHelper.BuildAnchor"/> +
+/// <see cref="BacklogBindingHelper.NormalizeSegment"/>, which 41-4 (roadmap) and 41-6 (sprint
+/// planning) both call BY NAME (story AC6 / Amendment A3).
+///
+/// <para>This fixture lives in <c>Tamma.Activities.Tests</c> — a DIFFERENT assembly from
+/// <c>Tamma.ElsaServer</c> — and calls both members directly, so a <c>private</c> member or an
+/// inline lambda does not compile. That alone does not catch <c>internal</c>
+/// (<c>Tamma.ElsaServer.csproj</c> has <c>InternalsVisibleTo Tamma.Activities.Tests</c>, and
+/// 41-4/41-6 happen to sit in the SAME assembly as the helper, so <c>internal</c> would compile
+/// for them too and quietly make the member unusable to anything else). The modifier is therefore
+/// asserted DIRECTLY, by reflection.</para>
+/// </summary>
+[TestFixture]
+public class BacklogBindingHelperTests
+{
+    private const string Repo = "meywd/tamma";
+
+    // ====================================================================
+    // AC6 — the shared contract is PUBLIC, deterministic, total, and
+    //        delimiter-safe
+    // ====================================================================
+
+    [Test]
+    public void BuildAnchor_AndItsSegmentNormaliser_ArePublicAndSeparatelyCallable()
+    {
+        // Story AC6 / Amendment A3. 41-6 (implementation-plan.md:90, :349, :524-528) and 41-4
+        // (:51, :93-96, :150) call BuildAnchor by name, and BOTH additionally state that their own
+        // anchor builders delegate to "the same segment transform" — which is only possible if the
+        // normaliser is a separately callable member. InternalsVisibleTo would let this fixture
+        // compile against an `internal` member, so the modifier is asserted rather than implied.
+        typeof(BacklogBindingHelper).IsPublic.Should().BeTrue(
+            "41-4 and 41-6 consume this helper as a shared contract; every one of the sibling "
+            + "helpers in Tamma.ElsaServer/Workflows/Helpers/ is a public static class");
+
+        var buildAnchor = typeof(BacklogBindingHelper)
+            .GetMethod(nameof(BacklogBindingHelper.BuildAnchor), BindingFlags.Public | BindingFlags.Static);
+        buildAnchor.Should().NotBeNull();
+        buildAnchor!.IsPublic.Should().BeTrue();
+
+        var normalizeSegment = typeof(BacklogBindingHelper)
+            .GetMethod(nameof(BacklogBindingHelper.NormalizeSegment), BindingFlags.Public | BindingFlags.Static);
+        normalizeSegment.Should().NotBeNull(
+            "the segment transform must be a SEPARATELY CALLABLE public member — not a private "
+            + "helper and not an inline lambda inside BuildAnchor — or 41-4 and 41-6 can only "
+            + "COPY it, and their 'provably consistent' claim becomes two divergent copies");
+        normalizeSegment!.IsPublic.Should().BeTrue();
+    }
+
+    [Test]
+    public void BuildAnchor_IsDeterministic()
+    {
+        // The 41-6 consumer contract: it recomputes the anchor from inputs alone and must land on
+        // the byte-identical string, or its "hard-fails loud if no ordering exists" read fails
+        // against an ordering that DOES exist.
+        var first = BacklogBindingHelper.BuildAnchor(Repo, "Q3 Roadmap");
+        var second = BacklogBindingHelper.BuildAnchor(Repo, "Q3 Roadmap");
+        second.Should().Be(first);
+        first.Should().Be("backlog:meywd-tamma:q3-roadmap");
+    }
+
+    [Test]
+    public void BuildAnchor_FoldsCaseAndSeparators()
+    {
+        BacklogBindingHelper.BuildAnchor("MeyWd/Tamma", "Q3-Roadmap")
+            .Should().Be(BacklogBindingHelper.BuildAnchor("meywd/tamma", "q3-roadmap"));
+    }
+
+    [TestCase(null, null)]
+    [TestCase("", "")]
+    [TestCase("   ", "\t\n")]
+    [TestCase(":::", "###")]
+    public void BuildAnchor_IsTotal_NeverThrows_AndStaysThreeSegments(string? repository, string? scope)
+        => AssertAnchorIsTotal(repository, scope);
+
+    /// <summary>
+    /// The control-character / astral-plane case, as a <c>[Test]</c> rather than a FIFTH
+    /// <c>[TestCase]</c> on the method above.
+    ///
+    /// <para><b>Review F11 (2026-08-01) — two separate defects on one line.</b></para>
+    /// <list type="number">
+    ///   <item><b>The file was BINARY.</b> This case used to carry the two control
+    ///   characters as RAW BYTES in the source. A literal NUL makes git classify the whole
+    ///   file as binary — it landed in commit <c>2a97ede</c> as <c>Bin 0 -&gt; 18447
+    ///   bytes</c>, so the entire test file for a 443-line helper could not be read with
+    ///   <c>git show</c> or <c>git diff</c> and went to review unreviewable. Written as
+    ///   <c>\u</c> escapes the compiler produces exactly the same two chars, in a file that
+    ///   is text.</item>
+    ///   <item><b>It never ran.</b> Found while VERIFYING the first fix: this method
+    ///   reported FOUR results, not five — with the raw bytes as well as with the escapes,
+    ///   so it is not a regression the escape change introduced. NUnit derives the VSTest
+    ///   case name from the argument VALUES, and a name containing U+0000 does not survive
+    ///   adapter registration, so the case was silently DROPPED. A green suite therefore
+    ///   recorded control-character coverage it did not have. Hoisting it to a named
+    ///   <c>[Test]</c> that builds its arguments in the BODY keeps the NUL out of the test
+    ///   name, and the case now actually executes.</item>
+    /// </list>
+    /// </summary>
+    [Test]
+    public void BuildAnchor_IsTotal_ForControlCharacterAndAstralPlaneInput()
+    {
+        const string controlChars = "\u0000\u0001";
+        const string grinningFace = "\U0001F600";
+
+        // Anti-vacuity: if a later edit turns these escapes back into something else, this
+        // test must stop claiming to exercise control characters.
+        controlChars.Should().HaveLength(2);
+        controlChars[0].Should().Be('\u0000', "the NUL is the whole point of this case");
+        controlChars[1].Should().Be('\u0001');
+        char.IsSurrogatePair(grinningFace[0], grinningFace[1]).Should().BeTrue(
+            "the emoji must stay an astral-plane pair, not collapse to a BMP char");
+
+        AssertAnchorIsTotal(controlChars, grinningFace);
+    }
+
+    /// <summary>The totality rule, shared so both cases above drive ONE body.</summary>
+    private static void AssertAnchorIsTotal(string? repository, string? scope)
+    {
+        var act = () => BacklogBindingHelper.BuildAnchor(repository, scope);
+        act.Should().NotThrow();
+
+        var anchor = act();
+        anchor.Split(BacklogBindingHelper.AnchorDelimiter).Should().HaveCount(3,
+            "a total anchor is always exactly {prefix}:{repository}:{scope} — an empty segment "
+            + "collapses to the placeholder, never to nothing");
+        anchor.Should().StartWith(BacklogBindingHelper.AnchorPrefix + BacklogBindingHelper.AnchorDelimiter);
+    }
+
+    [Test]
+    public void NormalizeSegment_NeverEmitsTheAnchorDelimiter_SoAThreeSegmentAnchorCannotBeForged()
+    {
+        // The namespace is NOT naturally disjoint: TriageItemCycleHelper.DeriveItemKey (:88-95)
+        // emits {repo}:{source}:{title} and {repo}:{source} in the SAME colon-delimited shape. If
+        // a segment could carry a colon, a 2-segment item key could be presented as — or collide
+        // with — a 3-segment backlog anchor.
+        string[] hostile =
+        {
+            "a:b", "backlog:meywd/tamma", "a:b:c:d", "x#42", "with space", "tab\tsep",
+            "new\nline", "emoji 😀 here", "sla$h\\es", "%3A", "..", "  :  ",
+        };
+
+        foreach (var input in hostile)
+        {
+            var normalized = BacklogBindingHelper.NormalizeSegment(input);
+            normalized.Should().NotContain(BacklogBindingHelper.AnchorDelimiter.ToString(),
+                $"segment '{input}' normalised to '{normalized}', which carries the anchor delimiter");
+            normalized.Should().NotBeNullOrEmpty();
+            BacklogBindingHelper.BuildAnchor(input, input)
+                .Split(BacklogBindingHelper.AnchorDelimiter).Should().HaveCount(3);
+        }
+    }
+
+    [Test]
+    public void NormalizeSegment_BoundsItsOutput()
+    {
+        var normalized = BacklogBindingHelper.NormalizeSegment(new string('x', 5_000));
+        normalized.Length.Should().BeLessThanOrEqualTo(BacklogBindingHelper.MaxSegmentLength);
+    }
+
+    // ====================================================================
+    // AC2 — the item set, the anchorable subset, and the recorded misses
+    // ====================================================================
+
+    [Test]
+    public void ParseItems_ReadsExplicitIssueIds_AndDerivesFromIssueNumber()
+    {
+        var items = BacklogBindingHelper.ParseItems(
+            """
+            [
+              { "itemId": "WI-1", "issueId": "meywd/tamma#7", "title": "a", "summary": "s" },
+              { "issueNumber": 9, "title": "b" }
+            ]
+            """, Repo);
+
+        items.Should().HaveCount(2);
+        items[0].ItemId.Should().Be("WI-1");
+        items[0].ItemIssueId.Should().Be("meywd/tamma#7");
+        items[1].ItemIssueId.Should().Be("meywd/tamma#9",
+            "an item that names only its number is anchored through CreationBindingHelper.DeriveIssueId");
+        items[1].ItemId.Should().Be("meywd/tamma#9", "an item with no explicit itemId falls back to its issue id");
+    }
+
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("not json at all")]
+    [TestCase("{\"items\": []}")]
+    [TestCase("[1, 2, 3]")]
+    [TestCase("[{}]")]
+    public void ParseItems_IsTotal_MalformedYieldsEmpty_NeverThrows(string? itemsJson)
+    {
+        var act = () => BacklogBindingHelper.ParseItems(itemsJson, Repo);
+        act.Should().NotThrow();
+        act().Should().BeEmpty();
+    }
+
+    [Test]
+    public void ParseItems_HonoursTheCap()
+    {
+        var many = JsonSerializer.Serialize(
+            Enumerable.Range(1, 500).Select(i => new { issueNumber = i }).ToArray());
+
+        BacklogBindingHelper.ParseItems(many, Repo).Should()
+            .HaveCount(BacklogBindingHelper.MaxEvidenceReads,
+                "D3 — a 500-item backlog must not mint 1500 store reads inside one workflow instance");
+        BacklogBindingHelper.ParseItems(many, Repo, cap: 3).Should().HaveCount(3);
+        BacklogBindingHelper.ParseItems(many, Repo, cap: 0).Should().BeEmpty();
+    }
+
+    [TestCase("meywd/tamma#7", true)]
+    [TestCase("meywd/tamma#0", false)]
+    [TestCase("meywd/tamma#-1", false)]
+    [TestCase("meywd/tamma#abc", false)]
+    [TestCase("meywd/tamma", false)]
+    [TestCase("#7", false)]
+    [TestCase("WI-42", false)]
+    [TestCase("", false)]
+    [TestCase(null, false)]
+    public void IsAnchorableIssueId_RequiresTheDeriveIssueIdForm(string? candidate, bool expected)
+        // Story AC2: "{repository}#{issueNumber}" is the id the LANDED triage producers write
+        // under (TriagePODecisionWorkflow:105-108, TriageItemCycleHelper.DeriveItemKey:85-86). An
+        // id in any other form cannot hit them, so a read at it would be theatre.
+        => BacklogBindingHelper.IsAnchorableIssueId(candidate).Should().Be(expected);
+
+    [Test]
+    public void NonAnchorableItems_AreRecordedAsAnExplicitMiss_NotSilentlyTreatedAsNoEvidence()
+    {
+        var items = BacklogBindingHelper.ParseItems(
+            """
+            [
+              { "itemId": "WI-1", "issueId": "meywd/tamma#7" },
+              { "itemId": "WI-2", "issueId": "board-card-88" }
+            ]
+            """, Repo);
+
+        BacklogBindingHelper.SelectEvidenceAnchors(items).Should().BeEquivalentTo(
+            new[] { "meywd/tamma#7" },
+            "only the DeriveIssueId-form id can hit a landed producer anchor");
+
+        var seed = BacklogBindingHelper.SeedEvidence(items);
+        seed.Should().Contain(BacklogBindingHelper.EvidenceMissHeading);
+        seed.Should().Contain("board-card-88");
+        seed.Should().NotContain("meywd/tamma#7",
+            "an anchorable item is not a miss — it is simply read");
+    }
+
+    [Test]
+    public void SeedEvidence_IsEmptyWhenEveryItemIsAnchorable()
+        => BacklogBindingHelper.SeedEvidence(BacklogBindingHelper.ParseItems(
+            """[{ "issueNumber": 7 }, { "issueNumber": 9 }]""", Repo)).Should().BeEmpty();
+
+    [Test]
+    public void SelectEvidenceAnchors_DeduplicatesAndPreservesOrder()
+    {
+        var items = BacklogBindingHelper.ParseItems(
+            """[{ "issueNumber": 9 }, { "issueNumber": 7 }, { "issueNumber": 9 }]""", Repo);
+
+        BacklogBindingHelper.SelectEvidenceAnchors(items).Should().Equal(
+            "meywd/tamma#9", "meywd/tamma#7");
+    }
+
+    [Test]
+    public void SelectEvidenceAnchors_AndSeedEvidence_AreTotalOnNull()
+    {
+        BacklogBindingHelper.SelectEvidenceAnchors(null).Should().BeEmpty();
+        BacklogBindingHelper.SeedEvidence(null).Should().BeEmpty();
+    }
+
+    // ====================================================================
+    // AC2 — the accumulator labels BOTH findings anchors distinctly
+    // ====================================================================
+
+    [Test]
+    public void AppendEvidence_LabelsEachBlockWithTheAnchorItCameFrom()
+    {
+        // Amendment A1: `findings` has TWO landed producers writing under TWO anchors. An
+        // implementation that reads one and calls it "the findings" is the defect. The composed
+        // carrier must let the model tell them apart.
+        const string item = "meywd/tamma#9";
+        var scoped = CreationBindingHelper.ScopeIssueId(item, "triage-context");
+
+        var evidence = BacklogBindingHelper.AppendEvidence(
+            "", item, "triage-decision", """{"priority":"high"}""");
+        evidence = BacklogBindingHelper.AppendEvidence(
+            evidence, item, "findings", """{"summary":"research says"}""");
+        evidence = BacklogBindingHelper.AppendEvidence(
+            evidence, scoped, "findings", """{"summary":"triage context says"}""");
+
+        evidence.Should().Contain($"triage-decision @ {item}");
+        evidence.Should().Contain($"findings @ {item}\n");
+        evidence.Should().Contain($"findings @ {scoped}");
+        evidence.Should().Contain("research says");
+        evidence.Should().Contain("triage context says");
+    }
+
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("  ")]
+    [TestCase("{}")]
+    [TestCase("[]")]
+    [TestCase("null")]
+    public void AppendEvidence_SkipsAnAbsentDocument_AndNeverThrows(string? documentJson)
+    {
+        var act = () => BacklogBindingHelper.AppendEvidence(
+            "SEED", "meywd/tamma#9", "findings", documentJson);
+        act.Should().NotThrow();
+        act().Should().Be("SEED", "an absent read is a skip, never a fabricated empty block");
+    }
+
+    [Test]
+    public void AppendEvidence_SkipsWhenTheAnchorOrTypeIsMissing()
+    {
+        BacklogBindingHelper.AppendEvidence("SEED", "", "findings", "{\"a\":1}").Should().Be("SEED");
+        BacklogBindingHelper.AppendEvidence("SEED", "meywd/tamma#9", "", "{\"a\":1}").Should().Be("SEED");
+    }
+
+    // ====================================================================
+    // AC2(iv) — the composed value must stay under the renderer's cap
+    // ====================================================================
+
+    [Test]
+    public void TheEvidenceBudget_StaysStrictlyUnderTheRendererCap()
+    {
+        // PromptStoreService.Render treats a value longer than MaxVariableValueLength as
+        // UNRESOLVED and leaves the literal {{evidence}} in the rendered prompt (:559-589) — an
+        // unbounded accumulator therefore ships a silently broken prompt. Tamma.ElsaServer cannot
+        // reference Tamma.Api, so the relationship is pinned HERE, where both are visible.
+        BacklogBindingHelper.MaxEvidenceLength.Should().BeLessThan(
+            PromptStoreService.MaxVariableValueLength,
+            "the evidence budget must leave headroom — the lifecycle APPENDS repair/revise notes "
+            + "into this same declared carrier on every round");
+    }
+
+    [Test]
+    public void AppendEvidence_NeverExceedsTheBudget_EvenForAnOversizedBacklog()
+    {
+        // 60 items × a 5 KB document each = 300 KB of raw evidence: three times the renderer's cap.
+        var fat = "{\"summary\":\"" + new string('e', 5_000) + "\"}";
+        var evidence = "";
+        for (var i = 1; i <= 60; i++)
+        {
+            var item = $"meywd/tamma#{i}";
+            evidence = BacklogBindingHelper.AppendEvidence(evidence, item, "triage-decision", fat);
+            evidence = BacklogBindingHelper.AppendEvidence(evidence, item, "findings", fat);
+            evidence = BacklogBindingHelper.AppendEvidence(
+                evidence, CreationBindingHelper.ScopeIssueId(item, "triage-context"), "findings", fat);
+        }
+
+        evidence.Length.Should().BeLessThan(PromptStoreService.MaxVariableValueLength,
+            "an unbounded accumulator ships a prompt whose {{evidence}} placeholder is never substituted");
+        evidence.Should().NotBeEmpty("the budget truncates the accumulation, it does not discard it");
+    }
+
+    [Test]
+    public void SeedEvidence_IsAlsoBounded()
+    {
+        var many = JsonSerializer.Serialize(
+            Enumerable.Range(1, 400)
+                .Select(i => new { itemId = "card-" + new string('x', 400) + i })
+                .ToArray());
+
+        var seed = BacklogBindingHelper.SeedEvidence(
+            BacklogBindingHelper.ParseItems(many, Repo, cap: 400));
+        seed.Length.Should().BeLessThan(PromptStoreService.MaxVariableValueLength);
+    }
+
+    // ====================================================================
+    // Producer input + accepted-ordering projection
+    // ====================================================================
+
+    [Test]
+    public void BuildItemsForProducer_EchoesTheCallersItemIdVerbatim()
+    {
+        // 44-3's open Cross-Story Contract C2 asks what BacklogItem.itemId MEANS. This story does
+        // NOT decide it: whatever the caller supplies is what the producer is shown and what the
+        // accepted ordering echoes back. Pinned so a later "helpful" rewrite of the id is caught.
+        var produced = BacklogBindingHelper.BuildItemsForProducer(
+            BacklogBindingHelper.ParseItems(
+                """[{ "itemId": "WI-42", "issueId": "meywd/tamma#7", "title": "t", "summary": "s" }]""",
+                Repo));
+
+        using var doc = JsonDocument.Parse(produced);
+        var first = doc.RootElement[0];
+        first.GetProperty("itemId").GetString().Should().Be("WI-42");
+        first.GetProperty("issueId").GetString().Should().Be("meywd/tamma#7");
+        first.GetProperty("title").GetString().Should().Be("t");
+    }
+
+    [Test]
+    public void BuildItemsForProducer_IsTotal()
+    {
+        BacklogBindingHelper.BuildItemsForProducer(null).Should().Be("[]");
+        BacklogBindingHelper.BuildItemsForProducer([]).Should().Be("[]");
+    }
+
+    [Test]
+    public void ProjectOrdering_ReadsTheItemsArray()
+    {
+        const string body = """
+            {"items":[{"itemId":"a","rank":1,"rationale":"r","value":"v","effort":"e"}]}
+            """;
+        var projected = BacklogBindingHelper.ProjectOrdering(body);
+        JsonDocument.Parse(projected).RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        projected.Should().Contain("\"itemId\"");
+        BacklogBindingHelper.CountOrderedItems(body).Should().Be(1);
+    }
+
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("not json")]
+    [TestCase("{}")]
+    [TestCase("{\"items\":[]}")]
+    [TestCase("{\"items\":\"nope\"}")]
+    [TestCase("[]")]
+    public void ProjectOrdering_FailsClosedToEmptyArray(string? body)
+    {
+        BacklogBindingHelper.ProjectOrdering(body).Should().Be("[]");
+        BacklogBindingHelper.CountOrderedItems(body).Should().Be(0);
+    }
+
+    [Test]
+    public void ProjectOrdering_AcceptsABareArrayBody()
+        => BacklogBindingHelper.ProjectOrdering("""[{"itemId":"a","rank":1}]""")
+            .Should().Contain("\"itemId\"");
+
+    [Test]
+    public void BuildFailureDetail_NamesTheTypedOutcomeWire()
+    {
+        var exit = new LifecycleBindingHelper.LifecycleExit(
+            "escalated", "validation-exhausted", null, "{}", "");
+        BacklogBindingHelper.BuildFailureDetail(exit).Should().Contain("validation-exhausted");
+        BacklogBindingHelper.BuildFailureDetail(exit).Should().Contain("escalated");
+
+        var noOutcome = new LifecycleBindingHelper.LifecycleExit("rejected", null, null, "{}", "");
+        BacklogBindingHelper.BuildFailureDetail(noOutcome).Should().Contain("rejected");
+    }
+}

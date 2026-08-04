@@ -498,6 +498,195 @@ public class GitMediationServiceTests
     }
 
     // ===================================================================
+    // Story 31-13 — the 7 PR-lifecycle verbs
+    // ===================================================================
+
+    private static GitHubPullRequestDetail PrDetail(string state, bool isDraft = false) =>
+        new() { Number = 15, State = state, IsDraft = isDraft };
+
+    [Test]
+    public async Task ClosePr_Success_EmitsExactlyOnePrClosedSuccessEvent()
+    {
+        Allow();
+        ResolveToken(GitCredentialSources.Byok);
+        _github.Setup(g => g.ClosePullRequestAsync(Repo, 15))
+            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(PrDetail("closed")));
+
+        var result = await _sut.ClosePullRequestAsync(_tenant, Repo, 15, new ClosePrRequest { CorrelationId = "corr-close" });
+
+        result.Success.Should().BeTrue();
+        result.PrState.Should().Be("closed");
+        result.Outcome.Should().Be("Closed");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrClosedSuccess);
+    }
+
+    [Test]
+    public async Task ReopenPr_Success_EmitsExactlyOnePrReopenedSuccessEvent()
+    {
+        Allow();
+        ResolveToken(GitCredentialSources.Byok);
+        _github.Setup(g => g.ReopenPullRequestAsync(Repo, 15))
+            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(PrDetail("open")));
+
+        var result = await _sut.ReopenPullRequestAsync(_tenant, Repo, 15, new ReopenPrRequest { CorrelationId = "corr-reopen" });
+
+        result.Success.Should().BeTrue();
+        result.PrState.Should().Be("open");
+        result.Outcome.Should().Be("Reopened");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrReopenedSuccess);
+    }
+
+    [Test]
+    public async Task CommentPr_Success_EmitsExactlyOnePrCommentedSuccessEvent()
+    {
+        Allow();
+        ResolveToken(GitCredentialSources.Byok);
+        _github.Setup(g => g.PostIssueCommentAsync(Repo, 15, "hello"))
+            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+
+        var result = await _sut.CommentOnPullRequestAsync(_tenant, Repo, 15, new PrCommentRequest { Body = "hello", CorrelationId = "corr-cmt" });
+
+        result.Success.Should().BeTrue();
+        result.Outcome.Should().Be("Commented");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrCommentedSuccess);
+    }
+
+    [Test]
+    public async Task ReviewCommentPr_Success_EmitsExactlyOnePrReviewCommentedSuccessEvent()
+    {
+        Allow();
+        ResolveToken(GitCredentialSources.Byok);
+        _github.Setup(g => g.PostPullRequestReviewCommentAsync(Repo, 15, "nit", "sha1", "a.cs", 5, "RIGHT"))
+            .ReturnsAsync(IntegrationResult<GitHubReviewComment>.Ok(new GitHubReviewComment { Id = 77, Body = "nit", Path = "a.cs", Line = 5 }));
+
+        var body = new PrReviewCommentRequest { Body = "nit", CommitId = "sha1", Path = "a.cs", Line = 5, Side = "RIGHT", CorrelationId = "corr-rc" };
+        var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeTrue();
+        result.CommentId.Should().Be(77);
+        result.Outcome.Should().Be("Commented");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrReviewCommentedSuccess);
+    }
+
+    [Test]
+    public async Task RequestReviewersPr_Success_EmitsExactlyOnePrReviewersRequestedSuccessEvent()
+    {
+        Allow();
+        ResolveToken(GitCredentialSources.Byok);
+        _github.Setup(g => g.RequestReviewersAsync(Repo, 15, It.IsAny<IReadOnlyList<string>>()))
+            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+
+        var body = new PrReviewersRequest { Reviewers = new[] { "alice", "bob" }, CorrelationId = "corr-rev" };
+        var result = await _sut.RequestPullRequestReviewersAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeTrue();
+        result.Outcome.Should().Be("ReviewersRequested");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrReviewersRequestedSuccess);
+    }
+
+    [Test]
+    public async Task LabelsPr_Success_AddAndRemove_EmitsExactlyOnePrLabelsUpdatedSuccessEvent()
+    {
+        Allow();
+        ResolveToken(GitCredentialSources.Byok);
+        _github.Setup(g => g.AddIssueLabelsAsync(Repo, 15, It.IsAny<string[]>()))
+            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        _github.Setup(g => g.RemoveIssueLabelAsync(Repo, 15, "stale"))
+            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+
+        var body = new PrLabelsRequest { AddLabels = new[] { "ready" }, RemoveLabels = new[] { "stale" }, CorrelationId = "corr-lbl" };
+        var result = await _sut.UpdatePullRequestLabelsAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeTrue();
+        result.Outcome.Should().Be("LabelsUpdated");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrLabelsUpdatedSuccess);
+    }
+
+    [Test]
+    public async Task DraftPr_Success_EmitsExactlyOnePrDraftSetSuccessEvent()
+    {
+        Allow();
+        ResolveToken(GitCredentialSources.Byok);
+        _github.Setup(g => g.SetPullRequestDraftAsync(Repo, 15, true))
+            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(PrDetail("open", isDraft: true)));
+
+        var result = await _sut.SetPullRequestDraftAsync(_tenant, Repo, 15, new PrDraftRequest { Draft = true, CorrelationId = "corr-draft" });
+
+        result.Success.Should().BeTrue();
+        result.IsDraft.Should().Be(true);
+        result.Outcome.Should().Be("DraftSet");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrDraftSetSuccess);
+    }
+
+    // ── Guard-deny: close AND draft (the GET-bearing verb) — REPO_NOT_AUTHORIZED,
+    //    platform verb NEVER called, token resolver NEVER called ──
+
+    [Test]
+    public async Task ClosePr_GuardDenied_NeverResolvesToken_PlatformNeverCalled()
+    {
+        Deny();
+
+        var result = await _sut.ClosePullRequestAsync(_tenant, Repo, 15, new ClosePrRequest { CorrelationId = "corr-close" });
+
+        result.Success.Should().BeFalse();
+        result.FailureCode.Should().Be(GitFailureCodes.RepoNotAuthorized);
+        _tokenResolver.Verify(t => t.ResolveAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _github.Verify(g => g.ClosePullRequestAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        _github.VerifyNoOtherCalls();
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrClosedFailed);
+    }
+
+    [Test]
+    public async Task DraftPr_GuardDenied_NeverResolvesToken_PlatformNeverCalled()
+    {
+        Deny();
+
+        var result = await _sut.SetPullRequestDraftAsync(_tenant, Repo, 15, new PrDraftRequest { Draft = true, CorrelationId = "corr-draft" });
+
+        result.Success.Should().BeFalse();
+        result.FailureCode.Should().Be(GitFailureCodes.RepoNotAuthorized);
+        _tokenResolver.Verify(t => t.ResolveAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _github.Verify(g => g.SetPullRequestDraftAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<bool>()), Times.Never);
+        _github.VerifyNoOtherCalls();
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrDraftSetFailed);
+    }
+
+    // ── Token-unavailable: close AND review-comment — GIT_TOKEN_UNAVAILABLE
+    //    fail-closed, exactly one FAILED event, platform verb never called ──
+
+    [Test]
+    public async Task ClosePr_TokenUnavailable_FailsClosed_PlatformNeverCalled()
+    {
+        Allow();
+        NoToken();
+
+        var result = await _sut.ClosePullRequestAsync(_tenant, Repo, 15, new ClosePrRequest { CorrelationId = "corr-close" });
+
+        result.Success.Should().BeFalse();
+        result.FailureCode.Should().Be(GitFailureCodes.TokenUnavailable);
+        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
+        _github.Verify(g => g.ClosePullRequestAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrClosedFailed);
+    }
+
+    [Test]
+    public async Task ReviewCommentPr_TokenUnavailable_FailsClosed_PlatformNeverCalled()
+    {
+        Allow();
+        NoToken();
+
+        var body = new PrReviewCommentRequest { Body = "nit", Path = "a.cs", Line = 5, CorrelationId = "corr-rc" };
+        var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeFalse();
+        result.FailureCode.Should().Be(GitFailureCodes.TokenUnavailable);
+        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
+        _github.Verify(g => g.PostPullRequestReviewCommentAsync(
+            It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrReviewCommentedFailed);
+    }
+
+    // ===================================================================
     // Helpers
     // ===================================================================
 

@@ -1,6 +1,6 @@
 # Story 43-5: Storage, Principal Resolution, the Resolver, and Audit
 
-Status: done — conformance-reviewed 2026-07-29; both control-plane tables, the principal resolver, the pure evaluator, the ledger and the audit family ship; AC12 superseded by F7 (singleton 60 s TTL store, no Redis — `Registration_IsScoped` / `TwoGateCallsInOneRequest_IssueOneRepositoryRead` do not exist) and AC13's `.ALLOWED` "or Enforced" arm dropped per F9; `IAutonomyGate` has no production caller, but Seam B enforcement is live and resolver-backed; F6/F10 open
+Status: done — conformance-reviewed 2026-07-29; both control-plane tables, the principal resolver, the pure evaluator, the ledger and the audit family ship; AC12 superseded by F7 (singleton 60 s TTL store, no Redis — `Registration_IsScoped` / `TwoGateCallsInOneRequest_IssueOneRepositoryRead` do not exist) and AC13's `.ALLOWED` "or Enforced" arm dropped per F9; `IAutonomyGate` has no production caller, but Seam B enforcement is live and resolver-backed. **F6 and F10 CLOSED 2026-07-30**: the gate fails CLOSED on a degraded read — a failed rules read is represented as `null` rather than substituted with the shipped defaults, so concluding "no legacy floor" from a failure is unrepresentable at the signature; degraded decisions force AlwaysHuman/Enforced with their own provenance (`policy-unavailable`) and distinct reasons for the two causes, and are never suppressed by the `.ALLOWED` volume gate. Deliberate carve-outs — non-enforceable members and uncatalogued keys stay **Automated** (epic OQ2/D2) — but both now carry `Unavailable` provenance so they are still audited (review 2.1, 2026-07-30). F10's cross-plane composition is monotone by construction — `Enforce` ORs, `AllowedRoles` intersects — so a row on either plane can only restrict. F7 (≤60 s cross-instance staleness) and F9 remain as recorded: F6 was about ignorance, F7 is about lag. **F11 CLOSED 2026-07-30 — Story 43-9 is no longer blocked by it**: a config-sourced, mandatorily-expiring, per-decision-audited break-glass override that suspends the fail-closed substitution for an UNREADABLE input and nothing else (a denial from a successfully-read policy row is still a denial) — see "F11 — CLOSED" below. **F12 remains OPEN** (the live seam hard-denies rather than escalating; break-glass changes whether work continues, not who is asked). Also landed here: **`effect:mcp.tool.invoke` ships `AlwaysHuman`** and `mcp__*` names resolve to it rather than passing as uncatalogued — see "MCP tool invocation — governed by default".
 
 ## MANDATORY: Before You Code
 
@@ -341,6 +341,8 @@ cycle (see below); F6–F10 are recorded here as open follow-ups so they cannot 
   evaluates as automated. Dial degrade (falling back to the default dial level) is safe — it can
   only be more conservative than a raised dial. Before any seam ENFORCES, decide: fail-closed on
   cold snapshot for enforce-marked rows, or a bounded startup gate.
+  **→ CLOSED 2026-07-30. See "F6 — CLOSED" below; the diagnosis above is kept verbatim as the
+  statement of the bug.**
 - **F7 — AC12 deviations are now formal.** The shipped snapshot provider deviates from AC12's
   sketch: it is a **singleton** (not scoped), with a **60 s TTL** and **no Redis cross-instance
   invalidation** (the story's Redis clause is unimplemented). Consequence: enforcement changes
@@ -363,9 +365,554 @@ cycle (see below); F6–F10 are recorded here as open follow-ups so they cannot 
   enforce/roles endpoints, a platform `Enforce=false` would OVERRIDE a tenant's `Enforce=true`
   (and a tenant roles list already overrides a platform one) — decide the intended lattice before
   exposing those endpoints.
+  **→ CLOSED 2026-07-30 by FIXING the composition, not by recording it. See "F10 — CLOSED" below.**
+
+- **F11 — there is NO BREAK-GLASS OVERRIDE for the fail-closed posture. ⛔ WAS A BLOCKER ON
+  STORY 43-9 — CLOSED 2026-07-30, see "F11 — CLOSED" below; 43-9 is unblocked.**
+  Recorded 2026-07-30 (adversarial review of the F6 close). The diagnosis below is kept verbatim
+  as the statement of the gap. The product questions it left open were answered by the coordinator
+  and are recorded, with what shipped, in the F11 close section.
+
+  *The proven behaviour.* When the governance policy snapshot is non-authoritative — priming
+  failed and no lazy TTL refresh has landed — the live Seam B tool-loop gate DENIES **every
+  catalogued tool**. This is exhaustive, not a majority: `ActionCatalog`'s `Tool(...)` factory
+  never passes `enforceable: false`, so every shipped `tool:*` descriptor is enforceable, and the
+  one non-enforceable catalog member (`effect:secret.reveal`) is not a tool. Every DI-registered
+  tool executor — `file_read`, `file_write`, `search_code`, `shell_execute`, `run_tests`,
+  `git_operations` (which splits read/write by subcommand) — resolves to a catalogued, enforceable
+  key and is therefore refused. **Every agent tool loop is effectively inert** for the duration;
+  only names the catalog does not know (e.g. `mcp__*`) still pass, by epic D2. This holds in
+  **BOTH** SaaS **and** single-user-with-a-control-plane deployments: the posture keys on the
+  snapshot store, not on the tenancy mode. A deployment with no control-plane repository at all is
+  unaffected (that store is authoritative from birth — no rows to miss).
+
+  *What already works, and is not the gap.* It **self-heals automatically** within `RefreshTtl`
+  (60 s) of the control plane coming back — no restart, no operator action. The logging is loud
+  and correct: `GovernancePolicySnapshotStore.RefreshAsync` logs at ERROR when a refresh fails
+  before any successful load, `GovernancePolicySnapshotPrimingService` logs at ERROR on failed
+  priming, and each denial logs at ERROR naming `policy-snapshot-unavailable` rather than a policy
+  reason. Diagnosis is not the problem.
+
+  *The gap.* There is **no config flag, no environment variable and no admin endpoint** that can
+  force the gate open. An operator who has diagnosed the outage correctly, understands that the
+  control plane is unreachable and has accepted the risk has no supported way to keep the fleet
+  working — the only levers are "wait for the control plane" or "edit code". For 43-5 that is
+  arguably acceptable: the blast radius is one seam and the failure direction is the safe one.
+
+  *Why it blocks 43-9.* Story 43-9 carries this same posture into **four more seams** (A/C/D/E),
+  each with a larger blast radius than the tool loop. At that point a control-plane outage stops
+  an agent from doing anything at all, across every seam, with no supported recovery lever short
+  of a code change. An explicit break-glass knob should exist **before** 43-9 lands.
+
+  *Left open deliberately — the product questions to answer first.* Who may set it (platform owner
+  only? per-tenant? deploy-time only, so it cannot be flipped by a compromised admin session?);
+  whether it is time-bounded and auto-expiring or sticky until cleared; how each decision made
+  under it is audited (a distinct `ACTION.GATE.*` type? a `breakGlass` tag alongside `degraded`?);
+  whether it opens the gate wholesale or only for a named risk tier. Whatever it is, it must be
+  **loudly logged at every use** — a quiet break-glass is the fail-open with extra steps.
+  **→ ANSWERED and CLOSED 2026-07-30. See "F11 — CLOSED" below.**
+
+- **F12 — the live seam HARD-DENIES rather than escalating.** Recorded 2026-07-30, same review.
+  This is a precision correction to how the F6 posture is described, not a new defect: it is the
+  correct failure *direction*, but calling it "escalation" would be inaccurate.
+
+  `IAutonomyGate`'s decision type can return `RequiresHuman`, and the evaluator does return it for
+  escalatable members. But `IAutonomyGate` **has no production caller yet** (43-5 D12 — 43-9 owns
+  all five seams). The only LIVE consumer of the governance posture is the tool loop, via
+  `CatalogDefaultToolLoopAutonomyGate` → `ToolLoopGateDecision`, whose `ToolLoopGateOutcome` has
+  **no `RequiresHuman` case** — only `Allowed` and `Denied`. So on the one path that actually
+  enforces today, a degraded decision is a flat denial: it is fed back to the model as a tool
+  rejection, and the run burns its remaining turns retrying tools that will all be refused,
+  accomplishing nothing and reaching nobody. No human is notified, no approval is requested, no
+  authorization row is created.
+
+  The story should say this plainly rather than let "fails closed to requires-human" imply that a
+  person is waiting somewhere. 43-9's seam work — or the break-glass knob of F11 — is where a
+  degraded decision could become a real escalation.
 
 See also `.dev/findings/2026-07-29-governance-wipe-orphans-policy-rows.md` (review F8: the
 dev-mode wipe orphans `action_assignments` principal keys).
+
+## F6 — CLOSED 2026-07-30: the gate FAILS CLOSED on a degraded read, and degradation is visible
+
+### The posture chosen, and why
+
+Three options were on the table (propagate the failure to the caller; cache last-known-good and
+serve it with a warning; fail the gate closed). **Chosen: fail CLOSED, with the two degraded
+causes named separately and both surfaced in the audit stream.** The argument:
+
+1. **Every input this gate composes can only TIGHTEN.** The platform ceiling `max()`es upward, the
+   legacy always-escalate floor `max()`es upward, `Enabled` ANDs downward, a role allowlist only
+   restricts. There is no input whose absence is *more* restrictive than its presence. So "I could
+   not read X" can never be answered with "then there is no X" — **ignorance is not absence**. The
+   pre-fix code did exactly that: it substituted `AcceptanceDefaults.Rules`, whose `AlwaysEscalate`
+   list is EMPTY, and thereby concluded from a failed read that the principal had pinned nothing.
+   `agent-action:triage-intake` — which ships at `AutonomyDial.Min` and gets its human floor
+   *only* from the legacy list — became AUTOMATED on a tenant-DB blip.
+2. **Last-known-good was rejected.** The snapshot store already keeps a last-known-good for
+   `action_assignments` (a refresh failure after a successful load keeps serving the previous
+   snapshot — that part is unchanged and correct). A *second*, differently-shaped LKG cache for
+   the per-principal acceptance rules would need its own invalidation hook (acceptance-rules
+   writes do not notify the gate), and its staleness would be silent in exactly the loosening
+   direction — a floor added since the cached read would not apply. One cache with a clear
+   invalidation story beats two with a fuzzy one.
+3. **Propagate-and-let-the-caller-decide was rejected** because it pushes the safety decision onto
+   five seams that do not exist yet (43-9), each free to get it wrong differently. The gate is the
+   place that knows the composition is monotone; it is the place that should conclude.
+4. **The availability cost is bounded and mostly illusory.** `action_assignments` and the base
+   acceptance rules are read against databases the request needed anyway (control plane for
+   auth/tenancy, tenant DB for the rules). A deployment that cannot read them is not otherwise
+   healthy. Fail-closed converts "silently ungoverned" into "visibly waiting for a person".
+
+### What the failure posture actually is
+
+| Input | Read succeeded, nothing found | Read FAILED / never happened |
+|---|---|---|
+| `action_assignments` snapshot | shipped defaults, `system-default` provenance, automatable | `AlwaysHuman`, `Unavailable` provenance, reason `policy-snapshot-unavailable` |
+| principal base acceptance rules | shipped defaults, dial + empty always-escalate, automatable | `AlwaysHuman`, `Unavailable` provenance, reason `acceptance-rules-unavailable` |
+
+A degraded decision is `RequiresHuman` where a human wait exists and `Denied` where none does
+(the `EscalatableToHuman` split, unchanged), and **`Enforced` is forced TRUE** — a degraded
+decision a seam is free to ignore would be the same fail-open wearing a warning label.
+
+**Two deliberate carve-outs from fail-closed**, both pre-existing epic answers that degradation
+must not silently reverse:
+
+- `Enforceable = false` members (`effect:secret.reveal`) stay `Automated`. Epic open question 2
+  answered that reading a secret never requires a human; turning every credential fetch into an
+  approval during a blip amplifies an outage rather than containing it.
+- An **uncatalogued** key stays `Automated` (epic D2 — unclassified is allowed at runtime,
+  unmergeable in CI). An unread policy table does not create a catalog entry.
+
+**A carve-out from fail-closed is NOT a carve-out from AUDIT (review 2.1, corrected 2026-07-30).**
+Both carve-outs keep their outcome and carry `Unavailable` provenance, so both still emit. This
+was originally true only of the non-enforceable one: the uncatalogued short-circuit returned
+*before* the degradation check and hard-coded `SystemDefault` provenance, `Enforced: false`,
+`Outcome: Automated` — and the `.ALLOWED` volume gate (which suppresses system-default allows)
+then suppressed the row entirely, with the `degraded` tag reading `false` even if it had not.
+The fix moved the degradation computation above the short-circuit and stamps `Unavailable` on it.
+**The outcome is provably unchanged** — still `Automated`, still `Enforced: false`, still
+`Enabled: true`, still `EffectiveMinAutonomy = Min`, still reason `uncatalogued`; only the
+provenance moved, which is asserted field-by-field against the healthy answer in
+`UncataloguedKey_UnderDegradation_StaysAutomated_ButCarriesDegradedProvenance`. During a
+control-plane outage the uncatalogued surface is precisely the surface that STAYS OPEN, which is
+precisely why an auditor needs a record of it.
+
+### The mechanism (why the two states could not be told apart before)
+
+`GovernancePolicySnapshot` gains **`IsAuthoritative`** (defaults TRUE, so every hand-built
+snapshot and the 43-6 fresh-read pin keep meaning "these ARE the rows"). `GovernancePolicySnapshotStore`
+tracks a `_everLoaded` flag set only on a SUCCESSFUL load and stamps it onto every projection;
+a store with **no** repository is authoritative from birth (no control-plane DB ⇒ no rows to
+miss ⇒ the empty snapshot IS the truth). `GovernancePolicySnapshot.Unavailable` is the named
+degraded value. Before this, both states were literally `GovernancePolicySnapshot.Empty`.
+
+`AutonomyGateEvaluator.Evaluate`'s `baseRules` parameter is now **nullable, and null means the
+read failed** — the shipped defaults are no longer a legal substitute for a failure, which makes
+the fail-open unrepresentable at the signature rather than forbidden by a comment.
+`AutonomyGateService.ResolveBaseRulesAsync` returns null on exception and logs at **ERROR**
+(it logged a WARNING and returned defaults). A platform-only principal has no rules row to read
+at all — that is a successful "nothing to read" and still returns the shipped base, not null.
+
+`ActionAssignmentSource` gains **`Unavailable`** (wire `policy-unavailable`), and the decision
+event gains a **`degraded`** tag. Both matter: a degraded decision is never `system-default`, so
+the `.ALLOWED` volume gate cannot suppress it.
+
+**The audit guarantee, stated precisely** (the first wording of this paragraph over-claimed and
+was corrected on review, 2026-07-30):
+
+- A degraded decision that BLOCKS (`RequiresHuman`/`Denied`) is `Enforced`, so its append rides
+  the non-swallowing path — **guaranteed an audit row or an exception**, never silence.
+- A degraded decision that ALLOWS (the two carve-outs) is **guaranteed an emission ATTEMPT**
+  carrying `assignmentSource=policy-unavailable` and `degraded=true`. It is not enforced-blocking,
+  so an append failure is logged and swallowed like every other best-effort `.ALLOWED` — the
+  volume gate can no longer suppress it, but the event repository being down is still tolerated.
+
+The distinction is deliberate: the compliance hole the non-swallowing path exists to close is *a
+block with no record of it*. Rethrowing on a failed audit append for an allow would convert an
+event-store blip into a second outage on the surface that is deliberately staying open.
+
+`GovernancePolicySnapshot` has **no public constructor** (review 2.2, 2026-07-30): it is minted by
+`FromSuccessfulRead(...)` or by the `Unavailable` singleton, so a caller must state which it is.
+`IsAuthoritative` was previously an `init` property defaulting to TRUE. Every construction site
+was correct at the time, but a default-true *safety* bit means the next hand-built snapshot
+silently claims an authority it may not have — a test-convenience default governing a production
+safety property. Making it structural costs nothing: `GovernancePolicySnapshotStore.Project`
+returns `Unavailable` when the store has never loaded (provably lossless — `_snapshot` is only
+assigned inside `_installLock` together with `_everLoaded = 1`, so a non-authoritative store's
+`FullSnapshot` is necessarily `Empty`), `ActionPolicyEndpoints.PinnedEffectiveThreshold` says
+`FromSuccessfulRead` because both row sets were just read successfully on that request, and the
+two test helpers say the same. No call site changed meaning.
+
+### Seam B (the one gate that already enforces) honours it
+
+`CatalogDefaultToolLoopAutonomyGate` now reads the provenance out of
+`ResolveEffectiveMinAutonomy` and denies with reason `policy-snapshot-unavailable` + an ERROR
+log when the snapshot has never loaded — deliberately NOT `below-min-autonomy`, because this is
+an outage of the governance surface, not a policy decision. This is the behaviour change with the
+largest blast radius in the fix: a host that comes up while the control plane is unreachable
+withholds tool calls instead of running them ungoverned.
+
+### Tests (the "prove they are distinguishable" obligation)
+
+- `AutonomyGateEvaluatorTests.UnavailableSnapshot_FailsClosed_WhileALoadedEmptyTableAutomates` —
+  THE pair, same action, opposite answers, different provenance.
+- `AutonomyGateEvaluatorTests.UnreadableBaseRules_CannotConcludeThereIsNoLegacyFloor` — the
+  concrete `triage-intake` loss, both directions.
+- `AutonomyGateEvaluatorTests.TheTwoDegradedCauses_CarryDistinctReasons` (including the
+  deterministic order when both degrade at once).
+- `AutonomyGateEvaluatorTests.DegradedDecision_IsAlwaysEnforced_EvenAgainstAStoredEnforceFalse`,
+  `Degraded_DeniesRatherThanEscalates_WhereNoHumanWaitExists`,
+  `NonEnforceableMember_StaysAutomated_WhenPolicyIsUnavailable`,
+  `UncataloguedKey_StaysAllowed_EvenWhenPolicyIsUnavailable`,
+  `ResolveEffectiveMinAutonomy_OnAnUnavailableSnapshot_IsAlwaysHuman`.
+- `GovernancePolicySnapshotStoreTests.AStoreThatHasNeverLoaded_ServesANonAuthoritativeSnapshot`,
+  `AFailedLoad_LeavesTheStoreNonAuthoritative_SoGatesFailClosed`,
+  `AFailedRefreshAfterASuccessfulLoad_KeepsTheLastGoodSnapshot_AndStaysAuthoritative`,
+  `FailedPriming_LeavesTheStoreNonAuthoritative_ButDoesNotCrashStartup`,
+  and `NoRepository_ServesEmptySnapshots_ShippedDefaultsApply` (extended: no repository ⇒ still
+  authoritative).
+- `AutonomyGateEvaluatorTests.UncataloguedKey_UnderDegradation_StaysAutomated_ButCarriesDegradedProvenance`
+  (review 2.1) — every other field asserted equal to the healthy answer, so the fix is pinned as
+  provenance-only.
+- `AutonomyGateServiceFailurePostureTests` (new fixture) — the composed service end to end,
+  including `ADegradedDecision_EmitsAnEventTaggedDegraded_WithPolicyUnavailableSource`,
+  `BaseRulesReadSucceedsWithNoOverrides_Automates_AndEmitsNoDegradedTag`, and (review 2.1)
+  `AnUncataloguedKey_UnderDegradation_StaysAutomated_AndStillEmitsADegradedRow` with its control
+  `AnUncataloguedKey_WithReadablePolicy_EmitsNothing` — the second proves the new row is a
+  degradation signal rather than new noise on the healthy path.
+- `ResolverBackedToolLoopGateTests.AnUnavailableSnapshot_DeniesEveryCatalogedTool_WithItsOwnReason`
+  and `AnUnavailableSnapshot_StillAllowsUncataloguedNames_EpicD2`.
+
+### What F6 does NOT close
+
+The **staleness** bound is untouched: a snapshot that loaded 59 seconds ago is authoritative even
+if an admin tightened policy 58 seconds ago on another instance. That is F7's ≤60 s cross-instance
+bound, deliberately separate — F6 is about *ignorance*, F7 about *lag*.
+
+## F10 — CLOSED 2026-07-30: Enforce and AllowedRoles compose monotonely
+
+Fixed rather than recorded, because the fix is small, is unreachable from today's endpoints (the
+ceiling routes author thresholds only, so **no shipped behaviour changes**), and encoding the
+invariant in the evaluator is strictly better than leaving prose for whoever adds the endpoints.
+
+**The invariant, now enforced by construction:** *adding a row on either plane can only make the
+resolution more restrictive, never less. The only value a plane may lower is the SHIPPED default,
+and only when no other plane has an opinion.*
+
+- **`Enforce` composes by `OR`** over the planes' present opinions; the v1 default (epic D1: TRUE)
+  applies only when NEITHER plane has one. So a platform `Enforce=false` can no longer override a
+  principal's `Enforce=true` — nor the reverse. A single plane saying observe-only with nothing
+  opposing it is still honoured: that is a *default* being lowered, not a plane overriding a plane.
+- **`AllowedRoles` composes by INTERSECTION.** A principal allowlist could previously ADD roles a
+  platform restriction excluded. Now both restrictions apply. Two subtleties, both tested: a
+  **stored empty array keeps its historical "no restriction" reading** (so no stored row changes
+  meaning), while an **intersection that comes out empty is a restriction that allows nobody** —
+  which is the honest answer to "developers only" AND "testers only". The guard therefore tests
+  `allowedRoles is not null` rather than `Count > 0`.
+- `MinAutonomy` (`max()`) and `Enabled` (`AND`) were already monotone and are unchanged.
+
+Pinned by `PlatformEnforceFalse_CannotUnEnforceAPrincipalEnforceTrue`,
+`PrincipalEnforceFalse_CannotUnEnforceAPlatformEnforceTrue`,
+`SinglePlaneEnforceOpinion_StillApplies_AndTheDefaultStaysTrue`,
+`PrincipalRoles_CannotWidenAPlatformRoleRestriction`, `DisjointRoleRestrictions_AllowNobody`,
+`AnEmptyStoredRolesArray_StillMeansUnrestricted`.
+
+**What a future ceiling endpoint must not do:** re-introduce a "this plane wins outright" rule for
+any field, and in particular must not let a ceiling write express "un-enforce" or "widen the
+allowed roles" — the evaluator will now refuse to honour it, so an endpoint that offers it would
+be lying to its caller. If a platform-level *kill switch* for enforcement is ever genuinely
+wanted, it needs a separate, explicitly non-monotone field with its own story, not a reinterpretation
+of `Enforce`.
+
+## F11 — CLOSED 2026-07-30: a config-sourced, expiring, audited break-glass that bypasses DEGRADATION ONLY
+
+### The product answers (they were the blocker, not the code)
+
+| Question F11 left open | Answer | Why |
+|---|---|---|
+| Who may set it? | **Nobody at runtime. It is CONFIGURATION** (`Tamma:Governance:BreakGlass:*`), read ONCE at construction of a singleton. Engaging requires a config change **and a restart**. | An endpoint that can switch off a governance posture is itself a governance surface — it would need its own permission, its own ceiling and its own audit, and a compromised admin session would reach it. Configuration friction is the feature. There is deliberately **no writer** on the type, pinned by `TheOverrideHasNoWriter`. |
+| Time-bounded or sticky? | **Time-bounded, mandatory, and CAPPED at 24 hours.** It **refuses to engage** with a missing, unparseable, already-past, or more-than-24h-away `ExpiresAtUtc`, logging at ERROR each time. | A break-glass that can be left on forever stops being a break-glass and becomes the permanent configuration — the fail-open F6 removed, re-introduced by an operator who forgot. **The cap was added by review MEDIUM-3 (2026-07-31)**: as shipped, only `expiresAt <= now` was rejected, so `9999-12-31T23:59:59Z` engaged and stayed engaged — the exact failure the mandatory expiry exists to prevent, wearing a timestamp. **Why 24h:** break-glass is an OUTAGE lever, and an outage still unresolved after a day needs a real fix rather than a longer bypass; if the answer genuinely is "another day", re-engaging is deliberately a config change plus a restart, so a second day of bypass is somebody's explicit decision instead of a timestamp nobody re-read. |
+| Wholesale, or per risk tier? | **Neither — scoped by CAUSE, not by target.** It suspends exactly one thing: the substitution of `AlwaysHuman` for an input that could **not be read**. | A risk-tier switch would be a second policy language on top of the catalog. Scoping by cause is narrower *and* needs no new vocabulary: it can only ever restore the answer the system would have given had the unreadable input said "nothing". |
+| How is each use audited? | A **distinct event type `ACTION.GATE.BREAK_GLASS_BYPASS`**, one row per bypassed decision, carrying the operator's reason, the expiry, the seam and the degraded cause — on the **non-swallowing** append path. Plus a `break-glass` `assignmentSource` wire value and a `breakGlass` tag on the ordinary decision row. | A tag alone would sit inside the allow stream and could be suppressed by the `.ALLOWED` volume gate. A reviewer after the outage needs to *select* the bypassed decisions. |
+| Loud? | ERROR on engage, on refusal to engage, on expiry, and on **every** bypassed decision at the gate that is live. | Recorded requirement: a quiet break-glass is the fail-open with extra steps. **Corrected 2026-07-31 (review doc-fix 5):** this row and the epic README both said "at both live gates". Only ONE gate is live — Seam B (`CatalogDefaultToolLoopAutonomyGate` → `InlineToolLoopRunner`). `IAutonomyGate`/`AutonomyGateService` has **no production caller** (43-5 D12; 43-9 adds them), so its per-decision ERROR log and bypass row are wired and tested but unreached in production. |
+
+### THE boundary — bypasses degradation, never a real denial
+
+This is the whole design, and it is enforced by **construction**, not by comment:
+
+```
+break-glass suspends:   "I could not READ policy X, therefore AlwaysHuman"
+break-glass never suspends:
+    a threshold row that WAS read        (incl. the platform ceiling)
+    Enabled = false that WAS read
+    an AllowedRoles restriction that WAS read
+    a legacy always-escalate entry that WAS read
+    the SHIPPED catalog default          (document-type:design, effect:mcp.tool.invoke, …)
+```
+
+Two structural facts make that hold rather than merely intending it:
+
+1. **The snapshot half cannot discard a row, because there are none to discard.** The bypass is
+   sited *inside* `ResolveEffectiveMinAutonomy`'s `!IsAuthoritative` branch, and
+   `GovernancePolicySnapshot.Unavailable` carries no rows by construction (the store's own
+   `Project` comment proves `!IsAuthoritative ⇒ FullSnapshot.Empty`). The fallback is
+   `descriptor.DefaultMinAutonomy` — **not "allow"** — so an `AlwaysHuman` shipped default still
+   blocks. Pinned by `ResolveEffectiveMinAutonomy_Engaged_NeverDiscardsAReadRow` and
+   `EngagedAndSnapshotUnavailable_AnAlwaysHumanShippedDefault_StillBlocks`.
+2. **The acceptance-rules half keeps the real ladder result.** Degradation causes are evaluated in
+   a fixed order (snapshot first), so reaching the `baseRules is null` branch means the assignment
+   rows *were* read. That branch therefore leaves `effectiveMin`/the ladder untouched and only
+   skips the unreadable legacy floor. Pinned by `EngagedButARealPolicyRowDenies_IsStillDenied` (the
+   reason comes back `always-human`, naming the POLICY, not the bypass) and
+   `BreakGlassEngaged_AgainstARealPolicyDenial_IsSTILLDenied`. **Read the parenthesis narrowly (review
+   doc-fix 4, 2026-07-31):** it was true of the `reason` field and only of that. The
+   `assignmentSource`, `breakGlass` and `degraded` TAGS on the very same audit row said the opposite
+   until MEDIUM-1 was fixed, so a dashboard selecting `breakGlass=true` got denials the override had
+   never touched. Reason and tags now agree.
+
+Also load-bearing and easy to lose in a refactor: `Enabled` and `AllowedRoles` are checked
+**above** the degradation branch in `AutonomyGateEvaluator.Evaluate`, which is why they survive an
+engaged override for free. Moving the break-glass fall-through above them would silently turn the
+lever into a backdoor.
+
+### The boundary now holds for PROVENANCE too (review MEDIUM-1/MEDIUM-2, fixed 2026-07-31)
+
+As first shipped, the acceptance-rules branch above did one more thing than the paragraph admits:
+it **re-stamped `source = BreakGlass`** before the `Enabled`, `AllowedRoles` and threshold guards
+ran, and those guards return through a local `Decision(...)` helper that carries `source` forward.
+The OUTCOMES were right — a disabled row, a role mismatch and a platform ceiling all still denied —
+but every one of those denials came back labelled `break-glass`, and label is not cosmetic here:
+
+- `AutonomyGateService` gates the bypass audit on `Source == BreakGlass`, so a denial the override
+  had never touched emitted a spurious `ACTION.GATE.BREAK_GLASS_BYPASS` row;
+- the `ACTION.GATE.DENIED` row for the same decision carried `assignmentSource: "break-glass"`,
+  `breakGlass: "true"` and `degraded: "true"`, so **a dashboard filtering `breakGlass=true` returned
+  denials the override never touched** — which is the opposite of what the distinct provenance value
+  was introduced for;
+- the ERROR log read *"the autonomy gate did NOT fail closed … because the break-glass override is
+  engaged"* about a decision that had, in fact, failed closed on policy;
+- and the real provenance was destroyed: a platform-ceiling denial no longer said `platform-ceiling`.
+
+Worse (MEDIUM-2), the bypass append is deliberately **non-swallowing** and is sequenced **before**
+the decision row. So `agent-action:triage-intake` + a read `Enabled = false` row + an engaged
+override + a failing event store made `EvaluateAsync` **throw**, and the `ACTION.GATE.DENIED` row was
+never written either. The same held for `effect:secret.reveal` (`Enforceable = false`), whose
+carve-out returned `Automated` *carrying* `BreakGlass` even though nothing had been bypassed — the
+uncatalogued carve-out immediately above it had been explicitly exempted with the reasoning "this
+allow was never going to be blocked", and the identical reasoning had simply never been applied
+here.
+
+**The fix, and the invariant it establishes:** each guard that decides the outcome stamps its own
+provenance, and `BreakGlass` is stamped at exactly ONE return — the automated one reached with the
+bypass in force.
+
+| Decision under an engaged override | Provenance now |
+|---|---|
+| The override permitted it (degraded ⇒ would have blocked, now `Automated`) | `BreakGlass` — **the only case** |
+| Denied by a read `Enabled = false` | `PlatformCeiling` if the platform plane disabled, else `ActionOverride` / `GroupOverride` |
+| Denied by a read `AllowedRoles` | the plane whose restriction excluded (platform first) |
+| Blocked by a read threshold / platform ceiling | the threshold ladder's own source, e.g. `PlatformCeiling` |
+| Blocked by the SHIPPED default over an unreadable snapshot | `Unavailable` (keeps `degraded=true`) |
+| The uncatalogued or non-enforceable carve-out | `SystemDefault` healthy, `Unavailable` degraded — never `BreakGlass` |
+
+Pinned in **both** directions, because either half alone is a way to be wrong:
+`BreakGlassProvenance_NeverAppearsOnADecisionTheOverrideDidNotPermit` (a catalog-wide sweep over
+disabled / role-restricted / always-human rows on both planes, plus the shipped-default block) and
+`BreakGlassProvenance_IsStillStamped_WhenTheOverrideGenuinelyPermitted` (a bypass with no stamp is
+an unrecorded bypass — the failure this whole audit path exists to prevent). At the service level,
+`ADenialUnderAnEngagedOverride_SurvivesAFailingBypassAppend` and
+`ANonEnforceableAllow_UnderAnEngagedOverride_IsNotAnAuditableBypass` pin MEDIUM-2.
+
+**Test expectations changed to match**, listed here because changing a test to agree with new
+behaviour is exactly the move that has to be visible:
+
+- `EngagedButARealPolicyRowDenies_IsStillDenied` asserted `Source == BreakGlass`; it now asserts
+  `ActionOverride`. Code and test had agreed with each other and disagreed with the shipped doc.
+- `BreakGlassEngaged_AgainstARealPolicyDenial_IsSTILLDenied` asserted that a
+  `BREAK_GLASS_BYPASS` row **was** emitted for that denial; it now asserts the row is **absent** and
+  that the `.REQUIRES_HUMAN` row carries `breakGlass=false` / `assignmentSource=action-override`.
+
+And: **an engaged override is inert on a healthy evaluation.** It is a fallback for an unreadable
+input, not a mode the system runs in — proved over the WHOLE catalog by
+`Engaged_ChangesNothing_WhenEveryInputIsReadable`, so a member cannot quietly acquire
+break-glass-only behaviour later.
+
+### What shipped
+
+| Piece | Where |
+|---|---|
+| `BreakGlassState` (engaged / expiry / reason) | `Tamma.Core/Actions/AutonomyGovernance.cs` |
+| `ActionAssignmentSource.BreakGlass` (wire `break-glass`) | same file — a THIRD value, distinct from `system-default` (nothing was wrong) and `policy-unavailable` (the gate refused) |
+| The bypass rules + `ReasonBreakGlassBypass` | `Tamma.Core/Actions/AutonomyGateEvaluator.cs` — new optional `breakGlass` parameter on `Evaluate` and on `ResolveEffectiveMinAutonomy` (both default null ⇒ every existing caller keeps the F6 posture) |
+| `IGovernanceBreakGlass` + `ConfigurationGovernanceBreakGlass` | `Tamma.Api/Services/Actions/GovernanceBreakGlass.cs` |
+| `ACTION.GATE.BREAK_GLASS_BYPASS` + `EmitBreakGlassBypassAsync` (non-swallowing) + the `breakGlass` tag | `Tamma.Api/Services/Actions/ActionGateEventsService.cs` |
+| Per-decision ERROR log + bypass event on the `IAutonomyGate` path | `Tamma.Api/Services/Actions/AutonomyGateService.cs` |
+| Seam B: bypass handling + ERROR log; the decision carries `BreakGlassState` | `Tamma.Api/Services/Agents/CatalogDefaultToolLoopAutonomyGate.cs`, `IToolLoopAutonomyGate.cs` |
+| Seam B: the durable audit row | `Tamma.Api/Services/Agents/InlineToolLoopRunner.cs` — the gate is **sync by design** (AC12: the per-tool-call path must never block on a database), so the append rides the loop's async path via a new optional `ActionGateEventsService` collaborator |
+| Singleton DI registration | `Tamma.Api/Extensions/ActionCatalogGovernanceServiceCollectionExtensions.cs` |
+
+Configuration:
+
+```
+Tamma:Governance:BreakGlass:Enabled       = true                   # must be a BOOL literal
+Tamma:Governance:BreakGlass:ExpiresAtUtc  = 2026-07-31T06:00:00Z   # MANDATORY; bare instants read as UTC; at most 24h away
+Tamma:Governance:BreakGlass:Reason        = control plane unreachable, INC-4412
+```
+
+### The lifecycle, stated in both directions (review LOW-4 / INFO-7 / INFO-8, 2026-07-31)
+
+**Engaging requires a restart — and so does DISENGAGING.** The first half was documented; the second
+was not, and it is the half an operator hits under stress. `_configured` is captured in the
+CONSTRUCTOR, so setting `Enabled = false` and reloading configuration does **not** turn the override
+off in a running process. An operator who engages it by mistake, or who fixes the outage in ten
+minutes, **cannot turn it off before the expiry without restarting the process.** That is the direct
+cost of "configuration, never an endpoint", and it is a large part of why the expiry cap is 24 hours
+rather than a week: the expiry is the only in-process off switch there is.
+
+**Expiry is LATCHED (LOW-4).** `Current()` re-derives expiry from `TimeProvider.GetUtcNow()` on every
+call and used to remember nothing, while the "expired" ERROR was one-shot and the "engaged" ERROR was
+constructor-only. So advancing past the expiry and then rewinding the clock — an NTP step correction,
+a resumed VM, a bad RTC — silently RE-ENGAGED the override with **zero log lines**. Once this process
+has seen the override end, it stays ended for the process lifetime; the latch is checked before the
+clock. Pinned by `AnExpiredOverride_StaysExpired_EvenIfTheClockGoesBackwards`.
+
+**A malformed `Enabled` fails CLOSED (INFO-8).** `IConfiguration.GetValue<bool>` throws on `"yes"`,
+`"1"`, `"on"`. Because the type is built inside a DI factory, that exception surfaced as a
+service-resolution failure on the FIRST GATE CALL — not a startup refusal, not an ERROR line, just an
+unrelated-looking failure somewhere downstream. It is now caught, logged at ERROR as a refusal like
+every other malformed input, and read as NOT engaged. Pinned by
+`AnUnparseableEnabledValue_FailsClosed_WithoutThrowing` with
+`AParseableEnabledValue_StillEngages` as the control.
+
+**The permissive expiry parse is intended, and now bounded.** `DateTimeOffset.TryParse` accepts
+partial forms — `"2026-12"` and `"Dec 2026"` both parse — which is deliberate: rejecting them would
+push operators toward copy-pasted full timestamps they understand less. What was missing was the
+upper bound, which let a month-precision value engage for MONTHS. Both are now refused by the 24h
+cap, pinned as refusals rather than as parse failures
+(`AMonthPrecisionExpiry_ParsesButIsRefusedByTheCap`).
+
+### One deliberate tension with the F6 close, recorded rather than glossed
+
+The F6 close reasoned that rethrowing on a failed audit append for an **allow** would convert an
+event-store blip into a second outage on the surface that is deliberately staying open — and that
+reasoning still governs `.ALLOWED` (pinned by the new control test
+`AnOrdinaryDegradedAllow_StillSwallowsItsEmissionFailure`). **Break-glass is the one exception:**
+its audit row is not commentary on the decision, it *is* the justification for having a bypass at
+all, and an unrecorded bypass is indistinguishable from an unauthorised one. So the bypass append
+is non-swallowing and a bypass that cannot be recorded fails instead of happening quietly
+(`ABypassThatCannotBeAudited_FailsRatherThanHappeningQuietly`,
+`A_break_glass_bypass_that_cannot_be_audited_does_not_happen_quietly`).
+
+### What F11 does NOT close
+
+- **F12 still stands.** `ToolLoopGateOutcome` still has no `RequiresHuman` case, so a degraded (or
+  break-glass-blocked) decision at Seam B still reaches the model as a tool rejection and reaches
+  no person. Break-glass changes *whether* work continues, not *who is asked*.
+- **The staleness bound (F7) is untouched.** Break-glass is about ignorance, not lag.
+- **It is per-process, not per-tenant.** A SaaS operator engaging it engages it for every tenant on
+  that host. That is deliberate for v1 — the failure it relieves (an unreadable control plane) is
+  itself per-process — but it means the lever is a platform-owner action in every deployment mode,
+  and a per-tenant variant would need its own story.
+- **Nothing verifies that the override was *needed*.** Configuring it while the control plane is
+  healthy is legal and inert; the expiry, the logging and the per-decision audit are what bound the
+  risk, not a liveness check.
+- **The bypass row is 1:1 with decisions the override PERMITTED — not with decisions taken while it
+  was engaged.** This entry originally named the `AlwaysEscalateLegacy` case as the single exception
+  to "an audit row on every decision it bypasses". Review MEDIUM-1 (2026-07-31) showed the framing
+  was backwards: the legacy-floor case was not an exception at all, it was the ONE place the code
+  had got right. Every OTHER blocked-while-engaged decision was being stamped `BreakGlass` and
+  therefore emitting a bypass row *for a denial nothing had bypassed* — the error ran in the
+  direction of too many rows, not too few.
+
+  The rule after the fix, and the one this story now claims: **`BREAK_GLASS_BYPASS` is emitted for
+  exactly the decisions the override permitted.** A decision that was blocked while the override was
+  engaged — by a read row, by a platform ceiling, by a disable, by a role restriction, by a legacy
+  always-escalate entry, or by an `AlwaysHuman` shipped default — is **not** a bypass, gets no bypass
+  row, and is attributed to whatever actually blocked it. It is still fully audited: a block rides
+  the non-swallowing `.REQUIRES_HUMAN`/`.DENIED` path, which is where it belongs. The
+  `AlwaysEscalateLegacy` case is therefore no longer an audit gap; it is one instance of the general
+  rule.
+
+  **What genuinely remains open here:** Seam B is looser than the `IAutonomyGate` path. It emits a
+  bypass row for the ALLOWED *and* the DENIED shape (`InlineToolLoopRunner`, "what is being recorded
+  is that the fail-closed posture was suspended for this call"), so at that seam the row means "the
+  override was in force for this decision" rather than "the override permitted this decision".
+  Deliberate and documented at the call site, but it means **the two seams do not answer the same
+  question**, and a dashboard that unions them must filter on `seam`. Reconciling them is a
+  follow-up, not a bug: the Seam B row is a superset, never a miss.
+
+### Tests
+
+- `Tamma.Core.Tests/Actions/AutonomyGateEvaluatorBreakGlassTests.cs` — the pure rules, paired
+  bypass/anti-backdoor: `EngagedAndSnapshotUnavailable_Proceeds_WithBreakGlassProvenance`,
+  `EngagedAndBaseRulesUnreadable_Proceeds_WithBreakGlassProvenance`,
+  **`EngagedButARealPolicyRowDenies_IsStillDenied`**, `EngagedButAPlatformCeilingDenies_IsStillDenied`,
+  `EngagedAndSnapshotUnavailable_AnAlwaysHumanShippedDefault_StillBlocks`,
+  `EngagedButTheActionIsDisabled_IsStillDenied`, `EngagedButTheRoleIsNotAllowed_IsStillDenied`,
+  `EngagedButALegacyAlwaysEscalateEntryWasRead_StillFloors`,
+  `NotEngaged_AndDegraded_StillDeniesExactlyAsBefore`,
+  `Engaged_ChangesNothing_WhenEveryInputIsReadable`,
+  `ResolveEffectiveMinAutonomy_Engaged_FallsBackToTheShippedDefault`,
+  `ResolveEffectiveMinAutonomy_Engaged_NeverDiscardsAReadRow`.
+- `Tamma.Activities.Tests/Actions/GovernanceBreakGlassTests.cs` — the config source, including the
+  three refusals (`EnabledWithNoExpiry_REFUSES_ToEngage`,
+  `EnabledWithAnUnparseableExpiry_REFUSES_ToEngage`,
+  `EnabledWithAnAlreadyPastExpiry_REFUSES_ToEngage`),
+  `AnEngagedOverride_StopsBeingEngaged_TheInstantItExpires`,
+  `ABareTimestamp_IsReadAsUtc_NotAsServerLocalTime`, `TheOverrideHasNoWriter`.
+- `Tamma.Activities.Tests/Actions/AutonomyGateServiceFailurePostureTests.cs` (extended) —
+  `BreakGlassEngaged_OverADegradedRead_Proceeds_AndWritesItsOwnAuditRow`,
+  **`BreakGlassEngaged_AgainstARealPolicyDenial_IsSTILLDenied`**,
+  `BreakGlassNotEngaged_LeavesTheFailClosedPostureUntouched`,
+  `BreakGlassEngaged_ChangesNothing_WhenEveryReadSucceeds`,
+  `ABypassThatCannotBeAudited_FailsRatherThanHappeningQuietly`,
+  `AnOrdinaryDegradedAllow_StillSwallowsItsEmissionFailure`.
+- `Tamma.Activities.Tests/Actions/ResolverBackedToolLoopGateTests.cs` (extended) — Seam B:
+  `BreakGlassEngaged_OverADegradedSnapshot_AllowsAndCarriesTheBypassState`,
+  `BreakGlassEngaged_DoesNotOpenAnAlwaysHumanShippedDefault`,
+  `BreakGlassEngaged_ChangesNothing_WhenTheSnapshotWasRead`,
+  `BreakGlassNotEngaged_LeavesTheF6PostureExactlyAsItWas`.
+- `Tamma.Api.Tests/Agents/ToolLoopAutonomyGateSeamTests.cs` (extended) — the durable row through
+  the REAL loop: `A_break_glass_bypass_writes_an_audit_row_per_call`,
+  `A_break_glass_bypass_that_cannot_be_audited_does_not_happen_quietly`,
+  `An_ordinary_decision_writes_no_break_glass_row`.
+
+Added by the 2026-07-31 review (see "The boundary now holds for PROVENANCE too" above):
+
+- `AutonomyGateEvaluatorBreakGlassTests.BreakGlassProvenance_NeverAppearsOnADecisionTheOverrideDidNotPermit`
+  and `…_IsStillStamped_WhenTheOverrideGenuinelyPermitted` — the invariant, both directions.
+- `EngagedButThePlatformDisabled_ReportsThePlatformCeiling`,
+  `EngagedAndDegraded_ANonEnforceableMember_IsNotStampedAsABypass`,
+  `EngagedAndDegraded_AnUncataloguedKey_IsNotStampedAsABypass` — the per-guard attributions and the
+  two carve-outs, pinned next to each other so they cannot drift apart again.
+- `AutonomyGateServiceFailurePostureTests.ADenialUnderAnEngagedOverride_SurvivesAFailingBypassAppend`
+  and `ANonEnforceableAllow_UnderAnEngagedOverride_IsNotAnAuditableBypass` — MEDIUM-2, through the
+  composed service with a refusing event store.
+- `GovernanceBreakGlassTests.AnExpiredOverride_StaysExpired_EvenIfTheClockGoesBackwards` (LOW-4),
+  `EnabledWithAnExpiryBeyondTheMaximumDuration_REFUSES_ToEngage` /
+  `EnabledWithAnExpiryExactlyAtTheMaximumDuration_Engages` / `AFarFutureExpiry_REFUSES_ToEngage` /
+  `AMonthPrecisionExpiry_ParsesButIsRefusedByTheCap` (MEDIUM-3),
+  `AnUnparseableEnabledValue_FailsClosed_WithoutThrowing` / `AParseableEnabledValue_StillEngages`
+  (INFO-8).
+
+## MCP tool invocation — governed by default (2026-07-30)
+
+Not a 43-5 follow-up, but it lands in the same change and it touches this story's resolver, so it
+is recorded here as well as in the epic README and Story 43-4.
+
+**`effect:mcp.tool.invoke` now ships `AutonomyDial.AlwaysHuman`**, and `ToolNameAliases` resolves
+the `mcp__<server>__<tool>` prefix family onto it instead of leaving those names uncatalogued.
+The reason is specific to MCP and does not generalise: epic **D2** allows an unclassified action at
+runtime *because* the drift harnesses make it unmergeable in CI, and for MCP that second half
+cannot exist — no harness can enumerate a remote server's tools. See the epic README's
+"MCP: the one family where the CI half cannot exist".
+
+Consequence for this story's ladder: an `mcp__*` call at Seam B now resolves through the normal
+assignment ladder (action row → group row → shipped default, then platform ceiling by `max()`), so
+an admin re-opens the family with one action-scoped row and a platform ceiling can still hold it
+shut. Pinned by `ResolverBackedToolLoopGateTests.AnMcpToolName_IsDeniedByDefault_AndCarriesTheMcpEffectKey`,
+`AnActionRowAtTheFloor_ReOpensMcp`, `APlatformCeiling_StillBinds_WhenAPrincipalRowReOpensMcp`.
 
 ## Change Log
 
@@ -373,3 +920,7 @@ dev-mode wipe orphans `action_assignments` principal keys).
 | ---------- | ------- | ---------------------------------------------------------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation                                                  | Claude |
 | 2026-07-29 | 1.1.0   | Adversarial-review amendments: F1–F5 fixed (ledger CAS, catalog-derived group coverage, expired-row unblocking, fresh-read threshold preservation + documented materialize-and-pin, group-write member validation); F6/F7/F9/F10 recorded as follow-ups | Claude |
+| 2026-07-30 | 1.2.0   | **F6 CLOSED** — fail-CLOSED posture on a degraded read: `GovernancePolicySnapshot.IsAuthoritative`, nullable `baseRules` meaning "read failed", `ActionAssignmentSource.Unavailable` + `degraded` audit tag, ERROR logging, Seam B honours it. **F10 CLOSED** — `Enforce` composes by OR and `AllowedRoles` by intersection, so every cross-plane field is monotone. F7/F9 remain open as recorded. | Claude |
+| 2026-07-31 | 1.3.1   | **Adversarial review of the F11 close — six fixes and five doc corrections.** **MEDIUM-1**: `BreakGlass` provenance was stamped on the whole evaluation once the override was in play, so a disabled row / role mismatch / platform ceiling produced a denial labelled `break-glass` — a spurious `BREAK_GLASS_BYPASS` row, `breakGlass=true` on the `.DENIED` row, a misleading ERROR log, and the real provenance destroyed. It is now stamped at exactly ONE return (the automated one reached with the bypass in force); every other guard stamps what actually decided. **MEDIUM-2** (follows): the non-swallowing bypass append, sequenced before the decision row, made a disabled action + engaged override + failing event store throw and lose the `.DENIED` row too; the `Enforceable=false` carve-out is now explicitly exempted the same way the uncatalogued one already was. **MEDIUM-3**: the mandatory expiry had no upper bound (`9999-12-31` engaged permanently) — capped at **24 hours**. **LOW-4**: expiry is latched, so a rewound clock cannot silently re-engage. **INFO-7**: documented that disengaging also requires a restart. **INFO-8**: a non-boolean `Enabled` now fails closed with an ERROR instead of throwing out of the DI factory. Docs: the `never appears on a decision a read row would have denied` claim is now true; the "does NOT close" list, the epic README and the 43-9 entry no longer imply a 1:1 bypass-row correspondence they did not have; "at both live gates" corrected to one (`IAutonomyGate` has no production caller). | Claude |
+| 2026-07-30 | 1.3.0   | **F11 CLOSED — 43-9 is unblocked.** A config-sourced (`Tamma:Governance:BreakGlass:*`), mandatorily-expiring, per-decision-audited break-glass override that suspends the fail-closed substitution for an UNREADABLE policy input and **nothing else**: `BreakGlassState`, `ActionAssignmentSource.BreakGlass`, `ReasonBreakGlassBypass`, `IGovernanceBreakGlass`/`ConfigurationGovernanceBreakGlass`, `ACTION.GATE.BREAK_GLASS_BYPASS` on the non-swallowing append path, ERROR logging at engage/refuse/expire/every-bypass, and Seam B support. Anti-backdoor boundary pinned in four places (a read policy row, a platform ceiling, a disable, a role restriction, and an AlwaysHuman shipped default all still deny). **Also in this change: `effect:mcp.tool.invoke` ships `AlwaysHuman` and `mcp__*` names resolve to it** — see the MCP section. F7/F9/F12 remain open. | Claude |
+| 2026-07-30 | 1.2.1   | Adversarial review of the F6 close. **2.1 fixed** — the degradation check now runs BEFORE the uncatalogued short-circuit, so a degraded uncatalogued decision carries `Unavailable` provenance and therefore emits; outcome provably unchanged (still Automated/observe-only). The "guaranteed an audit row" claim is narrowed to state the blocking and allowing cases separately. **2.2 fixed** — `GovernancePolicySnapshot` has no public constructor; `FromSuccessfulRead(...)` / `Unavailable` make the authority bit a required, stated input rather than a default-true safety property. **F11 recorded as a BLOCKER ON 43-9** (no break-glass override for the fail-closed posture) and **F12 recorded** (the live seam hard-denies rather than escalating — `ToolLoopGateOutcome` has no `RequiresHuman` case). | Claude |

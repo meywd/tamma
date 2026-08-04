@@ -5,7 +5,9 @@
 **Layer:** Layer 4 (integration/orchestration)
 **Depends on:** Epic 29 (`ISecretStore` exists; a *reveal-to-runtime-consumer* extension is hard-blocked), Epic 39 (`AcceptanceRequest` channel + autonomy dial + DCB emitter), Epic 41 / 41-29 (the consumers)
 
-> This epic is **backlog** — scoped and specified, not built. It *extends* the real `IToolExecutor` / `IToolExecutorRegistry` / `ResolveToolsActivity` surface; it does not design a parallel framework.
+> This epic is **backlog** — scoped and specified, not built. It *extends* the real `IToolExecutor` / `IToolExecutorRegistry` surface; it does not design a parallel framework.
+>
+> **Correction (2026-07-29):** earlier text named `ResolveToolsActivity` as part of that surface. **Story 43-0 DELETED `ResolveToolsActivity`** (`apps/tamma-elsa/src/Tamma.Activities/LlmCall/ResolveToolsActivity.cs`) — it was dead code with zero references outside its own file and shipped a third, wrong tool-name vocabulary. Nothing replaced it: tool selection is not a workflow activity. Where this page said 42-3 "extends `ResolveToolsActivity`", the work now has to land wherever the tool set is actually assembled for the model — `IToolExecutorRegistry` and the API-side tool loop (`InlineToolLoopRunner` / `ParallelToolExecutor`). Epic 42 is backlog, so this is a re-siting of unstarted work, not a lost implementation.
 
 ## 1. Overview
 
@@ -43,7 +45,7 @@ Per CLAUDE.md's universal rule, every tenant-aware surface answers ownership **t
 - **single-user mode** — the sole user owns tool enablement + per-role/per-autonomy grants; keyed by `user_id`. Resolution: user binding → system default descriptor.
 - **SaaS mode** — `tenant_owner` / `tenant_admin` owns the tenant's grants; `member` users get the resolved grant with **no edit access** (403 on write); keyed by `tenant_id`. **No per-user override layer.** Resolution: tenant binding → system default.
 
-**Enforcement is in `ResolveToolsActivity` (Story 42-3), not a new gate.** The resolver returns only the subset that is (a) enabled for the principal, (b) permitted for the agent's `AgentRole`, and (c) autonomy-eligible (`AutonomyFloor ≤ current dial`). A needed tool that is `Destructive` or above the floor is **not handed to the agent as callable**; instead the step routes that action to the orchestrator/human over the **existing** `AcceptanceRequest` channel — the same shape as the accept gate. The autonomy dial is read live, never cached.
+**Enforcement is in the tool-resolution seam (Story 42-3), not a new gate.** *(Was "`ResolveToolsActivity`" — that activity was deleted by Story 43-0 on 2026-07-29 and never replaced; 42-3 must site this in `IToolExecutorRegistry` / the API-side tool loop instead.)* The resolver returns only the subset that is (a) enabled for the principal, (b) permitted for the agent's `AgentRole`, and (c) autonomy-eligible (`AutonomyFloor ≤ current dial`). A needed tool that is `Destructive` or above the floor is **not handed to the agent as callable**; instead the step routes that action to the orchestrator/human over the **existing** `AcceptanceRequest` channel — the same shape as the accept gate. The autonomy dial is read live, never cached.
 
 **Credentials (Story 42-4)** bind through Epic 29's `ISecretStore` — `SecretScope.Tenant` in SaaS, `SecretScope.Platform`/user-owned in single-user. Secrets are **never** in tool args logged, in `ToolExecutionResult.Output`, in DCB `TOOL.*` events, or error messages (reuse `ErrorRedactor`). Reconciliation with Epic 29: `ISecretStore` **now exists** (Story 29-1 landed), but by design it *never returns plaintext through a public signature*. A tool that authenticates to Hetzner/Slack needs the live secret at execution time — so 42-4 **files a hard dependency** on an authorized, audited *reveal-to-runtime-consumer* path (an Epic 29 extension); until it lands, external-touching tools run only in the human-assigned path.
 
@@ -65,7 +67,7 @@ Each family declares its `PermissionClass`, `AutonomyFloor`, and `RequiredSecret
 |-------|-------|---------|
 | 42-1 | Tool Contract & Registry Evolution | Add `ToolDescriptor` to the `IToolExecutor` surface + a dynamic `Register`/`Unregister` seam; annotate the six built-ins. |
 | 42-2 | Tool Binding & Config Store (two-scoping) | Persist per-principal tool enablement as `tool_bindings` (user_id XOR tenant_id), mirroring `prompt_overrides`. |
-| 42-3 | Per-Tool Permission & Autonomy Gating | Extend `ResolveToolsActivity` to return the permitted + autonomy-eligible subset; route `Destructive`/above-floor tools to the orchestrator via `AcceptanceRequest`. |
+| 42-3 | Per-Tool Permission & Autonomy Gating | Return only the permitted + autonomy-eligible subset at the tool-resolution seam (**not** `ResolveToolsActivity` — deleted by Story 43-0, 2026-07-29; site it in `IToolExecutorRegistry` / the API-side tool loop); route `Destructive`/above-floor tools to the orchestrator via `AcceptanceRequest`. |
 | 42-4 | Tool Credential / Secret Binding | Bind external-touching tools to `ISecretStore`; file the reveal-to-runtime-consumer dependency on Epic 29; guarantee no-secret-in-logs/events. |
 | 42-5 | Tool-Use DCB Audit | Emit durable `TOOL.INVOKED` / `TOOL.SUCCEEDED` / `TOOL.FAILED` / `TOOL.DENIED` / `TOOL.ESCALATED` events (secret-redacted) at the `ParallelToolExecutor` hook. |
 | 42-6 | MCP Integration | Let external MCP servers expose tools into the registry via the 42-1 dynamic path, with the same permission/autonomy/secret/audit treatment as native tools. |
@@ -99,7 +101,7 @@ Each family declares its `PermissionClass`, `AutonomyFloor`, and `RequiredSecret
 - **Epic 29 (secrets):** `ISecretStore` / `SecretRef` / `SecretScope` / `SecretPurpose` exist (29-1). **Hard-blocked capability:** an authorized reveal-to-runtime-consumer path — 42-4/42-7/42-8/42-9's agent path waits on it; the human-assigned path does not.
 - **Epic 39:** the `AcceptanceRequest` channel + autonomy dial (42-3 routing), the DCB emitter drain (used by 42-5), resumable-by-design (42-1 `Suspends`).
 - **Epic 41 / 41-29:** the consumers. 41-29's `TaskKind`→workflow map is unchanged; this epic supplies the tools those dispatched workflows resolve.
-- **Existing surface (extended, not replaced):** `IToolExecutor`, `IToolExecutorRegistry` / `ToolExecutorRegistry`, `ResolveToolsActivity`, `ParallelToolExecutor`, `ToolCallValidator` + `ActionGate`, `IToolLoopEventSink` / `ToolLoopEventEmitter`.
+- **Existing surface (extended, not replaced):** `IToolExecutor`, `IToolExecutorRegistry` / `ToolExecutorRegistry`, `ParallelToolExecutor`, `ToolCallValidator` + `ActionGate`, `IToolLoopEventSink` / `ToolLoopEventEmitter`. *(`ResolveToolsActivity` was on this list until 2026-07-29; Story 43-0 deleted it as dead code and nothing replaced it.)*
 
 ## 11. See also
 

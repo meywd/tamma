@@ -71,6 +71,7 @@ namespace Tamma.ElsaServer.Workflows;
 public class IssueDecompositionWorkflow : WorkflowBase
 {
     private const string DecompositionDocumentType = "decomposition";
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -97,6 +98,10 @@ public class IssueDecompositionWorkflow : WorkflowBase
         var reEntryPositionJson = builder.WithVariable<string>();
         var reEntryDocJson  = builder.WithVariable<string>();
         var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── Dispatched-workflow result containers ──────────────────────
         var contextGatherResult = builder.WithVariable<IDictionary<string, object>?>();
@@ -233,29 +238,53 @@ public class IssueDecompositionWorkflow : WorkflowBase
         };
         emitContextGathered.SetDisplayText("Emit Context Gathered");
 
+        // ── Step 3b (39-25 leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Fail-closed: no accepted assessment for this issue ⇒ Found=false ⇒ the
+        // ambiguityScore dispatch key below is OMITTED (never a fabricated 0.0).
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment",
+            Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 4: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle",
             Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                // The (senior_developer, decompose-issue) producer cell is bound as the
-                // produce step; the drift enumeration reads producerRole/producerAction here.
-                ["documentType"]          = DecompositionDocumentType,
-                ["producerRole"]          = AgentRole.SeniorDeveloper.ToWire(),
-                ["producerAction"]        = AgentAction.DecomposeIssue.ToWire(),
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    ["workItemJson"] = BuildWorkItem(issueTitle.Get(ctx), workItemJson.Get(ctx), issueId.Get(ctx)),
-                    ["findings"]     = decompositionContext.Get(ctx) ?? "",
-                    ["conventions"]  = "",
-                }),
-                ["issueId"]             = issueId.Get(ctx) ?? "",
-                ["correlationId"]       = issueId.Get(ctx) ?? "",
-                ["tenantId"]            = tenantId.Get(ctx) ?? "",
-                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                    // The (senior_developer, decompose-issue) producer cell is bound as the
+                    // produce step; the drift enumeration reads producerRole/producerAction here.
+                    ["documentType"]          = DecompositionDocumentType,
+                    ["producerRole"]          = AgentRole.SeniorDeveloper.ToWire(),
+                    ["producerAction"]        = AgentAction.DecomposeIssue.ToWire(),
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["workItemJson"] = BuildWorkItem(issueTitle.Get(ctx), workItemJson.Get(ctx), issueId.Get(ctx)),
+                        ["findings"]     = decompositionContext.Get(ctx) ?? "",
+                        ["conventions"]  = "",
+                    }),
+                    ["issueId"]             = issueId.Get(ctx) ?? "",
+                    ["correlationId"]       = issueId.Get(ctx) ?? "",
+                    ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                    ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                };
+                // 39-25 — thread the accepted assessment's score into the lifecycle's
+                // existing ambiguityScore input; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -357,6 +386,7 @@ public class IssueDecompositionWorkflow : WorkflowBase
                 gatherContext,
                 storeContextResult,
                 emitContextGathered,
+                fetchAmbiguityAssessment,
                 dispatchLifecycle,
                 readLifecycleExit,
                 lifecycleAcceptedGate,
@@ -376,9 +406,12 @@ public class IssueDecompositionWorkflow : WorkflowBase
                 new(emitStarted, gatherContext),
                 new(gatherContext, storeContextResult),
                 new(storeContextResult, emitContextGathered),
-                new(emitContextGathered, dispatchLifecycle),
-                // Re-entry → straight to dispatch (a re-entry is not a new decomposition, D7).
-                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
+                // 39-25 — the ambiguity-assessment fetch is the SINGLE predecessor of the
+                // dispatch, so it runs on every path that actually dispatches (fresh + re-entry).
+                new(emitContextGathered, fetchAmbiguityAssessment),
+                // Re-entry → fetch → dispatch (a re-entry is not a new decomposition, D7).
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(fetchAmbiguityAssessment)),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
 
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, lifecycleAcceptedGate),

@@ -285,6 +285,10 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             {
                 ["repository"] = repository.Get(ctx),
                 ["issuesJson"] = subResult.Get(ctx)?.GetValueOrDefault("deferred")?.ToString() ?? "[]",
+                // 40-8 D6 — thread the tenant so the child's ISSUES.CREATE* audit
+                // events drain tenant-tagged (the drain reads the child's TenantId
+                // variable, which create-issues fills from this input).
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
         };
@@ -302,6 +306,8 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             {
                 ["repository"] = repository.Get(ctx),
                 ["issuesJson"] = subResult.Get(ctx)?.GetValueOrDefault("split")?.ToString() ?? "[]",
+                // 40-8 D6 — thread the tenant (see CreateDeferredIssues above).
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
         };

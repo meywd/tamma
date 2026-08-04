@@ -266,7 +266,50 @@ CI blocks the merge either way; what is lost is local-build feedback.
   deploy itself happens inside the loop. This must appear in the group description in the UI, not
   only in a doc.
 - MCP is one coarse member with no drift signal. Adding a server, or a tool on an existing server,
-  changes nothing in the catalog.
+  changes nothing in the catalog. **This is the one hole that D2's safety net cannot cover — see the
+  section immediately below.**
+
+### MCP: the one family where the CI half of D2 cannot exist
+
+*(Decided 2026-07-30. This is an amendment to **D2**, not an exception to it; the decision row in
+the table below is updated to match.)*
+
+D2 reads "an unclassified action is **allowed at runtime**, **unmergeable in CI**". The two halves
+are a bargain: runtime tolerance is affordable *because* the drift harnesses turn an uncatalogued
+capability into a build failure, so the gap is always temporary and always someone's to close.
+
+**For MCP the second half does not exist and cannot be built here.** An MCP server's tool list lives
+in another process — reachable only through `POST /api/kb/mcp/tools/invoke` — and is not derivable
+from this tree by reflection, by a route sweep, or by any of the mechanisms above. Adding a server,
+or a tool to an existing server, never becomes unmergeable, because there is nothing in the
+repository to notice. So MCP was an open capability class that was simultaneously **unenforceable**
+(one coarse member at the lowest threshold) and **drift-invisible** (no harness will ever flag it) —
+the exact combination the epic exists to prevent.
+
+**What compensates, since a harness cannot:**
+
+1. **`effect:mcp.tool.invoke` ships `AutonomyDial.AlwaysHuman`** instead of `AutonomyDial.Min`. Where
+   CI cannot make an unclassified MCP capability *unmergeable*, the default makes it *unautomatable*
+   — a person decides until an admin says otherwise. This is the deliberate exception to 43-3 D4's
+   "AlwaysHuman iff a person must act today" derivation, and to the D1 behaviour-preservation rule;
+   both are recorded at the descriptor and in `ActionCatalogDefaultsTests`.
+2. **`mcp__<server>__<tool>` names are no longer uncatalogued at the gate.** `ToolNameAliases`
+   resolves the prefix family onto that one member, so a model-emitted MCP name is *governed* rather
+   than passing through the Seam B tool-loop gate as `uncatalogued`. Deliberately narrow: this is a
+   named family, **not** a change to the uncatalogued rule — every other unknown tool name is still
+   allowed at runtime under D2, and a test guards that.
+3. **The blast radius is empty today, and that is why this could ship as a tightening.** No MCP
+   `IToolExecutor` is registered, so an `mcp__*` call already terminated as "Unknown tool" from
+   `ToolExecutorRegistry`; the only live MCP surface is a human-authenticated `SettingsManage` HTTP
+   route, not an agent path. What changed is *which* rejection the model receives.
+4. **Reversal is one admin policy row** (`effect:mcp.tool.invoke`, action scope, `min = Min`), and a
+   platform ceiling can still hold it shut against a tenant. It is a default, not a refusal.
+
+**What this does NOT claim to fix.** MCP is still ONE coarse member: per-server and per-tool
+granularity remain impossible without a catalog binding that can enumerate a remote server (epic
+Story 42-6's prerequisite, and open question 1 below). An admin who re-opens the member re-opens
+*every* server and *every* tool on it. When per-server members exist, this default should be
+revisited — the right long-term answer is granular members plus a sweep, not a blanket floor.
 
 ---
 
@@ -413,10 +456,76 @@ Built through as one epic. The ordering below is sequencing, not separate releas
 
 **Total ~43 days.** Stories 0 and 1 are independently valuable and ship first.
 
-**Story 0** fixes a live bug worth landing on its own: the acceptance-rules edit dialog builds its
-save body without `acceptorRequirement`, and the API defaults the missing field — so **every admin
-save silently resets `design` from human-required back to `any`**. Also deletes a dead tool-resolution
+**Story 0** fixes a live bug worth landing on its own: the acceptance-rules edit dialog **built** its
+save body without `acceptorRequirement`, and the API **defaulted** the missing field — so **every admin
+save silently reset `design` from human-required back to `any`**. Also deletes a dead tool-resolution
 activity with zero callers (a third dead tool vocabulary).
+
+> **Status (2026-07-29): FIXED, on both sides.** The DTO field is now `AcceptorRequirement?`
+> (`null` = "the caller did not say") and `AcceptanceRulesEndpoints.Upsert` resolves the in-force
+> value before mapping, so an omitted field is preserved rather than invented; the dashboard sends
+> and edits the field. The blast radius was three document types, not one — `sprint-plan` and
+> `threat-model` also ship `AcceptorRequirement.Human` since 41-1b/41-1c. **The fix covers
+> `PUT /api/acceptance-rules/{documentTypeKey}` only** — see carried defect **CD-1** below before
+> treating the class as closed. *(Update 2026-07-30: CD-1 is now closed — the base route can no
+> longer lower a shipped human acceptor floor.)*
+
+### Carried defects and follow-ups
+
+Defects found while implementing an Epic 43 story, deliberately NOT fixed in that story, and
+therefore not owned by any story that has landed. **A follow-up recorded only inside the story that
+deferred it is not tracked** — that is what this table is for.
+
+| # | Defect | Found in | Owner | Status |
+|---|---|---|---|---|
+| **CD-1** | **Tier-2 wholesale shadowing erases the shipped human acceptor floor via the BASE route.** `AcceptanceRulesService.ResolveAsync` resolves **wholesale** — tier 1 per-type override row, tier 2 principal BASE override row, tier 3 `AcceptanceDefaults.For(type)` — with **no field merge**. So the moment a base override row exists it shadows tier 3 *entirely*. Consequence, proved: **one** `PUT /api/acceptance-rules/base` writes a base row carrying that row's in-force `acceptorRequirement` (`any`), and from then on `design`, `sprint-plan` **and** `threat-model` all resolve to `any` — their human floor gone, without any of them having been written — and `threat-model` additionally loses its `security` reviewer selection. Worse, a **later omitting per-type save** then reads the degraded value as "what is in force" and bakes it into a type row, after which deleting the base row no longer restores the floor. **This is a resolution-semantics issue, not an omission bug:** it fires on an *explicitly stated* `acceptorRequirement` exactly as it does on an omitted one, so 43-0's preserve-on-absent cannot close it. **Not UI-reachable today** — the admin page renders only the ten per-type rows and issues no base PUT — but reachable by anything that speaks HTTP. Semantics are 39-5 D1/D2's and predate 43-0. **The follow-up must decide** whether tier 2 stays wholesale (and the base route grows a guard REFUSING to lower a floor below any shipped per-type floor) or tier 2 becomes a per-field merge for `AcceptorRequirement`. The two are not equivalent and the choice is a product one. | Story 43-0 adversarial review, 2026-07-29 (recorded as that story's amendment **A1**) | **closed 2026-07-30** — see 43-0 amendment **A1 → "RESOLUTION — 2026-07-30"** | **CLOSED (with one recorded remainder).** **Decision: tier 2 stays WHOLESALE; the shipped per-type `AcceptorRequirement` becomes a FLOOR** — a tier may raise it, never silently lower it. The general per-field merge was evaluated against 39-5 D2 and REJECTED in its own words ("field-level deep-merging makes provenance unexplainable in the admin UI and has no precedent"); the floor changes exactly ONE field, composing it by `max()` over the two-element lattice `any < human`, and leaves wholesale-row precedence intact for everything else, so `source` still names the row that produced the resolution. **Tier 1 is deliberately exempt**: a per-type `PUT` stating `"acceptorRequirement": "any"` still lowers it — lowering a shipped human floor must NAME the type, which is the semantic `Upsert_explicit_any_clears_the_human_floor` already pinned. A base row stands in for every document type at once and cannot express intent about any one of them. The **bake-in path closes as a consequence**: 43-0's preserve-on-absent now reads the floored value, so an omitting per-type save writes `human` and deleting the base row still restores everything. Corroborating evidence for the floor framing: `ActionCatalog.Descriptors` already pins `document-type:design|sprint-plan|threat-model` at `AutonomyDial.AlwaysHuman` *because* those types ship `AcceptorRequirement.Human`, so the pre-fix behaviour had the catalog and the resolver openly disagreeing. Shipped as `Tamma.Core/Documents/Policy/AcceptanceFloors.cs` + `ResolvedAcceptanceRules.AcceptorRequirementFloored` (additive on the wire, carried into the dashboard interface); pinned by `AcceptanceFloorsTests` and by `Upsert_base_cannot_erase_the_shipped_human_acceptor_floor` (which fires on an EXPLICIT `any`, proving it is resolution semantics and not 43-0's omission bug). **Recorded remainder, deliberate:** `threat-model`'s `security` reviewer selection is STILL shadowed wholesale by a base row — reviewer roles carry no ordering, so no monotone floor exists for that field, and a deployment-wide reviewer choice is a legitimate thing for tier 2 to say. Pinned as intentional by `Base_row_still_shadows_per_type_reviewer_selection_by_design`. |
+
+**Also closed on 2026-07-30, recorded inside Story 43-5 rather than here** (listed for
+discoverability, since the table's own preamble warns that a story-local follow-up is untracked):
+**F6** — the autonomy gate failed OPEN on a degraded read (a cold policy snapshot, or a base-rules
+read that threw, silently discarded the legacy always-escalate floor). It now fails **CLOSED**, with
+"read failed" made structurally distinct from "read succeeded and found nothing"
+(`GovernancePolicySnapshot.IsAuthoritative`, a nullable `baseRules` meaning *unreadable*,
+`ActionAssignmentSource.Unavailable`, a `degraded` audit tag, ERROR-level logging). **F10** — cross-plane
+`Enforce` and `AllowedRoles` composed non-monotonely, so a platform ceiling could LOOSEN; they now
+compose by `OR` and by INTERSECTION respectively, making every cross-plane field monotone. See
+`story-43-5/43-5-storage-principal-resolution-resolver-audit.md` → "F6 — CLOSED" / "F10 — CLOSED".
+
+**✅ `43-5 F11` — the break-glass override for the fail-closed posture. Opened by the F6 close as a
+BLOCKER on Story 43-9; CLOSED 2026-07-30, and 43-9 is unblocked.** The gap: a non-authoritative
+governance snapshot DENIED every catalogued tool, in both SaaS and single-user-with-a-control-plane
+deployments, with no operator lever short of a code change. What shipped: a **config-sourced**
+override (`Tamma:Governance:BreakGlass:Enabled` / `:ExpiresAtUtc` / `:Reason`) — no endpoint and no
+writer, because an API that can switch off a governance posture is itself a governance surface; it
+**refuses to engage** without an explicit UTC expiry, with one already past, or with one **more than
+24 hours away** (the cap added by review MEDIUM-3, 2026-07-31 — without it `9999-12-31T23:59:59Z`
+satisfied "mandatory expiry"); it logs at ERROR on engage, refusal, expiry and **every bypassed
+decision**; and each bypassed decision writes a distinct `ACTION.GATE.BREAK_GLASS_BYPASS` audit row
+on the **non-swallowing** append path, with its own provenance value (`break-glass`). **The
+load-bearing scoping decision:** it bypasses **degradation only** — a decision denied by a policy row
+that was read successfully, by a platform ceiling, by a disable, by a role restriction or by an
+`AlwaysHuman` shipped default is **still denied** while it is engaged. That is the difference between
+an outage lever and a backdoor, and it is enforced by construction in `AutonomyGateEvaluator` rather
+than by convention.
+
+Two precisions this paragraph used to get wrong, both corrected 2026-07-31:
+
+- **"every bypassed decision" means the decisions the override PERMITTED**, and since review
+  MEDIUM-1 that is exactly what `break-glass` provenance and the `BREAK_GLASS_BYPASS` row select.
+  Until then the evaluator stamped `BreakGlass` on the whole evaluation as soon as the override was
+  in play, so denials the override had never touched emitted bypass rows and carried
+  `breakGlass=true` on their `ACTION.GATE.DENIED` row — the correspondence read as 1:1 and was not.
+  One residual asymmetry, deliberate and documented: **Seam B** (`InlineToolLoopRunner`) emits its
+  row for the allowed *and* the denied shape, so there it means "the override was in force for this
+  call". Union the two seams only with a `seam` filter.
+- **There is ONE live gate, not two.** `IAutonomyGate`/`AutonomyGateService` has **no production
+  caller** (43-5 D12 — Story 43-9 adds them), so the only gate a bypass can actually happen at today
+  is Seam B. Wherever this epic said "at both live gates", read "at the gate that is live".
+
+Full write-up: 43-5 → "F11 — CLOSED". Alongside it, **`43-5 F12` remains OPEN**: the one live seam HARD-DENIES rather than
+escalating — `ToolLoopGateOutcome` has no `RequiresHuman` case, so a degraded decision reaches the
+model as a tool rejection and reaches no person at all. Break-glass changes *whether* work continues,
+not *who is asked*.
 
 > **Correction (2026-07-25).** An earlier draft of this line also asked Story 0 to "resolve
 > `GetAcceptanceRulesTool` — DI-register or delete, it must not stay a tool the registry cannot
@@ -436,7 +545,7 @@ dimmed-row treatment exists in the repo, but in Blazor.
 | | Decision | Rejected |
 |---|---|---|
 | **D1** | v1 **enforces**, with defaults reproducing today's behaviour. Admins opt into gating. | Declarative v1; enforce-with-pre-gated-defaults (two behaviour changes in one release) |
-| **D2** | Unclassified action is **allowed at runtime, unmergeable in CI**. | Fail-closed at runtime (any gap becomes a production stall); no guard at all |
+| **D2** | Unclassified action is **allowed at runtime, unmergeable in CI**. **Amended 2026-07-30:** the runtime tolerance is affordable only because the CI half exists. **MCP is the one family where the CI half cannot exist** — no harness can enumerate a remote server's tools — so `effect:mcp.tool.invoke` ships `AlwaysHuman` and `mcp__*` names resolve to it rather than passing as uncatalogued. Every OTHER unclassified name is unchanged. See "MCP: the one family where the CI half cannot exist". | Fail-closed at runtime (any gap becomes a production stall); no guard at all. **Also rejected in the 2026-07-30 amendment: making ALL uncatalogued tool names deny** — a far larger behaviour change than the evidence supports, and it would re-create the production-stall failure D2 was chosen to avoid |
 | **D3** | Model carries **no lower bound**; `[70,100]` stays as one named constant. | Widening now; keeping 70 permanently (which would make the greyed rows pointless) |
 | **S1** | Union catalog across all namespaces | Agent-actions only |
 | **S2** | Single source of truth; Epic 42 consumes | Two peer governance models |
@@ -451,6 +560,11 @@ dimmed-row treatment exists in the repo, but in Blazor.
 1. **MCP server trust and tenancy** — may a tenant admin register a tenant-scoped MCP server, or is
    the allowlist platform-owned? Determines whether MCP invocation can ever be finer-grained than one
    member. Not derivable from code.
+
+   **Still open — but the DEFAULT while it is open was settled on 2026-07-30**: `effect:mcp.tool.invoke`
+   ships `AlwaysHuman`, because an unanswered trust question plus an unenforceable, drift-invisible
+   capability class is not a state to leave automated. Answering this question is what makes a
+   finer-grained model possible, and the AlwaysHuman default should be revisited then — not before.
 2. ~~**Is secret-reveal gateable at all?**~~ — **ANSWERED (2026-07-25): NO. Reading a secret never
    requires a human.**
 

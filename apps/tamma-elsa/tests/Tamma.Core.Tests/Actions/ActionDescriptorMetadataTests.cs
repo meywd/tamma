@@ -45,9 +45,12 @@ public class ActionDescriptorMetadataTests
     public void Every_automation_member_is_non_escalatable()
     {
         // Seam D (43-9) can only DENY: a sweeper cannot suspend for a person.
-        // Asserted here so the property is true before anything relies on it —
-        // the 43-6 API will reject mid-range thresholds on non-escalatable
-        // members and the UI renders a two-state control.
+        // Asserted here so the property is true before anything relies on it.
+        // (Story 43-13 corrected the second half of this comment: the 43-6 API
+        // no longer offers a two-state threshold on these members — every
+        // automation:* row is machinery, so ANY threshold write is a 400
+        // ACTION_POLICY.MACHINERY_NOT_DIAL_GOVERNED and the off-switch is
+        // enabled=false.)
         ActionCatalog.All.Where(d => d.Key.Ns == ActionNamespace.Automation)
             .Should().OnlyContain(d => !d.EscalatableToHuman);
     }

@@ -193,6 +193,76 @@ public sealed class GitHubPlatformClient : IGitPlatformClient
         return Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());
     }
 
+    // ── Story 31-13 — the PR lifecycle verbs. Story 31-3 owns wiring these
+    //    (and the 12 methods above) through to the live GitHub REST/GraphQL
+    //    surface; until then they keep the uniform ServiceUnavailable posture.
+    //    The WORKING implementation of these verbs today is on the live
+    //    surface (GitHubIntegrationService + GitMediationService, per 31-13 D1),
+    //    not this platform-driver plane. ──
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> ClosePullRequestAsync(
+        string owner, string repoName, string prNumber, CancellationToken ct = default)
+    {
+        _logger.LogDebug(
+            "ClosePullRequestAsync not yet wired through the abstraction (31-3) for {Owner}/{Repo}#{Number}; returning ServiceUnavailable",
+            owner, repoName, prNumber);
+        return Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());
+    }
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> ReopenPullRequestAsync(
+        string owner, string repoName, string prNumber, CancellationToken ct = default)
+    {
+        _logger.LogDebug(
+            "ReopenPullRequestAsync not yet wired through the abstraction (31-3) for {Owner}/{Repo}#{Number}; returning ServiceUnavailable",
+            owner, repoName, prNumber);
+        return Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());
+    }
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> RequestReviewersAsync(
+        RequestReviewersRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _logger.LogDebug(
+            "RequestReviewersAsync not yet wired through the abstraction (31-3) for {Owner}/{Repo}#{Number}; returning ServiceUnavailable",
+            request.Owner, request.RepoName, request.PrNumber);
+        return Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());
+    }
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> AddPullRequestLabelsAsync(
+        AddPullRequestLabelsRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _logger.LogDebug(
+            "AddPullRequestLabelsAsync not yet wired through the abstraction (31-3) for {Owner}/{Repo}#{Number}; returning ServiceUnavailable",
+            request.Owner, request.RepoName, request.PrNumber);
+        return Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());
+    }
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> RemovePullRequestLabelAsync(
+        string owner, string repoName, string prNumber, string label, CancellationToken ct = default)
+    {
+        _logger.LogDebug(
+            "RemovePullRequestLabelAsync not yet wired through the abstraction (31-3) for {Owner}/{Repo}#{Number}; returning ServiceUnavailable",
+            owner, repoName, prNumber);
+        return Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());
+    }
+
+    /// <inheritdoc />
+    public Task<PlatformResult<PullRequest>> SetDraftAsync(
+        SetPullRequestDraftRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _logger.LogDebug(
+            "SetDraftAsync not yet wired through the abstraction (31-3) for {Owner}/{Repo}#{Number}; returning ServiceUnavailable",
+            request.Owner, request.RepoName, request.PrNumber);
+        return Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());
+    }
+
     /// <inheritdoc />
     public Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
         string owner, string repoName, string issueOrPrNumber, string body,

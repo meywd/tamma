@@ -134,13 +134,16 @@ public class ActionPolicyEndpointsTests
     {
         var user = Guid.NewGuid();
 
+        // Story 43-15 — the per-action threshold PUT is a TOGGLE: the only legal
+        // value is AutonomyDial.Min. agent-action:deploy ships at 90 (> the dial
+        // 70), so it is not level-owned and the toggle is accepted for an admin.
         using (var member = Client(user, "member"))
         {
             var write = await member.PutAsJsonAsync(
-                "/api/actions/policy/actions/tool/shell_execute/threshold",
-                new { minAutonomy = AutonomyDial.AlwaysHuman });
+                "/api/actions/policy/actions/agent-action/deploy/threshold",
+                new { minAutonomy = AutonomyDial.Min });
             write.StatusCode.Should().Be(HttpStatusCode.Forbidden,
-                "member must 403 at the ActionsManage policy");
+                "member must 403 at the ActionsManage policy (before the body is read)");
 
             var read = await member.GetAsync("/api/actions/policy");
             read.StatusCode.Should().Be(HttpStatusCode.OK,
@@ -150,8 +153,8 @@ public class ActionPolicyEndpointsTests
         using (var admin = Client(user, "admin"))
         {
             var write = await admin.PutAsJsonAsync(
-                "/api/actions/policy/actions/tool/shell_execute/threshold",
-                new { minAutonomy = AutonomyDial.AlwaysHuman });
+                "/api/actions/policy/actions/agent-action/deploy/threshold",
+                new { minAutonomy = AutonomyDial.Min });
             write.StatusCode.Should().Be(HttpStatusCode.OK,
                 "a production-shape bearer JWT (bare role claim) must satisfy ActionsManage");
         }
@@ -177,7 +180,7 @@ public class ActionPolicyEndpointsTests
         using (var tenantAdmin = Client(user, "admin", platformRole: "user"))
         {
             var put = await tenantAdmin.PutAsJsonAsync(
-                "/api/admin/actions/ceiling/actions/effect/deploy.promote-prod/threshold",
+                "/api/admin/actions/ceiling/actions/effect/deploy.prod/threshold",
                 new { minAutonomy = AutonomyDial.AlwaysHuman });
             put.StatusCode.Should().Be(HttpStatusCode.Forbidden,
                 "the ceiling is the load-bearing protection — a tenant admin (even role=admin) "
@@ -187,7 +190,7 @@ public class ActionPolicyEndpointsTests
         using (var platformAdmin = Client(user, "member", platformRole: "platform_admin"))
         {
             var put = await platformAdmin.PutAsJsonAsync(
-                "/api/admin/actions/ceiling/actions/effect/deploy.promote-prod/threshold",
+                "/api/admin/actions/ceiling/actions/effect/deploy.prod/threshold",
                 new { minAutonomy = AutonomyDial.AlwaysHuman });
             put.StatusCode.Should().Be(HttpStatusCode.OK,
                 "PlatformOwnerAccess keys off the platformRole claim, not the tenant role");
@@ -197,7 +200,7 @@ public class ActionPolicyEndpointsTests
         var row = db.ActionAssignments.Single();
         row.TenantId.Should().BeNull("a ceiling row carries NEITHER principal key");
         row.UserId.Should().BeNull();
-        row.TargetKey.Should().Be("effect:deploy.promote-prod");
+        row.TargetKey.Should().Be("effect:deploy.prod");
         row.MinAutonomy.Should().Be(AutonomyDial.AlwaysHuman);
     }
 
@@ -206,11 +209,17 @@ public class ActionPolicyEndpointsTests
     [Test]
     public async Task PutThreshold_DoesNotResetEnforceEnabledOrRoles()
     {
+        // Story 43-15 re-vector: the per-action threshold PUT is a TOGGLE now
+        // (only value = AutonomyDial.Min), and it may only target a NON-level-owned
+        // action. agent-action:deploy (shipped 90 > dial 70) qualifies;
+        // tool:file_write (shipped 25 ≤ 70) is level-owned and would 409. The
+        // per-field-independence invariant is unchanged — a toggle write must not
+        // reset enforce/enabled/roles.
         var user = Guid.NewGuid();
         using var admin = Client(user, "admin");
-        const string route = "/api/actions/policy/actions/tool/file_write";
+        const string route = "/api/actions/policy/actions/agent-action/deploy";
 
-        (await admin.PutAsJsonAsync($"{route}/threshold", new { minAutonomy = 90 }))
+        (await admin.PutAsJsonAsync($"{route}/threshold", new { minAutonomy = AutonomyDial.Min }))
             .StatusCode.Should().Be(HttpStatusCode.OK);
         (await admin.PutAsJsonAsync($"{route}/enforce", new { enforce = false }))
             .StatusCode.Should().Be(HttpStatusCode.OK);
@@ -219,13 +228,13 @@ public class ActionPolicyEndpointsTests
         (await admin.PutAsJsonAsync($"{route}/roles", new { allowedRoles = new[] { "developer" } }))
             .StatusCode.Should().Be(HttpStatusCode.OK);
 
-        // Now PUT only the threshold again…
-        (await admin.PutAsJsonAsync($"{route}/threshold", new { minAutonomy = 95 }))
+        // Now PUT only the threshold (toggle) again…
+        (await admin.PutAsJsonAsync($"{route}/threshold", new { minAutonomy = AutonomyDial.Min }))
             .StatusCode.Should().Be(HttpStatusCode.OK);
 
         await using var db = Db();
-        var row = db.ActionAssignments.Single(a => a.TargetKey == "tool:file_write");
-        row.MinAutonomy.Should().Be(95);
+        var row = db.ActionAssignments.Single(a => a.TargetKey == "agent-action:deploy");
+        row.MinAutonomy.Should().Be(AutonomyDial.Min);
         row.Enforce.Should().BeFalse("a threshold-only PUT must not reset enforce");
         row.Enabled.Should().BeFalse("a threshold-only PUT must not re-enable");
         row.AllowedRoles.Should().BeEquivalentTo("developer");
@@ -292,27 +301,104 @@ public class ActionPolicyEndpointsTests
     }
 
     [Test]
-    public async Task AutomationTarget_RejectsMidRangeThreshold()
+    public async Task MachineryTarget_RejectsAnyThreshold_NamingTheClassification()
     {
+        // Story 43-13 AC5 — REPLACES AutomationTarget_RejectsMidRangeThreshold:
+        // the old two-state rule (Min/AlwaysHuman legal on automation targets)
+        // is gone, because the evaluator never resolves a machinery row through
+        // the dial — a stored threshold, ANY threshold, would be a row that
+        // does nothing. Red state before 43-13: Min and AlwaysHuman were 200s.
         var user = Guid.NewGuid();
         using var admin = Client(user, "admin");
 
-        var midRange = await admin.PutAsJsonAsync(
-            "/api/actions/policy/actions/automation/channel-outbox-sweeper/threshold",
-            new { minAutonomy = 85 });
-        midRange.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "a sweeper cannot wait for a person — a mid-range threshold would silently "
-            + "behave as Deny while displaying as 'human below level N'");
-
-        (await admin.PutAsJsonAsync(
+        foreach (var value in new[] { AutonomyDial.Min, 85, AutonomyDial.AlwaysHuman })
+        {
+            var response = await admin.PutAsJsonAsync(
                 "/api/actions/policy/actions/automation/channel-outbox-sweeper/threshold",
-                new { minAutonomy = AutonomyDial.AlwaysHuman }))
-            .StatusCode.Should().Be(HttpStatusCode.OK, "the two-state OFF value is legal");
+                new { minAutonomy = value });
+
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                $"minAutonomy {value}: 'automation:channel-outbox-sweeper' is machinery "
+                + "(43-11 Amendment 4) and the dial does not govern it — enabled=false is "
+                + "the off-switch");
+            (await response.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("code").GetString()
+                .Should().Be("ACTION_POLICY.MACHINERY_NOT_DIAL_GOVERNED");
+        }
     }
 
     [Test]
-    public async Task NonEnforceableTarget_SecretReveal_RejectsAThresholdWrite()
+    public async Task AnEngineAppendEffect_ThresholdIsAlsoRejected()
     {
+        // The cleanest fail-first case in the story: effect:engine.events.append
+        // is escalatable AND enforceable, so before 43-13 a mid-range write
+        // SUCCEEDED — the plumbing effects were dial rows nobody meant to dial.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        var response = await admin.PutAsJsonAsync(
+            "/api/actions/policy/actions/effect/engine.events.append/threshold",
+            new { minAutonomy = 85 });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "the automatic event flush is plumbing (43-11's machinery inventory) — gating "
+            + "it would break the audit trail, not govern a decision");
+        (await response.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("code").GetString()
+            .Should().Be("ACTION_POLICY.MACHINERY_NOT_DIAL_GOVERNED");
+    }
+
+    [Test]
+    public async Task MachineryTarget_EnabledWrite_StaysLegal()
+    {
+        // PUT …/enabled is untouched at every step (43-13 D7): it is the
+        // admin's ONLY remaining off-switch for a machinery actor.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/actions/automation/channel-outbox-sweeper/enabled",
+                new { enabled = false }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await using var db = Db();
+        db.ActionAssignments.Single(a => a.TargetKey == "automation:channel-outbox-sweeper")
+            .Enabled.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task AMidRangeGroupWrite_IsLegal_WhenTheGroupHasDialMembers()
+    {
+        // Story 43-13 D7 — the group rule rewrite. platform-automation contains
+        // 39 machinery rows AND four dial rows (engine.channel-outbox.enqueue,
+        // schedule.create/update/delete); a group threshold is provably inert
+        // for the machinery members (the evaluator never reads it), so the old
+        // mid-range 400 policed nothing and is removed. Red state before
+        // 43-13: this write was a 400 naming the automation members.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        var response = await admin.PutAsJsonAsync(
+            "/api/actions/policy/groups/platform-automation/threshold",
+            new { minAutonomy = 85 });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "the write legitimately governs the group's dial members");
+
+        await using var db = Db();
+        db.ActionAssignments.Single(a => a.TargetKey == "platform-automation")
+            .MinAutonomy.Should().Be(85);
+    }
+
+    [Test]
+    public async Task SecretReveal_ReportsMachineryNotUnenforceable()
+    {
+        // Story 43-13 D7 precedence pin (formerly
+        // NonEnforceableTarget_SecretReveal_RejectsAThresholdWrite, which
+        // asserted ACTION_POLICY.NOT_ENFORCEABLE): still a 400 — but the
+        // machinery classification is the stronger, newer fact and wins the
+        // error code. The evaluator's not-enforceable carve-out (epic OQ2) is
+        // unchanged; only the API's refusal message moved.
         var user = Guid.NewGuid();
         using var admin = Client(user, "admin");
 
@@ -320,11 +406,10 @@ public class ActionPolicyEndpointsTests
             "/api/actions/policy/actions/effect/secret.reveal/threshold",
             new { minAutonomy = AutonomyDial.AlwaysHuman });
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "reading a secret never requires a human (epic OQ2) — the row is informational "
-            + "and no admin-raised threshold on it may ever be enforced");
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await response.Content.ReadFromJsonAsync<JsonElement>())
-            .GetProperty("code").GetString().Should().Be("ACTION_POLICY.NOT_ENFORCEABLE");
+            .GetProperty("code").GetString()
+            .Should().Be("ACTION_POLICY.MACHINERY_NOT_DIAL_GOVERNED");
     }
 
     // ── Adversarial review F4 — field writes never revert the threshold ────
@@ -332,24 +417,28 @@ public class ActionPolicyEndpointsTests
     [Test]
     public async Task EnforceOnlyWrite_OnAnExistingRow_PreservesItsStoredThreshold_EvenWhenTheSnapshotIsStale()
     {
+        // Story 43-15 re-vector: seed via a TOGGLE on a non-level-owned action
+        // (agent-action:deploy, shipped 90) — the row lands at Min. The F4
+        // invariant (enforce-only write preserves the STORED threshold, never
+        // re-materialises a stale one) is unchanged.
         var user = Guid.NewGuid();
         using var admin = Client(user, "admin");
-        const string route = "/api/actions/policy/actions/tool/file_write";
+        const string route = "/api/actions/policy/actions/agent-action/deploy";
 
-        // Seed a row through the endpoint (the local snapshot now holds 90)…
-        (await admin.PutAsJsonAsync($"{route}/threshold", new { minAutonomy = 90 }))
+        // Seed a row through the endpoint (the toggle stores Min)…
+        (await admin.PutAsJsonAsync($"{route}/threshold", new { minAutonomy = AutonomyDial.Min }))
             .StatusCode.Should().Be(HttpStatusCode.OK);
 
         // …then tighten it BEHIND the snapshot's back (the cross-pod shape:
-        // pod A tightened; pod B's ≤60s-stale snapshot still says 90).
+        // pod A tightened; pod B's ≤60s-stale snapshot still says Min).
         await using (var db = Db())
         {
             await db.Database.ExecuteSqlRawAsync(
-                """UPDATE action_assignments SET "MinAutonomy" = 101 WHERE "TargetKey" = 'tool:file_write';""");
+                """UPDATE action_assignments SET "MinAutonomy" = 101 WHERE "TargetKey" = 'agent-action:deploy';""");
         }
 
         // An enforce-only write on the stale pod must NOT re-materialize the
-        // stale 90 over the stored 101 (review F4: silent revert of a
+        // stale Min over the stored 101 (review F4: silent revert of a
         // tightening). The fix reads the row FRESH from the repository and
         // passes a null threshold, preserving the stored value.
         (await admin.PutAsJsonAsync($"{route}/enforce", new { enforce = true }))
@@ -357,7 +446,7 @@ public class ActionPolicyEndpointsTests
 
         await using (var db = Db())
         {
-            var row = db.ActionAssignments.Single(a => a.TargetKey == "tool:file_write");
+            var row = db.ActionAssignments.Single(a => a.TargetKey == "agent-action:deploy");
             row.MinAutonomy.Should().Be(101,
                 "an enforce-only write must never overwrite a stored threshold "
                 + "with a snapshot-derived value");
@@ -386,9 +475,9 @@ public class ActionPolicyEndpointsTests
         await using (var db = Db())
         {
             db.ActionAssignments.Single(a => a.TargetKey == "tool:file_write")
-                .MinAutonomy.Should().Be(AutonomyDial.Min,
-                    "with no rows the current effective is the shipped default — "
-                    + "the pin is behaviour-preserving at write time");
+                .MinAutonomy.Should().Be(25,
+                    "with no rows the current effective is the shipped default (file_write's "
+                    + "code-write zone level, 25) — the pin is behaviour-preserving at write time");
         }
 
         // The later group tightening…
@@ -401,63 +490,54 @@ public class ActionPolicyEndpointsTests
         var policy = await admin.GetFromJsonAsync<JsonElement>("/api/actions/policy");
         var fileWrite = policy.GetProperty("actions").EnumerateArray()
             .Single(a => a.GetProperty("key").GetString() == "tool:file_write");
-        fileWrite.GetProperty("minAutonomy").GetInt32().Should().Be(AutonomyDial.Min);
+        fileWrite.GetProperty("minAutonomy").GetInt32().Should().Be(25);
         fileWrite.GetProperty("source").GetString().Should().Be("action-override",
             "provenance surfaces the pin so an admin can see why the group row lost");
     }
 
-    // ── Adversarial review F5 — group writes validate every member ─────────
+    // ── Group writes: machinery members are inert (43-13 D7 rewrote F5) ────
 
     [Test]
-    public async Task GroupWrite_MidRangeOnAGroupWithNonEscalatableMembers_Is400NamingThem()
+    public async Task GroupWrite_MidRangeOnAGroupWithMachineryMembers_IsLegal_TheyAreInert()
     {
+        // REWRITTEN by Story 43-13 (formerly
+        // GroupWrite_MidRangeOnAGroupWithNonEscalatableMembers_Is400NamingThem,
+        // the F5 pin): the old 400 protected automation:* members from a
+        // mid-range value silently behaving as Deny — but the evaluator now
+        // short-circuits every machinery row BEFORE the dial comparison, so a
+        // group threshold provably cannot reach them and the rejection policed
+        // nothing. The secrets group's two automation members are inert; its
+        // DIAL member (agent-action:audit-secrets) is what the write governs.
         var user = Guid.NewGuid();
-
-        // The offenders, computed from the catalog (the secrets group carries
-        // two automation:* members; its non-enforceable effect:secret.reveal
-        // member is exempt — the evaluator never blocks on it).
-        var expected = Tamma.Core.Actions.ActionCatalog
-            .ByGroup[Tamma.Core.Actions.ActionGroup.Secrets]
-            .Select(k => Tamma.Core.Actions.ActionCatalog.ByKey[k])
-            .Where(d => d.Enforceable && !d.EscalatableToHuman)
-            .Select(d => d.Key.ToWire())
-            .OrderBy(w => w, StringComparer.Ordinal)
-            .ToArray();
-        expected.Should().NotBeEmpty("the probe needs a group with automation members");
 
         using (var admin = Client(user, "admin"))
         {
-            var response = await admin.PutAsJsonAsync(
-                "/api/actions/policy/groups/secrets/threshold", new { minAutonomy = 85 });
-            response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-                "the action route 400s a mid-range threshold on these members — the group "
-                + "route must not smuggle the same value in as a silent Deny");
-            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-            body.GetProperty("code").GetString().Should().Be("ACTION_POLICY.INVALID");
-            body.GetProperty("members").EnumerateArray().Select(m => m.GetString())
-                .Should().BeEquivalentTo(expected, "the 400 names every offending member");
+            (await admin.PutAsJsonAsync(
+                    "/api/actions/policy/groups/secrets/threshold", new { minAutonomy = 85 }))
+                .StatusCode.Should().Be(HttpStatusCode.OK,
+                    "the write governs the group's dial members; the machinery members "
+                    + "never consult it (43-13 AC4)");
 
-            // The two-state values stay legal for the same group…
+            // The two-state values stay legal too…
             (await admin.PutAsJsonAsync(
                     "/api/actions/policy/groups/secrets/threshold",
                     new { minAutonomy = AutonomyDial.AlwaysHuman }))
                 .StatusCode.Should().Be(HttpStatusCode.OK);
 
-            // …and a clean group (no automation members) accepts mid-range.
+            // …and a group with no machinery members is unchanged.
             (await admin.PutAsJsonAsync(
                     "/api/actions/policy/groups/deploy-control/threshold",
                     new { minAutonomy = 85 }))
                 .StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
-        // The ceiling route applies the SAME member validation.
+        // The ceiling route accepts the same write.
         using (var platformAdmin = Client(user, "member", platformRole: "platform_admin"))
         {
-            var ceiling = await platformAdmin.PutAsJsonAsync(
-                "/api/admin/actions/ceiling/groups/secrets/threshold", new { minAutonomy = 85 });
-            ceiling.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-            (await ceiling.Content.ReadFromJsonAsync<JsonElement>())
-                .GetProperty("code").GetString().Should().Be("ACTION_POLICY.INVALID");
+            (await platformAdmin.PutAsJsonAsync(
+                    "/api/admin/actions/ceiling/groups/secrets/threshold",
+                    new { minAutonomy = 85 }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
         }
     }
 
@@ -504,22 +584,387 @@ public class ActionPolicyEndpointsTests
     [Test]
     public async Task Delete_FallsBackToTheNextTier()
     {
+        // Story 43-15 re-vector: seed via a TOGGLE (Min) on a non-level-owned
+        // action; DELETE falls back to the shipped level. The DELETE response now
+        // NAMES the surviving source (AC4).
         var user = Guid.NewGuid();
         using var admin = Client(user, "admin");
-        const string route = "/api/actions/policy/actions/tool/file_write";
+        const string route = "/api/actions/policy/actions/agent-action/deploy";
 
-        (await admin.PutAsJsonAsync($"{route}/threshold", new { minAutonomy = 90 }))
+        (await admin.PutAsJsonAsync($"{route}/threshold", new { minAutonomy = AutonomyDial.Min }))
             .StatusCode.Should().Be(HttpStatusCode.OK);
-        (await admin.DeleteAsync(route)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var delete = await admin.DeleteAsync(route);
+        delete.StatusCode.Should().Be(HttpStatusCode.OK);
+        var deleteBody = await delete.Content.ReadFromJsonAsync<JsonElement>();
+        deleteBody.GetProperty("source").GetString().Should().Be("shipped",
+            "with no group/ceiling row the shipped level now applies");
+        deleteBody.GetProperty("nowResolvesTo").GetInt32().Should().Be(90);
 
+        var policy = await admin.GetFromJsonAsync<JsonElement>("/api/actions/policy");
+        var deploy = policy.GetProperty("actions").EnumerateArray()
+            .Single(a => a.GetProperty("key").GetString() == "agent-action:deploy");
+        deploy.GetProperty("source").GetString().Should().Be("system-default",
+            "DELETE removes the row and the next tier takes over — never a zeroed value");
+        deploy.GetProperty("minAutonomy").GetInt32().Should().Be(90,
+            "the shipped default for agent-action:deploy is the deploy zone level (90)");
+
+        (await admin.DeleteAsync(route)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // ── Story 43-15 — toggle encoding, level-ownership, diff, dial-lower ────
+
+    [Test]
+    public async Task ToggleWrite_StoresDialMin_AndRejectsAnyOtherValue()
+    {
+        // AC1 — the per-action threshold PUT is a TOGGLE: the ONLY legal value is
+        // AutonomyDial.Min. agent-action:deploy (shipped 90 > dial 70) is a valid
+        // above-dial toggle target.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+        const string route = "/api/actions/policy/actions/agent-action/deploy/threshold";
+
+        // Any non-Min value → 400 ACTION_POLICY.INVALID naming the toggle encoding.
+        var bad = await admin.PutAsJsonAsync(route, new { minAutonomy = 90 });
+        bad.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "a per-action threshold is a toggle now — only Min is legal (Amendment 2-E)");
+        (await bad.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("code").GetString().Should().Be("ACTION_POLICY.INVALID");
+
+        // Min → 200, the row stored at Min, the audit event carrying dialAtMint.
+        var ok = await admin.PutAsJsonAsync(route, new { minAutonomy = AutonomyDial.Min });
+        ok.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ok.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("minAutonomy").GetInt32().Should().Be(AutonomyDial.Min);
+        body.GetProperty("dialAtMint").GetInt32().Should().Be(
+            AcceptanceDefaults.DefaultAutonomyLevel, "the mint-time dial is provenance");
+
+        await using var db = Db();
+        db.ActionAssignments.Single(a => a.TargetKey == "agent-action:deploy")
+            .MinAutonomy.Should().Be(AutonomyDial.Min, "the stored value is Min, never the dial");
+    }
+
+    [Test]
+    public async Task LevelOwned_ViaGroupRow_Rejects409()
+    {
+        // AC3 — the group-row bypass, inverted into a pin. A GROUP row at Min
+        // covering deploy-control already automates agent-action:deploy (shipped
+        // 90) at any dial, so the per-action toggle is level-owned → 409. The
+        // predicate keys on the ladder WITHOUT the action row, which INCLUDES the
+        // group row (the bypass Amendment 2-E verified, closed).
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/groups/deploy-control/threshold",
+                new { minAutonomy = AutonomyDial.Min }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var conflict = await admin.PutAsJsonAsync(
+            "/api/actions/policy/actions/agent-action/deploy/threshold",
+            new { minAutonomy = AutonomyDial.Min });
+        conflict.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "the group row already automates the action — a per-action toggle is redundant");
+        var body = await conflict.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("code").GetString().Should().Be("ACTION_POLICY.LEVEL_OWNED");
+        body.GetProperty("source").GetString().Should().Be("group-override");
+    }
+
+    [Test]
+    public async Task HeldShutByCeiling_IsStillEditable()
+    {
+        // AC3 symmetric clause — tool:file_write ships at 25 (≤ dial 70, so the
+        // shipped level owns it), UNLESS a ceiling raises it. A ceiling at
+        // AlwaysHuman makes the ladder-without-row AlwaysHuman, so file_write is
+        // NOT level-owned and stays editable — a held-shut action is still a
+        // legal toggle target (the toggle just cannot beat the ceiling's max()).
+        var user = Guid.NewGuid();
+
+        using (var platformAdmin = Client(user, "member", platformRole: "platform_admin"))
+        {
+            (await platformAdmin.PutAsJsonAsync(
+                    "/api/admin/actions/ceiling/actions/tool/file_write/threshold",
+                    new { minAutonomy = AutonomyDial.AlwaysHuman }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        using var admin = Client(user, "admin");
         var policy = await admin.GetFromJsonAsync<JsonElement>("/api/actions/policy");
         var fileWrite = policy.GetProperty("actions").EnumerateArray()
             .Single(a => a.GetProperty("key").GetString() == "tool:file_write");
-        fileWrite.GetProperty("source").GetString().Should().Be("system-default",
-            "DELETE removes the row and the next tier takes over — never a zeroed value");
-        fileWrite.GetProperty("minAutonomy").GetInt32().Should().Be(AutonomyDial.Min);
+        fileWrite.GetProperty("levelOwned").GetBoolean().Should().BeFalse(
+            "the ceiling raised the ladder-without-row above the dial, so it is not level-owned");
+        fileWrite.GetProperty("editable").GetBoolean().Should().BeTrue();
+    }
 
-        (await admin.DeleteAsync(route)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+    [Test]
+    public async Task PolicyView_MarksLevelOwnedRowsNonEditable()
+    {
+        // AC8 — with no principal rows, an action whose shipped level ≤ dial is
+        // level-owned (editable=false); one above the dial is editable. The old
+        // unconditional editable=true is gone.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+        var policy = await admin.GetFromJsonAsync<JsonElement>("/api/actions/policy");
+        var actions = policy.GetProperty("actions");
+
+        var fileWrite = actions.EnumerateArray()
+            .Single(a => a.GetProperty("key").GetString() == "tool:file_write");
+        fileWrite.GetProperty("shippedLevel").GetInt32().Should().Be(25);
+        fileWrite.GetProperty("levelOwned").GetBoolean().Should().BeTrue(
+            "shipped 25 ≤ dial 70 — the level owns it");
+        fileWrite.GetProperty("editable").GetBoolean().Should().BeFalse();
+        fileWrite.GetProperty("reason").GetString().Should().Be("level-owned");
+
+        var deploy = actions.EnumerateArray()
+            .Single(a => a.GetProperty("key").GetString() == "agent-action:deploy");
+        deploy.GetProperty("shippedLevel").GetInt32().Should().Be(90);
+        deploy.GetProperty("levelOwned").GetBoolean().Should().BeFalse(
+            "shipped 90 > dial 70 — an above-dial action is editable (togglable)");
+        deploy.GetProperty("editable").GetBoolean().Should().BeTrue();
+    }
+
+    [Test]
+    public async Task PolicyView_GroupRowVariant_FlipsAboveDialActionToLevelOwned()
+    {
+        // AC8 group variant — a group row at Min covering deploy-control makes
+        // agent-action:deploy level-owned even though its SHIPPED level (90) is
+        // above the dial. The badge keys on the ladder-without-row, not shipped.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/groups/deploy-control/threshold",
+                new { minAutonomy = AutonomyDial.Min }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var policy = await admin.GetFromJsonAsync<JsonElement>("/api/actions/policy");
+        var deploy = policy.GetProperty("actions").EnumerateArray()
+            .Single(a => a.GetProperty("key").GetString() == "agent-action:deploy");
+        deploy.GetProperty("levelOwned").GetBoolean().Should().BeTrue(
+            "the group row automates it, so it is level-owned despite shipped 90 > dial");
+        deploy.GetProperty("editable").GetBoolean().Should().BeFalse();
+    }
+
+    [Test]
+    public async Task Toggle_KeepsActionAutomated_AtEveryPreviewedLevel_AndFlagsToggleAboveDial()
+    {
+        // AC2 (the toggle survives visibly). A toggle at Min keeps deploy
+        // automated at every PREVIEWED level (viewLevel) — a lower preview never
+        // flips it off — and the policy view flags toggleAboveDial while the
+        // ladder-without-row (90) exceeds the dial (70). The actual sub-70 dial
+        // DROP is proven at the evaluator level
+        // (AutonomyGateEvaluatorLadderWithoutRowTests) where a real dial can move.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/actions/agent-action/deploy/threshold",
+                new { minAutonomy = AutonomyDial.Min }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        foreach (var level in new[] { AutonomyDial.Min, 30, 60, 70, 100 })
+        {
+            var policy = await admin.GetFromJsonAsync<JsonElement>(
+                $"/api/actions/policy?level={level}");
+            var deploy = policy.GetProperty("actions").EnumerateArray()
+                .Single(a => a.GetProperty("key").GetString() == "agent-action:deploy");
+            deploy.GetProperty("automatedAtLevel").GetBoolean().Should().BeTrue(
+                $"a toggle at Min stays automated at previewed level {level}");
+            deploy.GetProperty("toggleAboveDial").GetBoolean().Should().BeTrue(
+                "the row is AT Min and the ladder-without-row (90) exceeds the dial (70)");
+        }
+    }
+
+    [Test]
+    public async Task ToggleAboveDial_IsNeverKeyedOnRowPresenceAlone()
+    {
+        // The badge guard: a row that is NOT at Min (e.g. materialised by an
+        // enforce write) must NOT read toggleAboveDial=true. Seed a row via an
+        // enforce write on deploy — it materialises at the shipped 90, NOT Min —
+        // and confirm the flag stays false even though a principal row is present.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/actions/agent-action/deploy/enforce", new { enforce = true }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var policy = await admin.GetFromJsonAsync<JsonElement>("/api/actions/policy");
+        var deploy = policy.GetProperty("actions").EnumerateArray()
+            .Single(a => a.GetProperty("key").GetString() == "agent-action:deploy");
+        deploy.GetProperty("toggleAboveDial").GetBoolean().Should().BeFalse(
+            "a materialised row at the shipped level (90) is NOT a toggle — the badge "
+            + "must never key on row presence alone (Amendment 2-E)");
+    }
+
+    [Test]
+    public async Task Delete_NamesTheSurvivingSource()
+    {
+        // AC4 — a group row + an action toggle; DELETE the action row names the
+        // group as the surviving source with its value.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        // Group at 85 (deploy-control has dial members) — leaves deploy (shipped
+        // 90) NOT level-owned at dial 70, so the action toggle is accepted.
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/groups/deploy-control/threshold", new { minAutonomy = 85 }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/actions/agent-action/deploy/threshold",
+                new { minAutonomy = AutonomyDial.Min }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var delete = await admin.DeleteAsync("/api/actions/policy/actions/agent-action/deploy");
+        delete.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await delete.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("source").GetString().Should().Be("group",
+            "the group row is what applies once the action row is gone");
+        body.GetProperty("nowResolvesTo").GetInt32().Should().Be(85);
+    }
+
+    [Test]
+    public async Task Reset_WithTargets_DeletesOnlyTheNamedRows()
+    {
+        // AC7 / D4 — reset-with-targets is the bulk revoke; it deletes exactly the
+        // named action rows (each audited individually) and leaves the rest.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        foreach (var wire in new[] { "agent-action/deploy", "agent-action/rollback" })
+        {
+            (await admin.PutAsJsonAsync(
+                    $"/api/actions/policy/actions/{wire}/threshold",
+                    new { minAutonomy = AutonomyDial.Min }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        // A third toggle that must SURVIVE the targeted revoke.
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/actions/document-type/sprint-plan/threshold",
+                new { minAutonomy = AutonomyDial.Min }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var reset = await admin.PostAsJsonAsync("/api/actions/policy/reset", new
+        {
+            targets = new[] { "agent-action:deploy", "agent-action:rollback" },
+        });
+        reset.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await reset.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("removed").GetInt32().Should().Be(2);
+
+        await using var db = Db();
+        db.ActionAssignments.Any(a => a.TargetKey == "agent-action:deploy").Should().BeFalse();
+        db.ActionAssignments.Any(a => a.TargetKey == "agent-action:rollback").Should().BeFalse();
+        db.ActionAssignments.Single(a => a.TargetKey == "document-type:sprint-plan")
+            .Should().NotBeNull("a non-targeted toggle survives a targeted revoke");
+    }
+
+    [Test]
+    public async Task Reset_WithoutBody_DeletesAll_ByteIdenticalToToday()
+    {
+        // D4's no-regression pin — an absent body keeps the delete-all behaviour.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/actions/agent-action/deploy/threshold",
+                new { minAutonomy = AutonomyDial.Min }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/actions/agent-action/rollback/threshold",
+                new { minAutonomy = AutonomyDial.Min }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var reset = await admin.PostAsync("/api/actions/policy/reset", content: null);
+        reset.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await reset.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("removed").GetInt32().Should().Be(2);
+
+        await using var db = Db();
+        db.ActionAssignments.Count().Should().Be(0, "a bodyless reset deletes all rows");
+    }
+
+    [Test]
+    public async Task Enabled_IsWritableOnALevelOwnedRow()
+    {
+        // AC9 — enabled stays orthogonal and always writable. tool:file_write is
+        // level-owned (shipped 25 ≤ dial 70) — the 409 must NOT leak to the
+        // enabled route.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/actions/tool/file_write/enabled", new { enabled = false }))
+            .StatusCode.Should().Be(HttpStatusCode.OK,
+                "enabled is orthogonal to the level — a level-owned row is still disableable");
+
+        await using var db = Db();
+        db.ActionAssignments.Single(a => a.TargetKey == "tool:file_write")
+            .Enabled.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task Diff_ReturnsTheDelta_BothDirections()
+    {
+        // AC5 — the diff between two dial positions. Raising 70→95 automates
+        // deploy (90) and de-nothing; lowering 95→70 de-automates it. Symmetric.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        var raise = await admin.GetFromJsonAsync<JsonElement>(
+            "/api/actions/policy/diff?from=70&to=95");
+        raise.GetProperty("direction").GetString().Should().Be("raise");
+        var raiseKeys = raise.GetProperty("changes").EnumerateArray()
+            .Select(c => c.GetProperty("key").GetString()).ToList();
+        raiseKeys.Should().Contain("agent-action:deploy",
+            "shipped 90 flips from not-automated (70) to automated (95)");
+        raise.GetProperty("changes").EnumerateArray()
+            .Single(c => c.GetProperty("key").GetString() == "agent-action:deploy")
+            .GetProperty("direction").GetString().Should().Be("automates");
+
+        var lower = await admin.GetFromJsonAsync<JsonElement>(
+            "/api/actions/policy/diff?from=95&to=70");
+        lower.GetProperty("direction").GetString().Should().Be("lower");
+        lower.GetProperty("changes").EnumerateArray()
+            .Single(c => c.GetProperty("key").GetString() == "agent-action:deploy")
+            .GetProperty("direction").GetString().Should().Be("de-automates");
+
+        // Detents are the distinct shipped levels + the current dial.
+        raise.GetProperty("detents").EnumerateArray().Select(d => d.GetInt32())
+            .Should().Contain(new[] { 90, 95 }).And.BeInAscendingOrder();
+    }
+
+    [Test]
+    public async Task Diff_RejectsInvalidLevels()
+    {
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        (await admin.GetAsync("/api/actions/policy/diff?from=70")).StatusCode
+            .Should().Be(HttpStatusCode.BadRequest, "both from and to are required");
+        (await admin.GetAsync($"/api/actions/policy/diff?from=0&to=70")).StatusCode
+            .Should().Be(HttpStatusCode.BadRequest, "0 is below Min");
+        (await admin.GetAsync($"/api/actions/policy/diff?from=70&to={AutonomyDial.AlwaysHuman}"))
+            .StatusCode.Should().Be(HttpStatusCode.BadRequest, "AlwaysHuman is not a dial position");
+    }
+
+    [Test]
+    public async Task Diff_RendersNullNotZero_WhenTelemetryIsEmpty()
+    {
+        // AC5 / Amendment 2-H — with an empty event store and empty ledger, every
+        // fire count and approve rate is JSON null ("no data"), NEVER zero. This
+        // pins against a future "default to 0".
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        var diff = await admin.GetFromJsonAsync<JsonElement>(
+            "/api/actions/policy/diff?from=70&to=95");
+        foreach (var change in diff.GetProperty("changes").EnumerateArray())
+        {
+            change.GetProperty("fireCount30d").ValueKind.Should().Be(JsonValueKind.Null,
+                "no telemetry source (or empty source) renders 'no data', never 0");
+            change.GetProperty("approveRate30d").ValueKind.Should().Be(JsonValueKind.Null);
+        }
     }
 
     [Test]

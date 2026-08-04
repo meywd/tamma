@@ -59,6 +59,38 @@ public static class LifecycleBindingHelper
     public static bool IsAmbiguityOutcome(LifecycleExit exit)
         => string.Equals(exit.Outcome, DocumentLifecycleOutcome.AmbiguityAboveThreshold.ToWire(), StringComparison.Ordinal);
 
+    /// <summary>
+    /// Story 39-25 (D2) — TOTAL, fail-closed read of a fetched <c>ambiguity-assessment</c>
+    /// body into an optional threaded score. Returns the root <c>score</c> number when
+    /// <paramref name="found"/> is <c>true</c> and <paramref name="documentJson"/> parses to
+    /// an object carrying a numeric <c>score</c>; <c>null</c> otherwise (not-found, blank,
+    /// malformed, non-object root, missing or non-numeric score). Never throws — it runs
+    /// inside dispatch Input lambdas.
+    ///
+    /// <para><b>Null stays null.</b> A <c>null</c> here means the <c>ambiguityScore</c>
+    /// dispatch key is OMITTED entirely — no assessment is NOT a score of zero (a measured
+    /// <c>0.0</c> payload DOES thread; it means "assessed unambiguous"). Semantics mirror
+    /// <c>DocumentLifecycleHelper.TryReadAmbiguityScore</c>, the lifecycle's own leg-2 reader.</para>
+    /// </summary>
+    public static double? TryReadAssessmentScore(bool found, string? documentJson)
+    {
+        if (!found || string.IsNullOrWhiteSpace(documentJson))
+            return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(documentJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("score", out var s) &&
+                s.ValueKind == JsonValueKind.Number)
+                return s.GetDouble();
+        }
+        catch (JsonException)
+        {
+            // Unreadable payload → no threaded score (fail-closed, mirrors TryReadAmbiguityScore).
+        }
+        return null;
+    }
+
     private static LifecycleExit FailClosed()
         => new(
             DocumentLifecycleResult.StatusEscalated,
