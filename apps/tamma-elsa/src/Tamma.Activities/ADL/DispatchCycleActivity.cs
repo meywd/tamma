@@ -93,10 +93,13 @@ public class DispatchCycleActivity : TammaAsyncActivity
 
     protected override async Task RunAsync(ActivityExecutionContext context)
     {
-        if (_dispatcher == null)
+        // Context fallback: Elsa rehydrates a persisted definition through the
+        // [JsonConstructor], on which path the DI-injected field is null.
+        var dispatcher = _dispatcher ?? context.GetService<IWorkflowDispatcher>();
+        if (dispatcher == null)
         {
             Logger?.LogWarning("No IWorkflowDispatcher available, skipping dispatch");
-            InstanceId.Set(context, null);
+            InstanceId.Set(context, (string?)null);
             return;
         }
 
@@ -137,14 +140,31 @@ public class DispatchCycleActivity : TammaAsyncActivity
             CorrelationId = instanceId,
         };
 
-        await _dispatcher.DispatchAsync(request, default);
+        // FIRE & FORGET, and non-fatal by design. This activity sits upstream of the
+        // orchestrator's cooldown → restart edge, so an exception here faults the
+        // instance BEFORE it can dispatch its successor and the autonomous loop stops
+        // permanently. Failing to start ONE issue cycle must cost that issue, never
+        // the loop — the issue is still selectable on the next tick.
+        try
+        {
+            await dispatcher.DispatchAsync(request, default);
 
-        InstanceId.Set(context, instanceId);
+            InstanceId.Set(context, instanceId);
 
-        Logger?.LogInformation(
-            "Dispatched single-issue-cycle for issue #{IssueNumber}, instance {InstanceId} " +
-            "(mode={Mode}, requireProdApproval={RequireProdApproval})",
-            IssueNumber.Get(context), instanceId, mode, requireProdApproval);
+            Logger?.LogInformation(
+                "Dispatched single-issue-cycle for issue #{IssueNumber}, instance {InstanceId} " +
+                "(mode={Mode}, requireProdApproval={RequireProdApproval})",
+                IssueNumber.Get(context), instanceId, mode, requireProdApproval);
+        }
+        catch (Exception ex)
+        {
+            InstanceId.Set(context, (string?)null);
+            Logger?.LogError(
+                ex,
+                "Failed to dispatch single-issue-cycle for issue #{IssueNumber}; continuing so the "
+                + "ADL loop restarts (the issue stays selectable on the next tick)",
+                IssueNumber.Get(context));
+        }
     }
 
     private string ResolveMode(ActivityExecutionContext context)

@@ -44,9 +44,17 @@ public class DispatchAdlActivity : TammaAsyncActivity
 
     protected override async Task RunAsync(ActivityExecutionContext context)
     {
-        if (_dispatcher == null)
+        // Resolve from the execution context when the DI-injected field is null —
+        // Elsa rehydrates a persisted definition through the [JsonConstructor], on
+        // which path the field IS null, and returning quietly there would silently
+        // end the autonomous loop with nothing but a warning. Same fallback shape as
+        // ClosePullRequestActivity (`_apiClient ?? context.GetRequiredService<…>()`).
+        var dispatcher = _dispatcher ?? context.GetService<IWorkflowDispatcher>();
+        if (dispatcher == null)
         {
-            Logger?.LogWarning("No IWorkflowDispatcher available, cannot restart ADL");
+            Logger?.LogCritical(
+                "No IWorkflowDispatcher available — cannot restart ADL; the autonomous loop has "
+                + "STOPPED and will not resume until an adl-orchestrator instance is dispatched manually");
             return;
         }
 
@@ -60,7 +68,46 @@ public class DispatchAdlActivity : TammaAsyncActivity
             },
         };
 
-        await _dispatcher.DispatchAsync(request, default);
-        Logger?.LogInformation("Dispatched new ADL Orchestrator cycle");
+        // DURABILITY (loop restart) — this dispatch is the ONLY thing that starts the
+        // next ADL cycle: there is no cron trigger and no watchdog re-dispatching
+        // `adl-orchestrator`. It is also the LAST step of the instance it restarts, so
+        // an exception here does not merely fail a tick — it faults the instance
+        // before the successor exists and the autonomous loop stops PERMANENTLY until
+        // a human dispatches one by hand. A transient blip (broker/DB/dispatcher) must
+        // therefore never propagate: retry with backoff, and if every attempt fails,
+        // say so at Critical rather than throwing. Deliberately bounded and short —
+        // this is an in-process dispatch, not an external API call.
+        const int maxAttempts = 3;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                await dispatcher.DispatchAsync(request, default);
+                Logger?.LogInformation("Dispatched new ADL Orchestrator cycle");
+                return;
+            }
+            catch (Exception ex)
+            {
+                if (attempt == maxAttempts)
+                {
+                    // The loop is now stopping. This is the one log line that explains
+                    // why nothing else ever happens, so it must be unmissable.
+                    Logger?.LogCritical(
+                        ex,
+                        "ADL restart dispatch FAILED after {Attempts} attempts — the autonomous loop "
+                        + "has STOPPED and will not resume until an adl-orchestrator instance is "
+                        + "dispatched manually",
+                        maxAttempts);
+                    return;
+                }
+
+                Logger?.LogWarning(
+                    ex,
+                    "ADL restart dispatch attempt {Attempt}/{Attempts} failed; retrying",
+                    attempt,
+                    maxAttempts);
+                await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt));
+            }
+        }
     }
 }

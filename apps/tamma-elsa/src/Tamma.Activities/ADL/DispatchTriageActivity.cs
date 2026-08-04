@@ -46,7 +46,10 @@ public class DispatchTriageActivity : TammaAsyncActivity
 
     protected override async Task RunAsync(ActivityExecutionContext context)
     {
-        if (_dispatcher == null)
+        // Context fallback: Elsa rehydrates a persisted definition through the
+        // [JsonConstructor], on which path the DI-injected field is null.
+        var dispatcher = _dispatcher ?? context.GetService<IWorkflowDispatcher>();
+        if (dispatcher == null)
         {
             Logger?.LogWarning("No IWorkflowDispatcher available, skipping triage dispatch");
             return;
@@ -62,11 +65,25 @@ public class DispatchTriageActivity : TammaAsyncActivity
             Input = input,
         };
 
-        await _dispatcher.DispatchAsync(request, default);
+        // FIRE & FORGET, and non-fatal by design. This activity sits upstream of the
+        // orchestrator's cooldown → restart edge, so an exception here faults the
+        // instance BEFORE it can dispatch its successor and the autonomous loop stops
+        // permanently. Failing to triage one batch must cost one tick, never the loop.
+        try
+        {
+            await dispatcher.DispatchAsync(request, default);
 
-        Logger?.LogInformation(
-            "Dispatched issue-triage for {Count} untriaged issues",
-            UntriagedCount.Get(context));
+            Logger?.LogInformation(
+                "Dispatched issue-triage for {Count} untriaged issues",
+                UntriagedCount.Get(context));
+        }
+        catch (Exception ex)
+        {
+            Logger?.LogError(
+                ex,
+                "Failed to dispatch issue-triage for {Repository}; continuing so the ADL loop restarts",
+                Repository.Get(context));
+        }
     }
 
     public override Dictionary<string, object?> BuildStartData(ActivityExecutionContext context) => new()
