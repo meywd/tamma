@@ -170,6 +170,14 @@ public class MediationClientEffectSweepTests
             [ExternalEffect.SecretRead] = new(SiteKind.RouteOnly, null,
                 "GET /api/v1/secrets/reveal/{token} — LLM-caller value read into model context; "
                 + "enforced for LLM callers, no engine mediation-client method"),
+            // Story 43-17 follow-up — the two /api/engine callbacks that had NO
+            // OWNER. RouteOnly: they are reached by the ENGINE over HTTP, but
+            // neither has a TammaApiClient method (the engine calls them through
+            // its own callback clients), so there is no [PerformsEffect] site.
+            [ExternalEffect.CiWorkflowDispatch] = new(SiteKind.RouteOnly, null,
+                "POST /api/engine/trigger-ci — engine callback; no TammaApiClient method performs it"),
+            [ExternalEffect.LlmTaskExecute] = new(SiteKind.RouteOnly, null,
+                "POST /api/engine/execute-task — engine callback; no TammaApiClient method performs it"),
             [ExternalEffect.McpToolInvoke] = new(SiteKind.RouteOnly, null,
                 "the C# surface is the KB proxy route POST /api/kb/mcp/tools/invoke (SiteKey corrected "
                 + "2026-07-29, review F16 — it previously named a start|stop alternation that is not a "

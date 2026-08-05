@@ -458,8 +458,12 @@ public class WorkflowStructureTests
         // (15 main steps + notifications + extract steps + review routing)
         flowchart.Activities.Count.Should().BeGreaterThan(20,
             "SingleIssueCycleWorkflow should have at least 20 activities");
-        flowchart.Activities.Count.Should().BeLessThan(80,
-            "SingleIssueCycleWorkflow should not exceed 80 activities");
+        // 80 → 90: the cycle gained MarkPrReadyForReview, which took it to exactly 80
+        // and tripped the old strict-less-than bound. This is a SANITY bound against
+        // runaway growth, not a budget — it is raised deliberately here, with the
+        // reason recorded, rather than being nudged by one each time a step lands.
+        flowchart.Activities.Count.Should().BeLessThan(90,
+            "SingleIssueCycleWorkflow should not exceed 90 activities");
     }
 
     [Test]

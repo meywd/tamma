@@ -83,7 +83,10 @@ public class ActionWirePinTests
             // [Governs] attribute shape. `mentorship.session.` prefixed so they read
             // as one lifecycle family.
             "mentorship.session.start", "mentorship.session.pause",
-            "mentorship.session.resume", "mentorship.session.cancel");
+            "mentorship.session.resume", "mentorship.session.cancel",
+            // Story 43-17 follow-up — appended at the END of the enum so the
+            // existing order is untouched.
+            "ci.workflow.dispatch", "llm.task.execute");
     }
 
     [Test]

@@ -230,7 +230,12 @@ internal static class KnownUngovernedEndpoints
     /// issue-labels/{repo}/{issueNumber}/{label}) now bind git.issue.{create,comment,
     /// labels.set,labels.remove} and enforce. Their baseline entries are deleted in
     /// the same diff — the ungoverned backlog SHRINKS by 4.</para>
-    internal const int PinnedCount = 210;
+    /// <para><b>210 → 208 (43-17 follow-up).</b> POST /api/engine/trigger-ci and
+    /// POST /api/engine/execute-task now bind effect:ci.workflow.dispatch and
+    /// effect:llm.task.execute and enforce. Story 43-17 had flagged both as having
+    /// NO OWNER; they were the last two ungoverned routes on the /api/engine group.
+    /// Their baseline entries are deleted in the same diff — the backlog SHRINKS.</para>
+    internal const int PinnedCount = 208;
 
     /// <summary>
     /// The pin's recorded high-water history, oldest first; every element must be
@@ -244,7 +249,7 @@ internal static class KnownUngovernedEndpoints
     /// which is the defect <c>ContractBindingTests.cs:255-271</c> has and this epic's
     /// ratchets must not inherit.</para>
     /// </summary>
-    internal static readonly int[] PinHistory = [237, 216, 215, 214, 210];
+    internal static readonly int[] PinHistory = [237, 216, 215, 214, 210, 208];
 
     /// <summary>
     /// The pinned size of the in-scope mutating surface (Correction 4: derive it at
@@ -266,6 +271,9 @@ internal static class KnownUngovernedEndpoints
     // mutating endpoints (born bound). The 4 issue callbacks were ALREADY in scope —
     // they only move baseline→bound, no surface change. New state: 210 baselined + 2
     // exceptions + 33 bound = 245.
+    // 43-17 follow-up — UNCHANGED at 245: trigger-ci and execute-task were already
+    // in-scope mutating endpoints; they only move baseline→bound. New state:
+    // 208 baselined + 2 exceptions + 35 bound = 245.
     internal const int PinnedInScopeCount = 245;
 
     // =======================================================================
@@ -560,13 +568,9 @@ internal static class KnownUngovernedEndpoints
         // decrement: PinnedCount 216 → 215, PinnedInScopeCount 239 → 238).
         new("POST", "/api/engine/cycle-result",
             "no-catalog-member: an ENGINE ORCHESTRATION CALLBACK on the /api/engine group (WorkflowsManage, not EngineServiceOnly) with no catalog member of its own. Justification corrected 2026-07-30 when Story 43-8 AC1 step 3 landed the real bindings: these entries previously read 'an EngineServiceOnly route … its catalogued effect:* member exists and Story 43-9 binds it', which was a family paraphrase and is now provably false — all 17 route-backed effect:* members ARE bound, and none of them names this route. Cataloguing this family is epic README open question 5"),
-        new("POST", "/api/engine/execute-task",
-            "no-catalog-member: an ENGINE ORCHESTRATION CALLBACK on the /api/engine group (WorkflowsManage, not EngineServiceOnly) with no catalog member of its own. Justification corrected 2026-07-30 when Story 43-8 AC1 step 3 landed the real bindings: these entries previously read 'an EngineServiceOnly route … its catalogued effect:* member exists and Story 43-9 binds it', which was a family paraphrase and is now provably false — all 17 route-backed effect:* members ARE bound, and none of them names this route. Cataloguing this family is epic README open question 5"),
         new("POST", "/api/engine/query-context",
             "no-catalog-member: an ENGINE ORCHESTRATION CALLBACK on the /api/engine group (WorkflowsManage, not EngineServiceOnly) with no catalog member of its own. Justification corrected 2026-07-30 when Story 43-8 AC1 step 3 landed the real bindings: these entries previously read 'an EngineServiceOnly route … its catalogued effect:* member exists and Story 43-9 binds it', which was a family paraphrase and is now provably false — all 17 route-backed effect:* members ARE bound, and none of them names this route. Cataloguing this family is epic README open question 5"),
         new("POST", "/api/engine/store-context",
-            "no-catalog-member: an ENGINE ORCHESTRATION CALLBACK on the /api/engine group (WorkflowsManage, not EngineServiceOnly) with no catalog member of its own. Justification corrected 2026-07-30 when Story 43-8 AC1 step 3 landed the real bindings: these entries previously read 'an EngineServiceOnly route … its catalogued effect:* member exists and Story 43-9 binds it', which was a family paraphrase and is now provably false — all 17 route-backed effect:* members ARE bound, and none of them names this route. Cataloguing this family is epic README open question 5"),
-        new("POST", "/api/engine/trigger-ci",
             "no-catalog-member: an ENGINE ORCHESTRATION CALLBACK on the /api/engine group (WorkflowsManage, not EngineServiceOnly) with no catalog member of its own. Justification corrected 2026-07-30 when Story 43-8 AC1 step 3 landed the real bindings: these entries previously read 'an EngineServiceOnly route … its catalogued effect:* member exists and Story 43-9 binds it', which was a family paraphrase and is now provably false — all 17 route-backed effect:* members ARE bound, and none of them names this route. Cataloguing this family is epic README open question 5"),
         new("POST", "/api/github/webhooks",
             "platform-infrastructure: authentication, platform webhooks and app installation callbacks — the platform's own plumbing, not an autonomous agent capability"),

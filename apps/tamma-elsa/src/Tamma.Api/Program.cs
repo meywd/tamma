@@ -3175,8 +3175,17 @@ engine.MapDelete("/issue-labels/{repo}/{issueNumber}/{label}", EngineEndpoints.D
 engine.MapPost("/create-issue", EngineEndpoints.CreateIssue).RequireAuthorization("WorkflowsManage")
     .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssueCreate.ToWire()))
     .EnforcesGovernance();
-engine.MapPost("/trigger-ci", EngineEndpoints.TriggerCi).RequireAuthorization("WorkflowsManage");
-engine.MapPost("/execute-task", EngineEndpoints.ExecuteTask).RequireAuthorization("WorkflowsManage");
+// Story 43-17 follow-up — the two engine callbacks 43-17 flagged as having NO
+// OWNER now carry catalog keys + enforcement, closing the last two ungoverned
+// routes on this group. Auth is UNCHANGED (WorkflowsManage) — governance keys the
+// ACTION, not the caller's badge (D9). Behaviour-preserving at the shipped dial:
+// ci.workflow.dispatch is 30 and llm.task.execute is 20, both < 70.
+engine.MapPost("/trigger-ci", EngineEndpoints.TriggerCi).RequireAuthorization("WorkflowsManage")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.CiWorkflowDispatch.ToWire()))
+    .EnforcesGovernance();
+engine.MapPost("/execute-task", EngineEndpoints.ExecuteTask).RequireAuthorization("WorkflowsManage")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.LlmTaskExecute.ToWire()))
+    .EnforcesGovernance();
 engine.MapPost("/cycle-result", EngineEndpoints.PostCycleResult).RequireAuthorization("WorkflowsManage");
 engine.MapGet("/cycle-results", EngineEndpoints.GetCycleResults);
 // Generic engine→domain_events DCB-event append. The Elsa engine drains its

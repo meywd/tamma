@@ -3,6 +3,7 @@ using Elsa.Scheduling.Activities;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
+using Elsa.Workflows.IncidentStrategies;
 using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
@@ -35,6 +36,19 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         builder.DefinitionId = "adl-orchestrator";
         builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Selects issues and dispatches autonomous development cycles";
+
+        // CORRECTNESS (loop durability) — continue-with-incidents, matching the
+        // SingleIssueCycle / MergeApproval / TriageItemCycle / DeploymentPipeline /
+        // ReviewFix / CleanUpFailedTenant precedent. This workflow needs it MORE than
+        // any of them: the restart is the LAST step of the instance it restarts
+        // (cooldown → DispatchAdl → Finish), nothing else re-dispatches
+        // `adl-orchestrator` — there is no cron trigger and no watchdog — so under
+        // Elsa's default fault strategy a single throwing activity anywhere upstream
+        // faults the instance BEFORE its successor exists and the autonomous loop
+        // stops PERMANENTLY until a human dispatches one by hand. Under
+        // continue-with-incidents the tick records the incident and still reaches the
+        // restart edge, so a transient failure costs one cycle, never the loop.
+        builder.WorkflowOptions.IncidentStrategyType = typeof(ContinueWithIncidentsStrategy);
 
         // ================================================================
         // Variables
