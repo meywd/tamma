@@ -42,7 +42,28 @@ public interface ICiSecretsProvisioner
 }
 ```
 
-`GitPlatformCapabilities` declares per-driver differences (e.g. GitLab's protected+masked+env-scoped variables, GitHub's libsodium sealed-box secrets). Drivers that don't support an operation throw a typed `PlatformUnsupportedException` rather than silently failing.
+`GitPlatformCapabilities` declares per-driver differences (e.g. GitLab's protected+masked+env-scoped variables, GitHub's libsodium sealed-box secrets).
+
+**Unsupported operations do not throw.** An earlier draft of this page described a typed `PlatformUnsupportedException`; that is not what shipped. The interface carries a **no-throw contract**: a driver that cannot perform an operation returns a failed `PlatformResult<T>` carrying `PlatformError.InvalidRequest("capability_unsupported", …)`. A caller therefore branches on a value instead of catching, and "this platform can't do that" is indistinguishable in shape from any other typed failure — which is what lets one calling workflow serve every platform.
+
+## Pull-request lifecycle operations
+
+Beyond create and merge, the abstraction covers the full PR lifecycle:
+
+| Operation | Purpose |
+|---|---|
+| `close` / `reopen` | Close a PR, and undo that — deliberately paired, which is why closing is rated a reversible action |
+| `comment` | An ordinary PR comment |
+| `review-comment` | A comment anchored to a specific line of the diff |
+| `request-reviewers` | Ask named reviewers for a review |
+| `labels` | Add and remove labels in one operation |
+| `set-draft` | Toggle between draft and ready-for-review |
+
+Each is [catalogued and gated](/action-catalog-and-autonomy/) — level 35, except the review comment at 40 (it is review *output*, which sits in a different zone).
+
+**Only GitHub implements these today.** The `PrLifecycle` capability is advertised by the GitHub driver alone; every other driver answers all seven verbs with `capability_unsupported`. That is an honest gap rather than a hidden one: a caller can ask the capability matrix in advance, or call and receive a typed refusal — neither path silently does nothing.
+
+`set-draft` is the one with an interesting implementation: GitHub's REST API cannot toggle draft state at all, so the driver resolves the PR's node id and uses the GraphQL `convertPullRequestToDraft` / `markPullRequestReadyForReview` mutations. This matters more than it sounds — see [the draft step](/workflows/single-issue-cycle/#the-draft-step-why-it-exists) in the issue cycle.
 
 ## Research surprises that reshaped the story set
 

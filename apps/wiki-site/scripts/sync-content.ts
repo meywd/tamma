@@ -188,6 +188,7 @@ const WIKI_PAGE_MAP: Record<string, { outPath: string; order: number }> = {
   'API-Reference.md': { outPath: 'api-reference.md', order: 3.3 },
   'Agent-Dispatch.md': { outPath: 'agent-dispatch.md', order: 4 },
   'Security.md': { outPath: 'security.md', order: 5 },
+  'Action-Catalog-and-Autonomy.md': { outPath: 'action-catalog-and-autonomy.md', order: 5.1 },
   'GitHub-Integration.md': { outPath: 'github-integration.md', order: 6 },
   'Testing.md': { outPath: 'testing.md', order: 7 },
   'Port-Audit.md': { outPath: 'port-audit.md', order: 8 },
