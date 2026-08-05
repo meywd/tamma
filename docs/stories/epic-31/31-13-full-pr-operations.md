@@ -1,7 +1,6 @@
 # Story 31-13: Full PR Operation Support
 
-Status: drafted
-
+Status: done
 ## User Story
 
 As the orchestrator, I want the git platform client to support every PR

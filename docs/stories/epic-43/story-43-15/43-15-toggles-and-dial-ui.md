@@ -1,7 +1,6 @@
 # Story 43-15: Toggle Encoding and the Dial as Detents With a Diff Preview
 
-Status: drafted
-
+Status: done
 Implements: Story 43-11 **Amendment 2, sections E (toggle encoding, level-ownership predicate) and H (detents + diff preview)**, and the Supersessions note closing OQ6.
 
 ## MANDATORY: Before You Code

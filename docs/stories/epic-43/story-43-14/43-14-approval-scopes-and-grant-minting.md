@@ -1,7 +1,6 @@
 # Story 43-14: Approval Scopes and Grant Minting — One Approval System, Observed From Two Places
 
-Status: drafted
-
+Status: done
 Implements: Story 43-11 **Amendment 2, sections A (approval scopes), B (workflow approvals mint grants; correlation header threading) and C (chain rules, saga grants, monotonicity)**.
 
 ## MANDATORY: Before You Code

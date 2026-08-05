@@ -1,7 +1,6 @@
 # Story 43-12: Per-Target Merge/Deploy Keys and the Ladder Gaps
 
-Status: drafted
-
+Status: done
 Implements: Story 43-11 **Amendment 3** (zones, per-target actions), the **Caller-kind re-audit — Missing actions** section, and the count-pin consequences both name.
 
 ## MANDATORY: Before You Code
