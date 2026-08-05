@@ -153,8 +153,9 @@ approved defer  split  needsHuman
 | 8 | `pull-request` | Creates a **draft** PR with implementation plan `.md` files committed (before any code) |
 | 9 | `test-case-creation` (sub-workflow, wait) | Generates test cases from task plans so the red phase has specs ready |
 | 10 | TDD loop | For each task in dependency order: red (test first) -> green (implement) -> CI -> refactor -> commit |
-| 11 | Code review dispatch + bookmark | Dispatches `code-review` (fire-and-forget), then blocks on `WaitForPRApprovalActivity` bookmark |
-| 12 | Merge dispatch + bookmark | Dispatches `merge-complete` (fire-and-forget), then blocks on `WaitForPRMergedActivity` bookmark |
+| 11 | CI gate | `ci-with-debug-retry` runs once the TDD loop is done. **Only a CI pass proceeds** — a failure fails the cycle loudly and can never reach the merge gate |
+| 11a | **Mark PR ready for review** | The PR was opened as a **draft** at step 8, and GitHub refuses to merge a draft. This step flips it to ready-for-review before anyone is asked to approve a merge. A failure here fails the cycle and **never** opens the merge gate — see [The draft step](#the-draft-step-why-it-exists) |
+| 12 | Merge-approval gate + bookmark | Dispatches `merge-approval` and blocks on the human decision. The gate returns `merge` / `reject` / `escalated`; **only `merge`** proceeds to wait for the real merge webhook. `reject` and `escalated` finish at a human-handoff terminal — routing them to the merge wait would hang the cycle forever, since no merge webhook would ever fire |
 | 13 | Update & close issue | Updates the GitHub issue with final summary and closes it |
 | 14 | `deployment-pipeline` (sub-workflow, wait) | QA -> UAT -> Prod deployment pipeline after merge |
 | 15 | `ReportCycleResultActivity` | Reports result to orchestrator via engine callback API, then finishes |
@@ -165,7 +166,7 @@ approved defer  split  needsHuman
 2. **Plan Review with 7-role LLM panel** -- iterative discussion rounds between architect, dev, QA, security, devops, PO, and orchestrator roles
 3. **Create Tasks step** -- a senior dev LLM breaks the plan into deep implementation plans per task
 4. **Task Review with 4-role panel** -- architect, senior dev, dev, and QA review tasks before implementation begins
-5. **Draft PR created before code** -- plan `.md` files are committed first so reviewers can see the approach
+5. **Draft PR created before code** -- plan `.md` files are committed first so reviewers can see the approach, and the PR is marked ready once CI passes (see below)
 6. **Test cases created before TDD** -- the red phase has specs ready from the start
 7. **TDD loop per task** -- each task is independently tested and CI-verified (no separate CI step)
 8. **CI inside TDD** -- CI runs after each task's green phase, not as a separate workflow step
@@ -174,6 +175,21 @@ approved defer  split  needsHuman
 11. **Deployment pipeline** -- QA -> UAT -> Prod stages after merge
 12. **Issue updated at every step** -- tech writer LLM summarizes progress via `UpdateIssueStatus` sub-workflow (fire-and-forget)
 13. **Every exit reports to orchestrator** -- via engine callback API through `ReportCycleResultActivity`
+
+## The draft step: why it exists
+
+The cycle opens its pull request as a **draft** at step 8, deliberately — the plan `.md` files are committed before any code, and presenting that as ready-for-review would be misleading.
+
+GitHub, however, **refuses to merge a draft pull request**. So the draft has to be undone before anyone is asked to approve a merge. Step 11a is where that happens.
+
+Until this step existed, the cycle would build the change, pass CI, ask a human to approve the merge — and then attempt a merge that could not succeed. The failure landed at the very last moment, after all the expensive work and after pulling a person in.
+
+Two properties of the step are worth knowing:
+
+- **It sits behind the CI gate.** Only a CI pass reaches it, so a red build never produces a ready-for-review PR.
+- **A failure never opens the merge gate.** If the PR cannot be marked ready, the cycle fails loudly instead. Asking a human to approve a merge that cannot complete is precisely the failure this removes — so an error here routes to the shared fail-the-cycle sink, not onward.
+
+The underlying capability is the governed `set-draft` verb described in [Multi-Git-Platform](/multi-git-platform/); like every other PR operation it is catalogued and gated (level 35).
 
 ## Plan Review Decisions
 
