@@ -1,7 +1,6 @@
 # Story 40-8: Triage Outcome Dead Ends — Build `create-issues` (or Route the Branches Somewhere Real)
 
-Status: drafted
-
+Status: done
 Fixes: `.dev/bugs/2026-08-02-single-issue-cycle-dead-create-issues-dispatch.md`. Cross-references: Story 43-11's Missing-actions hunt (which re-surfaced the dangling dispatch), Story 39-24 (`:494-500`, the audit that found it), Story 31-13 (the `git.issue.create` catalog key).
 
 ## MANDATORY: Before You Code

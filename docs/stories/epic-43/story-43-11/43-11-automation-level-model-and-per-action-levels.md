@@ -1,7 +1,6 @@
 # Story 43-11: The Automation-Level Model — 1–100, and a Level for Every Action
 
-Status: drafted
-
+Status: done
 ## MANDATORY: Before You Code
 
 **ALL contributors MUST read and follow the comprehensive development process:**

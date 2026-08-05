@@ -1,7 +1,6 @@
 # Story 43-16: Acceptance Unification (Form α) — the Shipped Acceptor Floor Becomes Derived
 
-Status: drafted
-
+Status: done
 Implements: Story 43-11 **Amendment 2, section G** (form α), constrained by the Amendment 3 zone numbers and the caller-kind re-audit's FLAGs on the three human-pinned document types.
 
 ## MANDATORY: Before You Code

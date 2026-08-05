@@ -17,6 +17,7 @@ sidebar:
 - [API Reference](API-Reference) - REST surface, RBAC policies, SSE streams, webhooks, DCB event catalog (Story 5-9c)
 - [Agent Dispatch](Agent-Dispatch) - Epic 19 completion: `LocalExecutor`, `GitHubActionsExecutor`, webhook mode, TS `execute-agent` CLI
 - [Security](Security) - Schema-per-tenant isolation, rate limiting, API key hashing, content sanitization, libsodium, webhook tenant-scoping
+- [Action Catalog & Autonomy](Action-Catalog-and-Autonomy) - How Tamma decides what it may do alone: the action catalog, the 1-100 autonomy dial, per-route enforcement, and approval scopes
 - [GitHub Integration](GitHub-Integration) - Octokit App client, OAuth flows, Actions dispatch
 - [Testing](Testing) - Test strategy, testcontainers patterns, per-scope coverage
 - [Port Audit](Port-Audit) - TS → C# port-gap audit (196 findings) + 2026-04-20 code-review round (18 findings)

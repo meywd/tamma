@@ -1,7 +1,6 @@
 # Story 43-13: Caller-Kind Predicate — the Dial Governs the LLM Only
 
-Status: drafted
-
+Status: done
 Implements: Story 43-11 **Amendment 4** ("Who the dial governs: the LLM, and nothing else") and the **Caller-kind re-audit** (120 LLM / 7 HUMAN / 28 DUAL / 42 MACHINERY).
 
 ## MANDATORY: Before You Code

@@ -171,6 +171,24 @@ The orchestrator terminates when:
 - `DispatchTriageActivity` failures are logged but do not stop the loop
 - The loop continues selecting new work items until limits are hit or nothing remains
 
+## Loop durability -- why the restart edge matters
+
+This is the property the bullets above depend on, and it is worth stating explicitly because it is easy to break.
+
+**The orchestrator restarts itself.** Every terminal path runs `... -> cooldown -> DispatchAdl -> Finish`, and `DispatchAdlActivity` dispatches the *successor* instance. There is **no cron trigger and no watchdog** — nothing else in the system starts an `adl-orchestrator` instance. The restart is therefore the **last step of the instance it restarts**.
+
+That has a sharp consequence: anything that faults the instance *before* it reaches that final step ends the autonomous loop **permanently**, until a human dispatches one by hand. Not a skipped cycle — a stopped platform, and a quiet one.
+
+Three things protect against that:
+
+1. **Continue-with-incidents.** The workflow declares `ContinueWithIncidentsStrategy`, so a throwing activity records an incident and the flow still reaches the restart edge. Without it, the engine's default is to fault the whole instance. Every long-running workflow in Tamma sets this; the orchestrator needs it most.
+2. **The fire-and-forget dispatches never throw.** `DispatchCycleActivity` and `DispatchTriageActivity` sit upstream of the restart edge, so a failure to start one issue cycle or triage batch costs that item and not the loop. The issue stays selectable on the next tick.
+3. **The restart dispatch retries.** `DispatchAdlActivity` retries with a short backoff and never propagates an exception. If every attempt fails it logs at **Critical**, naming the consequence — because that log line is the only explanation for the platform going silent.
+
+### If the loop does go quiet
+
+Look for the Critical log line from `DispatchAdlActivity`. If it is there, the restart genuinely failed and a new `adl-orchestrator` instance must be dispatched manually. If it is *not* there, the loop stopped for a different reason — check the workflow instance list for a faulted orchestrator instance.
+
 ## Sub-Workflows Dispatched
 
 | Workflow | Wait | Purpose |

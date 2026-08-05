@@ -1,7 +1,6 @@
 # Story 39-25: Ambiguity Threading — the Dead Score Leg, Wired
 
-Status: drafted
-
+Status: done
 Implements: Story 43-11 **Amendment 2, section F** ("the 'at 100' escape hatch is currently one document type wide — say so, then widen it"). Sits in Epic 39 because the deliverable is lifecycle plumbing, not catalog policy.
 
 ## MANDATORY: Before You Code
