@@ -28,7 +28,7 @@ public class ActionCatalogLevelTests
         DialRows.Where(d => dial >= d.DefaultMinAutonomy).Select(d => d.Key.ToWire()).ToHashSet();
 
     /// <summary>
-    /// THE explicit (actionKey → zone level) table for all 175 dial rows (was 164; Story 31-13 +11 PR/issue effect keys, all dial rows at 35/40; was 163; Story 42-10 +1 effect:secret.read at 90; was 155; Story 43-12 +10 per-target merge/deploy keys −2 retired coarse keys)
+    /// THE explicit (actionKey → zone level) table for all 177 dial rows (was 175; 43-17 follow-up +2 engine-callback effect keys at 20/30; was 164; Story 31-13 +11 PR/issue effect keys, all dial rows at 35/40; was 163; Story 42-10 +1 effect:secret.read at 90; was 155; Story 43-12 +10 per-target merge/deploy keys −2 retired coarse keys)
     /// (Story 43-11 AC4, re-audit: 217 − 42 machinery). Transcribed from the
     /// zone-model derivation, NOT generated from the catalog — it is the
     /// independent pin the descriptor is compared against.
@@ -96,6 +96,9 @@ public class ActionCatalogLevelTests
         ["agent-action:write-user-docs"] = 15,
         // ── Level 20 — write Tamma's own records (16) ──
         ["effect:llm.call"] = 20,
+        // 43-17 follow-up — the engine-callback twin (POST /api/engine/execute-task).
+        // Same class as llm.call (it runs an LLM, and can enable TOOLS), same level.
+        ["effect:llm.task.execute"] = 20,
         ["effect:mentorship.session.cancel"] = 20,
         ["effect:mentorship.session.pause"] = 20,
         ["effect:mentorship.session.resume"] = 20,
@@ -140,6 +143,8 @@ public class ActionCatalogLevelTests
         ["agent-action:debug"] = 30,
         ["agent-action:exploratory-test"] = 30,
         ["effect:ci.tests.trigger"] = 30,
+        // 43-17 follow-up — the engine-callback twin (POST /api/engine/trigger-ci).
+        ["effect:ci.workflow.dispatch"] = 30,
         ["tool:run_tests"] = 30,
         // ── Level 35 — create branch / PR (15) ──
         ["effect:git.branch.create"] = 35,
@@ -282,7 +287,7 @@ public class ActionCatalogLevelTests
         missing.Should().BeEmpty("keys in the table with no catalog dial row");
         extra.Should().BeEmpty("catalog dial rows absent from the table");
         mismatched.Should().BeEmpty("a level moved without updating BOTH the descriptor and this table");
-        actual.Should().HaveCount(175, "175 = 217 catalog rows − 42 machinery (Story 31-13: +11 PR/issue effect keys, all dial rows at 35/40; Story 42-10: +1 effect:secret.read at 90; Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
+        actual.Should().HaveCount(177, "177 = 219 catalog rows − 42 machinery (43-17 follow-up: +2 engine-callback keys, ci.workflow.dispatch 30 and llm.task.execute 20; Story 31-13: +11 PR/issue effect keys, all dial rows at 35/40; Story 42-10: +1 effect:secret.read at 90; Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
     }
 
     [Test]

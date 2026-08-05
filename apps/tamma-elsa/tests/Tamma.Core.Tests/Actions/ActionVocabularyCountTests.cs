@@ -51,7 +51,7 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void ExternalEffect_has_59_members()
+    public void ExternalEffect_has_61_members()
     {
         // Derivation: grep 'RequireAuthorization("EngineServiceOnly")'
         // src/Tamma.Api/Program.cs → 26 routes, 17 MUTATING (5 engine-group
@@ -94,7 +94,12 @@ public class ActionVocabularyCountTests
         // git.issue.{create,comment,labels.set,labels.remove} (issue-tracking).
         // Enforceable-but-unbound descriptors (no .Governs binding yet — the same
         // green pattern effect:secret.read used when first minted).
-        Enum.GetValues<ExternalEffect>().Should().HaveCount(59);
+        // 59 -> 61 (Story 43-17 follow-up): the two /api/engine callbacks that had
+        // NO OWNER — ci.workflow.dispatch (POST /api/engine/trigger-ci) and
+        // llm.task.execute (POST /api/engine/execute-task). Both are DISTINCT from
+        // their mediation-route twins (ci.tests.trigger, llm.call) because an effect
+        // binds at exactly one site; same effect class, so same levels (30, 20).
+        Enum.GetValues<ExternalEffect>().Should().HaveCount(61);
     }
 
     [Test]
@@ -146,8 +151,10 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_217()
+    public void TotalCatalogMembers_is_219()
     {
+        // 96 + 17 + 8 + 61 + 29 + 8 = 219 — was 217 (effect 59): the 43-17 follow-up
+        // catalogued the two unowned engine callbacks (see ExternalEffect_has_61_members).
         // 96 + 17 + 8 + 59 + 29 + 8 = 217 — was 206 (effect 48): Story 31-13 added
         // the 11 PR + issue-callback effects (see ExternalEffect_has_59_members).
         // 96 + 17 + 8 + 48 + 29 + 8 = 206 — was 205 (effect 47): Story 42-10 minted
@@ -169,7 +176,7 @@ public class ActionVocabularyCountTests
         // (80 + 10 + 22 + 26 + …); the agent-action plane grew by 16 (Story
         // 41-1a), the document-type plane by 6 (Story 41-1b), and
         // effect/automation by 3 + 1 (Story 41-30).
-        ActionCatalog.All.Should().HaveCount(217);
-        ActionCatalog.ByKey.Should().HaveCount(217);
+        ActionCatalog.All.Should().HaveCount(219);
+        ActionCatalog.ByKey.Should().HaveCount(219);
     }
 }

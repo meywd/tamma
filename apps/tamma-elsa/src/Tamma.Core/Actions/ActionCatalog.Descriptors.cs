@@ -632,6 +632,19 @@ public static partial class ActionCatalog
         Effect(ExternalEffect.MentorshipSessionCancel, ActionGroup.ModelInvocation, ActionRisk.Destructive, "Cancel mentorship session", "Terminate a mentorship workflow instance — the in-flight agent run is abandoned and cannot be resumed.",
             "POST /api/Mentorship/sessions/{sessionId:guid}/cancel — MentorshipController.CancelSession", reversible: false, min: 20),
 
+        // Story 43-17 follow-up — the two /api/engine callbacks that 43-17 flagged as
+        // having NO OWNER: live, LLM-reachable, sitting directly beside four siblings
+        // 31-13 governed, with no catalog member and no enforcement. Each takes the
+        // level of the effect CLASS it belongs to (not a new judgement), so both stay
+        // below the shipped dial of 70 and this is behaviour-preserving.
+        Effect(ExternalEffect.CiWorkflowDispatch, ActionGroup.CiAndTest, ActionRisk.Command, "Dispatch CI workflow", "Dispatch a CI workflow run (GitHub Actions workflow_dispatch) via the engine callback.",
+            "POST /api/engine/trigger-ci — EngineEndpoints.TriggerCi", min: 30),
+        // TOOLS: ExecuteTaskRequest carries EnableTools, so this route can run the
+        // tool loop — it belongs on the model-invocation plane at llm.call's level,
+        // not treated as a bookkeeping callback.
+        Effect(ExternalEffect.LlmTaskExecute, ActionGroup.ModelInvocation, ActionRisk.Mutating, "Execute LLM task", "Run an LLM-driven task (optionally with tools) via the engine callback.",
+            "POST /api/engine/execute-task — EngineEndpoints.ExecuteTask", reversible: false, min: 20),
+
         // ── automation (27) — EscalatableToHuman=false for the whole plane ────
 
         Automation(BackgroundActor.HourlyAnalyticsRollupScheduler, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Hourly analytics rollup", "Rolls up analytics hourly.",

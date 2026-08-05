@@ -62,9 +62,14 @@ public class GovernedEndpointEnforcementSweepTests
     ///   opting them in would have been an unreviewed edit in someone else's
     ///   lane.</item>
     ///   <item><c>POST /api/kb/mcp/tools/invoke</c> — carries no binding at all,
-    ///   and Story 43-9 D16 decided it stays that way: <c>effect:mcp.tool.invoke</c>
-    ///   ships <c>AlwaysHuman</c> since 2026-07-30, so binding AND enforcing it
-    ///   would be a behaviour change rather than a behaviour-preserving one.</item>
+    ///   and Story 43-9 D16 decided it stays that way. <b>NOTE (43-17 follow-up):</b>
+    ///   the ORIGINAL justification recorded here — "<c>effect:mcp.tool.invoke</c>
+    ///   ships <c>AlwaysHuman</c>" — is STALE and was false by the time it was read:
+    ///   43-11 M6 moved all four AlwaysHuman rows onto real levels, and
+    ///   <c>ActionCatalogDefaultsTests.NoShippedDescriptor_CarriesAlwaysHuman</c>
+    ///   pins that set EMPTY. The D16 decision itself is untouched here — only the
+    ///   dead reasoning is corrected, because that sentence has already misled one
+    ///   reader into treating the key as human-gated.</item>
     /// </list>
     /// </summary>
     private static readonly IReadOnlySet<string> EnforcementOptedInRoutes =
@@ -110,6 +115,11 @@ public class GovernedEndpointEnforcementSweepTests
             "POST /api/engine/issue-comment",
             "POST /api/engine/issue-labels",
             "DELETE /api/engine/issue-labels/{repo}/{issueNumber}/{label}",
+            // 43-17 follow-up — the last two ungoverned /api/engine routes, which
+            // 43-17 flagged as having NO OWNER. ci.workflow.dispatch is 30,
+            // llm.task.execute is 20; both < 70, so behaviour-preserving.
+            "POST /api/engine/trigger-ci",
+            "POST /api/engine/execute-task",
         };
 
     /// <summary>Endpoints carrying the D15 enforcement opt-in, off the booted host.</summary>
@@ -154,9 +164,10 @@ public class GovernedEndpointEnforcementSweepTests
             + "binding is still there — which is exactly why this set is pinned in both "
             + "directions:" + Environment.NewLine + string.Join(Environment.NewLine, missing));
 
-        live.Should().HaveCount(28,
+        live.Should().HaveCount(30,
             "16 mediation routes (Story 43-9) + the reveal route (Story 42-10, secret.read) "
             + "+ the 11 PR/issue verbs (Story 31-13: 7 PR-lifecycle routes + 4 issue callbacks) "
+            + "+ the 2 formerly-unowned engine callbacks (43-17 follow-up: trigger-ci, execute-task) "
             + "opt into enforcement.");
     }
 

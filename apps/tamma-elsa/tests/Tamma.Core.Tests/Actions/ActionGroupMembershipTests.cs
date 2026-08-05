@@ -131,12 +131,16 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void CiAndTest_has_the_3_expected_members()
+    public void CiAndTest_has_the_4_expected_members()
     {
         // Executing tests, not writing them (43-3 D5.2).
         WiresIn(ActionGroup.CiAndTest).Should().BeEquivalentTo(new[]
         {
             "agent-action:exploratory-test", "tool:run_tests", "effect:ci.tests.trigger",
+            // 43-17 follow-up — the ENGINE-CALLBACK CI dispatch. Distinct key from
+            // effect:ci.tests.trigger (the /api/v1/ci mediation route) because an
+            // effect binds at exactly one site; same class, same level (30).
+            "effect:ci.workflow.dispatch",
         });
     }
 
@@ -225,7 +229,7 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void ModelInvocation_has_the_7_expected_members()
+    public void ModelInvocation_has_the_8_expected_members()
     {
         // 3 -> 7 (Story 43-8, 2026-07-30): the four mentorship-session lifecycle
         // effects. The 43-3 D1 partition rule is KIND OF CONSEQUENCE AT COMPLETION,
@@ -240,6 +244,10 @@ public class ActionGroupMembershipTests
             "effect:llm.call", "effect:mcp.tool.invoke", "effect:agent-dispatch.run",
             "effect:mentorship.session.start", "effect:mentorship.session.pause",
             "effect:mentorship.session.resume", "effect:mentorship.session.cancel",
+            // 43-17 follow-up — POST /api/engine/execute-task runs an LLM and can
+            // ENABLE TOOLS, so it belongs on this plane beside effect:llm.call
+            // rather than being treated as a bookkeeping callback.
+            "effect:llm.task.execute",
         });
     }
 
@@ -283,8 +291,10 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void The_per_group_counts_sum_to_217()
+    public void The_per_group_counts_sum_to_219()
     {
+        // 217 → 219 (43-17 follow-up): ci-and-test 3 → 4 (+ci.workflow.dispatch) and
+        // model-invocation 7 → 8 (+llm.task.execute) — the two unowned engine callbacks.
         // 206 → 217 (Story 31-13): source-control-write 10 → 17 (+7 PR ops) and
         // issue-tracking 12 → 16 (+4 issue callbacks) — nothing else moves.
         // 205 → 206 (Story 42-10): +1 in secrets — effect:secret.read (level 90),
@@ -313,18 +323,18 @@ public class ActionGroupMembershipTests
             [ActionGroup.CodeRead] = 3,
             [ActionGroup.CodeWrite] = 1,
             [ActionGroup.CommandExecution] = 2,
-            [ActionGroup.CiAndTest] = 3,
+            [ActionGroup.CiAndTest] = 4,
             [ActionGroup.SourceControlRead] = 1,
             [ActionGroup.SourceControlWrite] = 17,
             [ActionGroup.IssueTracking] = 16,
             [ActionGroup.DeployControl] = 10,
             [ActionGroup.ExternalComms] = 2,
-            [ActionGroup.ModelInvocation] = 7,
+            [ActionGroup.ModelInvocation] = 8,
             [ActionGroup.Secrets] = 5,
             [ActionGroup.PlatformAutomation] = 43,
         };
 
-        counts.Values.Sum().Should().Be(217);
+        counts.Values.Sum().Should().Be(219);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }

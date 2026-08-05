@@ -370,6 +370,33 @@ public enum ExternalEffect
     /// workflow instance: the in-flight run is abandoned and cannot be
     /// resumed.</summary>
     [Wire("mentorship.session.cancel")] MentorshipSessionCancel,
+
+    // ── Story 43-17 follow-up — the two engine callbacks that had NO OWNER ──
+    // Both are live, LLM-reachable /api/engine routes that sat beside four
+    // siblings governed by 31-13 while carrying no catalog member and no
+    // enforcement. Appended at the END so the existing wire-pin order is
+    // untouched.
+
+    /// <summary>Dispatch a CI workflow run on the git platform via the engine
+    /// callback <c>POST /api/engine/trigger-ci</c> (GitHub Actions
+    /// <c>workflow_dispatch</c> for an arbitrary workflow file).
+    ///
+    /// <para>DISTINCT from <c>effect:ci.tests.trigger</c>, which is the
+    /// <c>/api/v1/ci/...</c> MEDIATION route: an effect binds at exactly one site,
+    /// so the engine-callback plane needs its own key. Same effect CLASS, hence the
+    /// same level (30).</para></summary>
+    [Wire("ci.workflow.dispatch")] CiWorkflowDispatch,
+
+    /// <summary>Run an LLM-driven task via the engine callback
+    /// <c>POST /api/engine/execute-task</c> (<c>IExecuteTaskService</c> →
+    /// <c>ILlmProxyService</c>).
+    ///
+    /// <para>This is an LLM invocation that can ENABLE TOOLS (<c>EnableTools</c> on
+    /// the request), so it is the model-invocation plane, not a bookkeeping
+    /// callback. DISTINCT from <c>effect:llm.call</c>, which is the
+    /// <c>/api/v1/llm/call</c> mediation route — same reason as above, and the same
+    /// level (20).</para></summary>
+    [Wire("llm.task.execute")] LlmTaskExecute,
 }
 
 /// <summary><see cref="ExternalEffect"/> wire helper.</summary>
