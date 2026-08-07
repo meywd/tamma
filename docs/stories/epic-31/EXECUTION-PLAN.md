@@ -1,6 +1,6 @@
 # Epic 31 — Multi-Git-Platform Execution Plan
 
-**Date**: 2026-08-05
+**Date**: 2026-08-05 (amended 2026-08-07: §4 mechanism shape decided by owner — is-supported check step before every platform/third-party action, defined alternative step when unsupported)
 **Status**: ACTIVE — owner-directed completion plan
 **Supersedes**: the Epic 31 freeze in D3 of `.dev/decisions/2026-08-04-post-wave-d-decisions.md`. By owner direction the epic is unfrozen and the architecture below is decided; do not re-litigate it. (D3's factual note stands: `docs/research/multi-git-platform-2026.md` never existed — demand is now asserted by the owner, not that citation.)
 
@@ -9,6 +9,7 @@
 2. Every git call goes through the abstraction (`IGitPlatformClient`). No production path calls GitHub/Gitea/GitLab APIs directly. Drivers may implement via REST or CLI where CLI is the better tool.
 3. Auth (user sign-in) is a separate plane from the git-platform plane.
 4. Actions/CI is abstracted the same way (`IGitPlatformActionsClient`): dispatch, run status, artifacts.
+5. (Added 2026-08-07.) **Every platform or third-party action in a workflow is an explicit step, preceded by an is-supported check step, with a defined alternative step taken when the check fails.** Support is decided *before* the action runs, in workflow structure — not discovered mid-step. §4 carries the mechanism.
 
 All evidence below is grounded in `origin/main` (verified 2026-08-05, three independent inventory tracks + adversarial verdicts). Where a verdict refuted a claim, this plan states the correction.
 
@@ -156,7 +157,7 @@ Strictly sequenced. Every phase states what does **not** change: mediation route
 - **The swap**: `GitMediationService`'s 17 op cores resolve `IPlatformResolver` → `driver.Client` instead of `_githubFactory.Create(cred.Token)`. `GitTokenResolver` generalizes: BYOK tier resolves the tenant's **primary installation of any kind** (raw-git clone/push credentials remain its job); the `IGitHubClientFactory` chokepoint is deleted. ADL `ExecuteCoreAsync` helpers (CreateBranch/CreatePullRequest/MergePullRequest) retype onto `IGitPlatformClient`.
 - Wire `PlatformDriverCache.InvalidateTenantAsync` to the in-process platform event bus (CREDENTIAL_ROTATED / DISCONNECTED / SWITCH_ORG) — the emitter and event types exist; the subscriber was never built.
 
-**Effort**: L. **Risk**: this is the only production git path — regression risk is concentrated here. Mitigation: P1's per-verb parity tests run against both backends before the flip; capability degradation (§4) must land its mediation-side typed surface in this phase so the P5/P6 platforms don't hard-fail.
+**Effort**: L. **Risk**: this is the only production git path — regression risk is concentrated here. Mitigation: P1's per-verb parity tests run against both backends before the flip; capability degradation (§4) must land in this phase — both the mediation-side typed surface **and** the workflow-side pattern (`CheckPlatformCapabilityActivity` + the un-draft edge's alternative step) — so the P5/P6 platforms don't hard-fail.
 **Acceptance**:
 - `GitMediationService` has **zero** `IGitHubClientFactory` references (ratchet allowlist shrinks); existing mediation tests pass **unchanged** (GitHub behavior parity); governance sweep green with **zero SiteKey diffs**.
 - Fresh single-user deployment with only the `Platform:` config (no onboarding API call) resolves a working driver — integration test.
@@ -196,7 +197,7 @@ Strictly sequenced. Every phase states what does **not** change: mediation route
 
 **Scope**:
 - Implement the six lifecycle verbs in the Gitea driver (PATCH state, `requested_reviewers`, labels, draft via edit-PR `draft` field with version feature-detection and WIP-title fallback); flip `PrLifecycle` on for Gitea/Forgejo per detection.
-- **Degradation semantics live** (§4): the un-draft edge, reviewers, review-comment anchoring, merge-method fallback — per the owner decisions below.
+- **Degradation semantics live** (§4): check step + alternative step in place for the un-draft edge, reviewers, review-comment anchoring, merge-method fallback — per the owner decisions below.
 - Probe strictness: connect fails when a driver lacks `ListAccessibleRepos` capability rather than treating empty-as-success (GitHub's case was fixed in P1; this closes the class).
 - **Full-stack acceptance vehicle** on top of the 31-10 harness: compose fixture with Postgres + Tamma.Api + Tamma.ElsaServer + Gitea 1.21 + act_runner (or a CI stub resuming the bookmark), agent executor stubbed (scripted no-LLM `LocalExecutor`), container-network callback URL for webhooks. Reuses `GiteaContainerFixture`'s admin/PAT/repo seeding. Nightly, like the GitLab job.
 
@@ -215,17 +216,20 @@ Strictly sequenced. Every phase states what does **not** change: mediation route
 
 **Why this is not optional**: `MarkPrReadyForReview` sits on the CI-passed edge and its Error outcome routes to the fail-the-cycle sink (`SingleIssueCycleWorkflow.cs:1232-1234`). Both Gitea and GitLab return `capability_unsupported` for `SetDraftAsync` today — without degradation, **every** cycle on either platform permanently fails at that node the moment P2 lands.
 
-**Mechanism (decided shape)**: consultation is **dynamic, per-call** — activities react to the typed `capability_unsupported` failure code that the no-throw contract already delivers, so the matrix can never drift from driver reality (matrix flags remain advisory, used only for *proactive* choices like whether to request draft at PR-creation). Concretely:
-1. Mediation passes `capability_unsupported` through as a first-class field on its existing error envelope (the `FailureCode` already round-trips) — no route or SiteKey change.
-2. Capability-gated activities gain a third outcome (`Unsupported`) distinct from `Error`, wired per the policies below.
-3. **Every degradation emits a DCB audit event** (e.g. `GIT.PR_DRAFT_SET.SKIPPED`) — silent skips are forbidden; the audit trail is the point of this platform.
-4. Classification is exact-code-match only: anything other than `capability_unsupported` still routes to `Error`. Mis-classifying a real failure as "unsupported" would silently skip a gate.
+**Mechanism (owner-decided shape, amended 2026-08-07)**: every platform/third-party action is an explicit workflow step, **preceded by an is-supported check step**, and **paired with a defined alternative step** taken when the check says unsupported. Support is a branch in the workflow graph, decided before the action runs — not a surprise inside the step. Concretely:
+1. **The check step**: a `CheckPlatformCapabilityActivity` (one reusable activity, parameterized by capability) placed before each capability-gated action step. It consults the *resolved driver's* live capabilities — feature-detected per installation (version probe, credential mode), never the static matrix alone. P1's contract test (advertised capability ⇔ verb actually implemented) is what makes this check trustworthy.
+2. **The two branches**: check passes → the action step runs. Check fails → the workflow routes to that action's **alternative step**, defined per action by DG-1..DG-4 below (mark-satisfied, downgrade to plain comment, skip-with-label, fallback merge method). Every action added to a workflow ships with its alternative step or it doesn't ship — an unsupported capability with no alternative branch is a design error caught in review, not a runtime failure.
+3. **Defense in depth**: the action step itself still classifies the typed `capability_unsupported` failure code (which the no-throw contract already delivers) into a third outcome (`Unsupported`) distinct from `Error`, wired to the **same alternative step**. This is the safety net for a stale or lying probe (GitHub's lies today); the check step is the designed path. Mediation passes `capability_unsupported` through as a first-class field on its existing error envelope (the `FailureCode` already round-trips) — no route or SiteKey change.
+4. **Every trip through an alternative step emits a DCB audit event** (e.g. `GIT.PR_DRAFT_SET.SKIPPED`) — silent skips are forbidden; the audit trail is the point of this platform.
+5. Classification is exact-code-match only: anything other than `capability_unsupported` still routes to `Error`. Mis-classifying a real failure as "unsupported" would silently skip a gate.
 
-**Owner decisions, each with a recommendation** (defaults apply if unanswered; the plan proceeds on the recommendation):
+This rule is general: it applies to any third-party surface a workflow touches (git platform, CI/Actions, and future external integrations), not just the six lifecycle verbs. Within this plan it lands as: the check-step activity + the first alternative steps (the un-draft edge) in P2 alongside the mediation swap; the remaining capability-gated steps (reviewers, review-comment anchoring, merge method, CI dispatch) as each phase touches them (P3–P6).
+
+**Owner decisions, each with a recommendation** (defaults apply if unanswered; the plan proceeds on the recommendation). The *mechanism shape* above is owner-decided (2026-08-07) and no longer open; DG-1..DG-4 now decide only the **content of each alternative step**:
 
 | # | Decision | Recommendation |
 |---|---|---|
-| DG-1 | **Draft-PR handling** (the un-draft edge) | Create draft wherever create-draft works (GitHub, Gitea, GitLab-via-title). If the *un-draft* returns `capability_unsupported`, treat as **satisfied-with-audit-event** and proceed to the merge gate — the gate itself is preserved; only the "not mergeable while cooking" guard is lost, and only on platforms that can't express it. Where create-draft is unsupported, create non-draft and mark the un-draft step satisfied at creation time. |
+| DG-1 | **Draft-PR handling** (the un-draft edge) | Create draft wherever create-draft works (GitHub, Gitea, GitLab-via-title). If the check step (or the safety-net outcome) says un-draft is unsupported, the alternative step is **mark-satisfied-with-audit-event** and proceed to the merge gate — the gate itself is preserved; only the "not mergeable while cooking" guard is lost, and only on platforms that can't express it. Where create-draft is unsupported, create non-draft and mark the un-draft step satisfied at creation time. |
 | DG-2 | Review-comment anchoring failure | Downgrade to a plain PR comment carrying `file:line` in the body + audit event. Never drop the feedback. |
 | DG-3 | Reviewer request unsupported / unresolvable | Skip with label + audit event; do not fail the PR step. Username→id lookup lives inside the GitLab driver. |
 | DG-4 | Merge-method unsupported (e.g. GitLab rebase) | Auto-fallback along fixed order rebase→squash→merge, audited. Fail loud only if none work. |
