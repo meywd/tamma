@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
 using Tamma.Activities.ADL;
-using Tamma.Core.Interfaces;
+using Tamma.Platforms.Abstractions;
 
 namespace Tamma.Activities.Tests.ADL;
 
@@ -132,32 +132,54 @@ public class BranchCreationActivityTests
     }
 
     // ================================================================
-    // ExecuteCoreAsync — behavioral (happy / idempotency / failure / validation)
+    // ExecuteCoreAsync — behavioral (happy / idempotency / failure / validation).
+    // Epic 31 P2: the core is retyped onto IGitPlatformClient — existence is
+    // GetBranchAsync (Ok = exists, NotFound = absent), the base branch is
+    // resolved to a SHA before CreateBranchAsync, and errors classify through
+    // the same coarse legacy-string classes as before.
     // ================================================================
 
-    private static Mock<IGitHubIntegrationService> NoExistingBranch()
+    private static Tamma.Platforms.Abstractions.Models.Branch B(string name, string sha = "sha") =>
+        new(name, sha, false);
+
+    private static PlatformResult<Tamma.Platforms.Abstractions.Models.Branch> BranchOk(string name, string sha = "sha") =>
+        PlatformResult<Tamma.Platforms.Abstractions.Models.Branch>.FromOk(B(name, sha));
+
+    private static PlatformResult<Tamma.Platforms.Abstractions.Models.Branch> BranchAbsent() =>
+        PlatformResult<Tamma.Platforms.Abstractions.Models.Branch>.FromError(new PlatformError.NotFound());
+
+    private static void SetupBranch(
+        Mock<IGitPlatformClient> client, string branch,
+        PlatformResult<Tamma.Platforms.Abstractions.Models.Branch> result) =>
+        client.Setup(c => c.GetBranchAsync("o", "r", branch, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
+
+    private static Mock<IGitPlatformClient> NoExistingBranch()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        // candidate does not exist
-        gh.Setup(g => g.BranchExistsAsync(It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(false));
-        return gh;
+        var client = new Mock<IGitPlatformClient>();
+        // candidate does not exist; base branch resolves.
+        client.Setup(c => c.GetBranchAsync("o", "r", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BranchAbsent());
+        SetupBranch(client, "main", BranchOk("main", "deadbeef"));
+        return client;
     }
 
     [Test]
     public async Task ExecuteCore_HappyPath_CreatesBranch_AndCapturesBaseSha()
     {
-        var gh = NoExistingBranch();
-        gh.Setup(g => g.CreateGitHubBranchAsync("o/r", "adl/42-add-auth", "main"))
-            .ReturnsAsync(IntegrationResult<GitHubBranchResult>.Ok(new GitHubBranchResult
-            { Success = true, BranchName = "adl/42-add-auth", BaseSha = "deadbeef" }));
-        // post-create validation: now it exists.
-        gh.SetupSequence(g => g.BranchExistsAsync("o/r", "adl/42-add-auth"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(false))   // pre-create conflict check
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));   // post-create validation
+        var client = new Mock<IGitPlatformClient>();
+        client.SetupSequence(c => c.GetBranchAsync("o", "r", "adl/42-add-auth", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BranchAbsent())                        // pre-create conflict check
+            .ReturnsAsync(BranchOk("adl/42-add-auth"));          // post-create validation
+        SetupBranch(client, "main", BranchOk("main", "deadbeef"));
+        client.Setup(c => c.CreateBranchAsync(
+                It.Is<Tamma.Platforms.Abstractions.Models.CreateBranchRequest>(r =>
+                    r.Owner == "o" && r.RepoName == "r" && r.NewBranchName == "adl/42-add-auth" && r.FromSha == "deadbeef"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BranchOk("adl/42-add-auth", "deadbeef"));
 
         var outcome = await CreateBranchActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
+            client.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
 
         outcome.Outcome.Should().Be("Created");
         outcome.BranchName.Should().Be("adl/42-add-auth");
@@ -169,51 +191,57 @@ public class BranchCreationActivityTests
     [Test]
     public async Task ExecuteCore_BranchAlreadyExists_SuffixStrategy_CreatesSuffixed_NoDoubleCreate()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
+        var client = new Mock<IGitPlatformClient>();
         // base candidate exists, -2 free
-        gh.Setup(g => g.BranchExistsAsync("o/r", "adl/42-add-auth"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
-        gh.SetupSequence(g => g.BranchExistsAsync("o/r", "adl/42-add-auth-2"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(false))   // pre-create
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));   // post-create validation
-        gh.Setup(g => g.CreateGitHubBranchAsync("o/r", "adl/42-add-auth-2", "main"))
-            .ReturnsAsync(IntegrationResult<GitHubBranchResult>.Ok(new GitHubBranchResult
-            { Success = true, BranchName = "adl/42-add-auth-2", BaseSha = "sha2" }));
+        SetupBranch(client, "adl/42-add-auth", BranchOk("adl/42-add-auth"));
+        client.SetupSequence(c => c.GetBranchAsync("o", "r", "adl/42-add-auth-2", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BranchAbsent())                        // pre-create
+            .ReturnsAsync(BranchOk("adl/42-add-auth-2"));        // post-create validation
+        SetupBranch(client, "main", BranchOk("main", "sha2"));
+        client.Setup(c => c.CreateBranchAsync(
+                It.Is<Tamma.Platforms.Abstractions.Models.CreateBranchRequest>(r => r.NewBranchName == "adl/42-add-auth-2"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BranchOk("adl/42-add-auth-2", "sha2"));
 
         var outcome = await CreateBranchActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
+            client.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
 
         outcome.Outcome.Should().Be("Created");
         outcome.BranchName.Should().Be("adl/42-add-auth-2");
         outcome.ConflictResolved.Should().BeTrue();
         // The original (existing) name must NOT have been (re)created.
-        gh.Verify(g => g.CreateGitHubBranchAsync("o/r", "adl/42-add-auth", It.IsAny<string?>()), Times.Never);
+        client.Verify(c => c.CreateBranchAsync(
+            It.Is<Tamma.Platforms.Abstractions.Models.CreateBranchRequest>(r => r.NewBranchName == "adl/42-add-auth"),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task ExecuteCore_BranchAlreadyExists_AbortStrategy_ReturnsExistsError_NoCreate()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.BranchExistsAsync("o/r", "adl/42-add-auth"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        var client = new Mock<IGitPlatformClient>();
+        SetupBranch(client, "adl/42-add-auth", BranchOk("adl/42-add-auth"));
 
         var outcome = await CreateBranchActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 42, "adl/42-add-auth", "main", "abort");
+            client.Object, "o/r", 42, "adl/42-add-auth", "main", "abort");
 
         outcome.Outcome.Should().Be("Error");
         outcome.ErrorCode.Should().Be("branch_exists");
-        gh.Verify(g => g.CreateGitHubBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+        client.Verify(c => c.CreateBranchAsync(
+            It.IsAny<Tamma.Platforms.Abstractions.Models.CreateBranchRequest>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task ExecuteCore_CreateFailure_ReturnsError_NoFalseSuccess()
     {
-        var gh = NoExistingBranch();
-        gh.Setup(g => g.CreateGitHubBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
-            .ReturnsAsync(IntegrationResult<GitHubBranchResult>.Fail("403 Forbidden"));
+        var client = NoExistingBranch();
+        client.Setup(c => c.CreateBranchAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.CreateBranchRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.Branch>.FromError(
+                new PlatformError.PermissionDenied()));
 
         var outcome = await CreateBranchActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
+            client.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
 
         outcome.Outcome.Should().Be("Error");
         outcome.ErrorCode.Should().Be("permission_denied");
@@ -223,30 +251,34 @@ public class BranchCreationActivityTests
     [Test]
     public async Task ExecuteCore_BaseBranchMissing_ReturnsError_NoCreate()
     {
-        var gh = NoExistingBranch();
-        gh.Setup(g => g.CreateGitHubBranchAsync(It.IsAny<string>(), It.IsAny<string>(), "develop"))
-            .ReturnsAsync(IntegrationResult<GitHubBranchResult>.Fail("base_branch_not_found: develop"));
+        var client = new Mock<IGitPlatformClient>();
+        SetupBranch(client, "adl/42-add-auth", BranchAbsent());
+        SetupBranch(client, "develop", BranchAbsent()); // base branch missing
 
         var outcome = await CreateBranchActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 42, "adl/42-add-auth", "develop", "suffix");
+            client.Object, "o/r", 42, "adl/42-add-auth", "develop", "suffix");
 
         outcome.Outcome.Should().Be("Error");
         outcome.ErrorCode.Should().Be("base_branch_not_found");
+        client.Verify(c => c.CreateBranchAsync(
+            It.IsAny<Tamma.Platforms.Abstractions.Models.CreateBranchRequest>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task ExecuteCore_PostCreateValidationFails_ReturnsError_NoFalseSuccess()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.SetupSequence(g => g.BranchExistsAsync("o/r", "adl/42-add-auth"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(false))   // pre-create
-            .ReturnsAsync(IntegrationResult<bool>.Ok(false));  // post-create: STILL absent
-        gh.Setup(g => g.CreateGitHubBranchAsync("o/r", "adl/42-add-auth", "main"))
-            .ReturnsAsync(IntegrationResult<GitHubBranchResult>.Ok(new GitHubBranchResult
-            { Success = true, BranchName = "adl/42-add-auth", BaseSha = "sha" }));
+        var client = new Mock<IGitPlatformClient>();
+        client.SetupSequence(c => c.GetBranchAsync("o", "r", "adl/42-add-auth", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BranchAbsent())    // pre-create
+            .ReturnsAsync(BranchAbsent());   // post-create: STILL absent
+        SetupBranch(client, "main", BranchOk("main"));
+        client.Setup(c => c.CreateBranchAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.CreateBranchRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BranchOk("adl/42-add-auth"));
 
         var outcome = await CreateBranchActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
+            client.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
 
         outcome.Outcome.Should().Be("Error");
         outcome.ErrorCode.Should().Be("validation_failed");
@@ -255,41 +287,46 @@ public class BranchCreationActivityTests
     [Test]
     public async Task ExecuteCore_InvalidRefName_ReturnsError_NoCreate()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
+        var client = new Mock<IGitPlatformClient>();
 
         var outcome = await CreateBranchActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 42, "-bad..name", "main", "suffix");
+            client.Object, "o/r", 42, "-bad..name", "main", "suffix");
 
         outcome.Outcome.Should().Be("Error");
         outcome.ErrorCode.Should().Be("invalid_ref");
-        gh.Verify(g => g.CreateGitHubBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+        client.Verify(c => c.CreateBranchAsync(
+            It.IsAny<Tamma.Platforms.Abstractions.Models.CreateBranchRequest>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task ExecuteCore_ConflictCheckApiError_ReturnsError_NotSilentCreate()
     {
         // A transient existence-lookup failure must NOT be treated as "absent → create".
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.BranchExistsAsync("o/r", "adl/42-add-auth"))
-            .ReturnsAsync(IntegrationResult<bool>.Fail("503 service unavailable"));
+        var client = new Mock<IGitPlatformClient>();
+        SetupBranch(client, "adl/42-add-auth",
+            PlatformResult<Tamma.Platforms.Abstractions.Models.Branch>.FromError(
+                new PlatformError.ServiceUnavailable()));
 
         var outcome = await CreateBranchActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
+            client.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
 
         outcome.Outcome.Should().Be("Error");
         outcome.ErrorCode.Should().Be("transient");
-        gh.Verify(g => g.CreateGitHubBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+        client.Verify(c => c.CreateBranchAsync(
+            It.IsAny<Tamma.Platforms.Abstractions.Models.CreateBranchRequest>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task ExecuteCore_NeverThrows_OnUnexpectedException()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.BranchExistsAsync(It.IsAny<string>(), It.IsAny<string>()))
+        var client = new Mock<IGitPlatformClient>();
+        client.Setup(c => c.GetBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
         var outcome = await CreateBranchActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
+            client.Object, "o/r", 42, "adl/42-add-auth", "main", "suffix");
 
         outcome.Outcome.Should().Be("Error");
         outcome.ErrorCode.Should().NotBeNullOrEmpty();

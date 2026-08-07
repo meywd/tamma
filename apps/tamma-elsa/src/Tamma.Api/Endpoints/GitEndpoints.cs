@@ -169,5 +169,30 @@ public static class GitEndpoints
         return result.ToHttpResult();
     }
 
+    /// <summary>
+    /// Epic 31 P2 (plan §4) — the READ-ONLY capability probe the engine's
+    /// <c>CheckPlatformCapabilityActivity</c> consults before a
+    /// capability-gated action step. Status mapping mirrors the mediation
+    /// ops: 200 on success, 403 REPO_NOT_AUTHORIZED, 503
+    /// GIT_TOKEN_UNAVAILABLE, otherwise 200 success:false.
+    /// </summary>
+    public static async Task<IResult> GetCapabilities(
+        string owner, string repo,
+        ITenantContext tenantContext, IGitPlatformCapabilityService capabilities, CancellationToken ct)
+    {
+        var result = await capabilities
+            .GetCapabilitiesAsync(tenantContext.TenantId, Repo(owner, repo), ct).ConfigureAwait(false);
+        if (result.Success)
+        {
+            return Results.Ok(result);
+        }
+        return result.FailureCode switch
+        {
+            GitFailureCodes.RepoNotAuthorized => Results.Json(result, statusCode: StatusCodes.Status403Forbidden),
+            GitFailureCodes.TokenUnavailable => Results.Json(result, statusCode: StatusCodes.Status503ServiceUnavailable),
+            _ => Results.Ok(result),
+        };
+    }
+
     private static string Repo(string owner, string repo) => $"{owner}/{repo}";
 }

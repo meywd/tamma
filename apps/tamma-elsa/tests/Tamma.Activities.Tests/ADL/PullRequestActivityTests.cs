@@ -5,6 +5,7 @@ using Moq;
 using NUnit.Framework;
 using Tamma.Activities.ADL;
 using Tamma.Core.Interfaces;
+using Tamma.Platforms.Abstractions;
 
 namespace Tamma.Activities.Tests.ADL;
 
@@ -431,12 +432,28 @@ public class PullRequestActivityTests
     // ExecuteCoreAsync — behavioral (happy / draft+ready / idempotency / failure)
     // ================================================================
 
-    private static Mock<IGitHubIntegrationService> NoExistingPr()
+    // Epic 31 P2 — the core is retyped onto IGitPlatformClient: the idempotency
+    // lookup is ListOpenPullRequestsForBranchAsync, reuse updates via
+    // UpdatePullRequestAsync, create via OpenPullRequestAsync. Coarse error
+    // classes are preserved via the legacy-string projection.
+
+    private static Tamma.Platforms.Abstractions.Models.PullRequest PPr(
+        string number, string url = "u", bool isDraft = false) =>
+        new(number, "t", null, "feature/1", "main",
+            Tamma.Platforms.Abstractions.Models.PullRequestState.Open, isDraft, url, "bot",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+    private static PlatformResult<IReadOnlyList<Tamma.Platforms.Abstractions.Models.PullRequest>> Lookup(
+        params Tamma.Platforms.Abstractions.Models.PullRequest[] prs) =>
+        PlatformResult<IReadOnlyList<Tamma.Platforms.Abstractions.Models.PullRequest>>.FromOk(prs);
+
+    private static Mock<IGitPlatformClient> NoExistingPr()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.GetGitHubOpenPullRequestForBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestRef?>.Ok(null));
-        return gh;
+        var client = new Mock<IGitPlatformClient>();
+        client.Setup(c => c.ListOpenPullRequestsForBranchAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Lookup());
+        return client;
     }
 
     private static CreatePullRequestRequest Req(bool draft = false) => new()
@@ -447,13 +464,14 @@ public class PullRequestActivityTests
     [Test]
     public async Task ExecuteCore_HappyPath_Ready_CreatesPr()
     {
-        var gh = NoExistingPr();
-        gh.Setup(g => g.CreateGitHubPullRequestAsync(It.IsAny<string>(), It.IsAny<CreatePullRequestRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestResult>.Ok(
-                new GitHubPullRequestResult { Success = true, Number = 7, Url = "https://x/pull/7" }));
+        var client = NoExistingPr();
+        client.Setup(c => c.OpenPullRequestAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.FromOk(
+                PPr("7", "https://x/pull/7")));
 
         var outcome = await CreatePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", "feature/1", "main", draft: false, Req());
+            client.Object, "o/r", "feature/1", "main", draft: false, Req());
 
         outcome.Outcome.Should().Be("Created");
         outcome.PrNumber.Should().Be(7);
@@ -464,15 +482,16 @@ public class PullRequestActivityTests
     [Test]
     public async Task ExecuteCore_HappyPath_Draft_ThreadsIsDraftToRequest()
     {
-        var gh = NoExistingPr();
-        CreatePullRequestRequest? captured = null;
-        gh.Setup(g => g.CreateGitHubPullRequestAsync(It.IsAny<string>(), It.IsAny<CreatePullRequestRequest>()))
-            .Callback<string, CreatePullRequestRequest>((_, r) => captured = r)
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestResult>.Ok(
-                new GitHubPullRequestResult { Success = true, Number = 8, Url = "u" }));
+        var client = NoExistingPr();
+        Tamma.Platforms.Abstractions.Models.OpenPullRequestRequest? captured = null;
+        client.Setup(c => c.OpenPullRequestAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<Tamma.Platforms.Abstractions.Models.OpenPullRequestRequest, CancellationToken>((r, _) => captured = r)
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.FromOk(
+                PPr("8", isDraft: true)));
 
         var outcome = await CreatePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", "feature/1", "main", draft: true, Req(draft: true));
+            client.Object, "o/r", "feature/1", "main", draft: true, Req(draft: true));
 
         outcome.Outcome.Should().Be("Created");
         outcome.IsDraft.Should().BeTrue();
@@ -483,33 +502,38 @@ public class PullRequestActivityTests
     [Test]
     public async Task ExecuteCore_ExistingOpenPr_ReusesAndUpdates_NoDoubleOpen()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.GetGitHubOpenPullRequestForBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestRef?>.Ok(
-                new GitHubPullRequestRef { Number = 42, Url = "https://x/pull/42", IsDraft = true }));
-        gh.Setup(g => g.UpdateGitHubPullRequestAsync(It.IsAny<string>(), 42, It.IsAny<CreatePullRequestRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestResult>.Ok(
-                new GitHubPullRequestResult { Success = true, Number = 42, Url = "https://x/pull/42" }));
+        var client = new Mock<IGitPlatformClient>();
+        client.Setup(c => c.ListOpenPullRequestsForBranchAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Lookup(PPr("42", "https://x/pull/42", isDraft: true)));
+        client.Setup(c => c.UpdatePullRequestAsync(
+                It.Is<Tamma.Platforms.Abstractions.Models.UpdatePullRequestRequest>(r => r.PrNumber == "42"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.FromOk(
+                PPr("42", "https://x/pull/42")));
 
         var outcome = await CreatePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", "feature/1", "main", draft: false, Req());
+            client.Object, "o/r", "feature/1", "main", draft: false, Req());
 
         outcome.Outcome.Should().Be("Updated");
         outcome.PrNumber.Should().Be(42);
         outcome.Reused.Should().BeTrue();
         // CRITICAL: a re-run must NOT open a second PR.
-        gh.Verify(g => g.CreateGitHubPullRequestAsync(It.IsAny<string>(), It.IsAny<CreatePullRequestRequest>()), Times.Never);
+        client.Verify(c => c.OpenPullRequestAsync(
+            It.IsAny<Tamma.Platforms.Abstractions.Models.OpenPullRequestRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task ExecuteCore_CreateFailure_ReturnsError_NoFalseSuccess()
     {
-        var gh = NoExistingPr();
-        gh.Setup(g => g.CreateGitHubPullRequestAsync(It.IsAny<string>(), It.IsAny<CreatePullRequestRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestResult>.Fail("403 Forbidden"));
+        var client = NoExistingPr();
+        client.Setup(c => c.OpenPullRequestAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.FromError(
+                new PlatformError.PermissionDenied()));
 
         var outcome = await CreatePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", "feature/1", "main", draft: false, Req());
+            client.Object, "o/r", "feature/1", "main", draft: false, Req());
 
         outcome.Outcome.Should().Be("Error");
         outcome.ErrorCode.Should().Be("permission-denied");
@@ -520,25 +544,27 @@ public class PullRequestActivityTests
     public async Task ExecuteCore_422Race_FallsBackToUpdate()
     {
         // Create returns 422-already-exists (a race), then the lookup finds it.
-        var gh = new Mock<IGitHubIntegrationService>();
+        var client = new Mock<IGitPlatformClient>();
         var lookupCalls = 0;
-        gh.Setup(g => g.GetGitHubOpenPullRequestForBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+        client.Setup(c => c.ListOpenPullRequestsForBranchAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
                 // First lookup: none. Second (post-422): found.
                 lookupCalls++;
-                return lookupCalls == 1
-                    ? IntegrationResult<GitHubPullRequestRef?>.Ok(null)
-                    : IntegrationResult<GitHubPullRequestRef?>.Ok(new GitHubPullRequestRef { Number = 99, Url = "u99" });
+                return lookupCalls == 1 ? Lookup() : Lookup(PPr("99", "u99"));
             });
-        gh.Setup(g => g.CreateGitHubPullRequestAsync(It.IsAny<string>(), It.IsAny<CreatePullRequestRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestResult>.Fail("422 A pull request already exists"));
-        gh.Setup(g => g.UpdateGitHubPullRequestAsync(It.IsAny<string>(), 99, It.IsAny<CreatePullRequestRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestResult>.Ok(
-                new GitHubPullRequestResult { Success = true, Number = 99, Url = "u99" }));
+        client.Setup(c => c.OpenPullRequestAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.FromError(
+                new PlatformError.InvalidRequest("already_exists", "A pull request already exists")));
+        client.Setup(c => c.UpdatePullRequestAsync(
+                It.Is<Tamma.Platforms.Abstractions.Models.UpdatePullRequestRequest>(r => r.PrNumber == "99"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.FromOk(PPr("99", "u99")));
 
         var outcome = await CreatePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", "feature/1", "main", draft: false, Req());
+            client.Object, "o/r", "feature/1", "main", draft: false, Req());
 
         outcome.Outcome.Should().Be("Updated");
         outcome.PrNumber.Should().Be(99);
@@ -548,14 +574,17 @@ public class PullRequestActivityTests
     [Test]
     public async Task ExecuteCore_UpdateFailureOnExisting_ReturnsError()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.GetGitHubOpenPullRequestForBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestRef?>.Ok(new GitHubPullRequestRef { Number = 5, Url = "u5" }));
-        gh.Setup(g => g.UpdateGitHubPullRequestAsync(It.IsAny<string>(), 5, It.IsAny<CreatePullRequestRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestResult>.Fail("429 rate limit"));
+        var client = new Mock<IGitPlatformClient>();
+        client.Setup(c => c.ListOpenPullRequestsForBranchAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Lookup(PPr("5", "u5")));
+        client.Setup(c => c.UpdatePullRequestAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.UpdatePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.FromError(
+                new PlatformError.RateLimited(null)));
 
         var outcome = await CreatePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", "feature/1", "main", draft: false, Req());
+            client.Object, "o/r", "feature/1", "main", draft: false, Req());
 
         outcome.Outcome.Should().Be("Error");
         outcome.ErrorCode.Should().Be("rate-limited");
@@ -564,12 +593,13 @@ public class PullRequestActivityTests
     [Test]
     public async Task ExecuteCore_ServiceThrows_ReturnsError_NeverThrows()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.GetGitHubOpenPullRequestForBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+        var client = new Mock<IGitPlatformClient>();
+        client.Setup(c => c.ListOpenPullRequestsForBranchAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("network down"));
 
         var outcome = await CreatePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", "feature/1", "main", draft: false, Req());
+            client.Object, "o/r", "feature/1", "main", draft: false, Req());
 
         outcome.Outcome.Should().Be("Error", "an exception must become an Error outcome, never a throw or false success");
     }

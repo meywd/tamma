@@ -45,6 +45,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
     private readonly IGitHubSecretsProvisioner _provisioner;
     private readonly IApiKeyRepository _apiKeys;
     private readonly IWebhookSignalRegistry? _webhookSignals;
+    private readonly Tamma.Api.Services.Platforms.IGitHubInstallationBridge? _installationBridge;
     private readonly ILogger<InstallationRouterService> _logger;
 
     /// <summary>
@@ -68,8 +69,10 @@ public sealed class InstallationRouterService : IInstallationRouterService
         ILogger<InstallationRouterService> logger,
         ITaskQueue? taskQueue = null,
         IPlatformQueuedTaskRepository? platformTasks = null,
-        IWebhookSignalRegistry? webhookSignals = null)
+        IWebhookSignalRegistry? webhookSignals = null,
+        Tamma.Api.Services.Platforms.IGitHubInstallationBridge? installationBridge = null)
     {
+        _installationBridge = installationBridge;
         _installations = installations;
         _events = events;
         _tenants = tenants;
@@ -217,6 +220,16 @@ public sealed class InstallationRouterService : IInstallationRouterService
         if (stored.TenantId is not null)
         {
             keyResult = await IssueInstallationKeyAsync(stored, stored.TenantId.Value);
+
+            // Epic 31 P2 (seam 14) — registry unification: an App-linked tenant
+            // ALSO gets a tenant_platform_installations row so the driver plane
+            // (IPlatformResolver) and the BYOK tier can see it. Idempotent;
+            // failure degrades to a logged no-op (never blocks linking).
+            if (_installationBridge is not null)
+            {
+                await _installationBridge.EnsureBridgedAsync(
+                    stored.TenantId.Value, installationId);
+            }
         }
 
         await EmitEventAsync(

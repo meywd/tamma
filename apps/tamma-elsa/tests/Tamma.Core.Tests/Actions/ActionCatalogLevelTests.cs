@@ -287,15 +287,17 @@ public class ActionCatalogLevelTests
         missing.Should().BeEmpty("keys in the table with no catalog dial row");
         extra.Should().BeEmpty("catalog dial rows absent from the table");
         mismatched.Should().BeEmpty("a level moved without updating BOTH the descriptor and this table");
-        actual.Should().HaveCount(177, "177 = 219 catalog rows − 42 machinery (43-17 follow-up: +2 engine-callback keys, ci.workflow.dispatch 30 and llm.task.execute 20; Story 31-13: +11 PR/issue effect keys, all dial rows at 35/40; Story 42-10: +1 effect:secret.read at 90; Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
+        actual.Should().HaveCount(177, "177 = 221 catalog rows − 44 machinery (Epic 31 P2: +2 automation machinery rows on both sides of the subtraction) (43-17 follow-up: +2 engine-callback keys, ci.workflow.dispatch 30 and llm.task.execute 20; Story 31-13: +11 PR/issue effect keys, all dial rows at 35/40; Story 42-10: +1 effect:secret.read at 90; Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
     }
 
     [Test]
     public void MachineryRows_AreOffTheDial()
     {
-        // The 42 machinery rows are excluded from the dial by IsMachinery (43-13);
+        // The machinery rows are excluded from the dial by IsMachinery (43-13);
         // none appears in the level table, and none is a dial row here.
-        ActionCatalog.All.Count(d => d.IsMachinery).Should().Be(42);
+        // 42 → 44 (Epic 31 P2): + the driver-cache invalidator + the
+        // installation-bridge backfill (both automation:*, machinery by class).
+        ActionCatalog.All.Count(d => d.IsMachinery).Should().Be(44);
         ActionCatalog.All.Where(d => d.IsMachinery).Select(d => d.Key.ToWire())
             .Should().OnlyContain(k => !LevelTable.ContainsKey(k));
     }

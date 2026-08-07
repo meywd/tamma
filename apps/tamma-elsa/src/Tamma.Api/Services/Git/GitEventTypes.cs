@@ -121,6 +121,15 @@ public static class GitFailureCodes
 
     /// <summary>The per-tenant git token could not be resolved (fail-closed, AC3/AC6).</summary>
     public const string TokenUnavailable = "GIT_TOKEN_UNAVAILABLE";
+
+    /// <summary>
+    /// Epic 31 P2 (plan §4) — the resolved driver's platform cannot perform the
+    /// requested verb. Surfaced FIRST-CLASS (exact code, lower-case, matching the
+    /// driver contract's <c>PlatformError.InvalidRequest</c> code) so the
+    /// workflow's capability check step / <c>Unsupported</c> safety-net outcome
+    /// can branch on it. Never coarsened into <see cref="PlatformError"/>.
+    /// </summary>
+    public const string CapabilityUnsupported = "capability_unsupported";
 }
 
 /// <summary>The credential-source LABEL surfaced on the audit event + response —

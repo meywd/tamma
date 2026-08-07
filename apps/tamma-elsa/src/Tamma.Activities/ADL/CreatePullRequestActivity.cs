@@ -187,11 +187,14 @@ public class CreatePullRequestActivity : Activity
     /// Pure-ish orchestration core (no Elsa context): idempotency lookup →
     /// create OR update, with the defensive 422-race fall-back. Returns a typed
     /// outcome so the happy / draft+ready / idempotency / failure paths are
-    /// unit-testable against a mocked <see cref="IGitHubIntegrationService"/>.
+    /// unit-testable against a mocked
+    /// <see cref="Tamma.Platforms.Abstractions.IGitPlatformClient"/> (Epic 31 P2
+    /// — retyped from the GitHub-specific client onto the platform abstraction;
+    /// coarse error classes preserved via the legacy-string projection).
     /// NEVER throws — exceptions become an <c>Error</c> outcome (no silent success).
     /// </summary>
     public static async Task<PrCreationOutcome> ExecuteCoreAsync(
-        IGitHubIntegrationService github,
+        Tamma.Platforms.Abstractions.IGitPlatformClient client,
         string repository,
         string headBranch,
         string baseBranch,
@@ -201,46 +204,62 @@ public class CreatePullRequestActivity : Activity
     {
         try
         {
+            var (owner, repoName) = GitRepoName.Split(repository);
+
             // ── Idempotency (AC8): reuse / update an existing open PR for head→base. ──
-            var existing = await github.GetGitHubOpenPullRequestForBranchAsync(repository, headBranch, baseBranch);
-            if (existing.Success && existing.Data is { } open)
+            var lookup = await client.ListOpenPullRequestsForBranchAsync(owner, repoName, headBranch, baseBranch);
+            if (lookup is Tamma.Platforms.Abstractions.PlatformResult<IReadOnlyList<Tamma.Platforms.Abstractions.Models.PullRequest>>.Ok lookupOk
+                && lookupOk.Value.Count > 0)
             {
+                var open = lookupOk.Value[0];
                 logger?.LogInformation(
                     "Existing open PR #{Number} found for {Head}->{Base}; updating instead of re-creating",
                     open.Number, headBranch, baseBranch);
 
-                var updated = await github.UpdateGitHubPullRequestAsync(repository, open.Number, request);
-                if (!updated.Success)
-                    return PrCreationOutcome.Failed(ClassifyError(updated.Error));
-
-                return PrCreationOutcome.Reuse(
-                    updated.Data!.Number ?? open.Number, updated.Data.Url ?? open.Url, open.IsDraft);
+                var reused = await UpdateExistingAsync(client, owner, repoName, open, request, logger);
+                if (reused.Outcome is not null) return reused.Outcome;
+                return PrCreationOutcome.Failed(ClassifyError(reused.Error));
             }
 
             // ── Create ──
-            var result = await github.CreateGitHubPullRequestAsync(repository, request);
-            if (!result.Success)
+            var result = await client.OpenPullRequestAsync(
+                new Tamma.Platforms.Abstractions.Models.OpenPullRequestRequest(
+                    Owner: owner,
+                    RepoName: repoName,
+                    Title: request.Title,
+                    SourceBranch: request.Head,
+                    TargetBranch: request.Base,
+                    Body: request.Body,
+                    IsDraft: request.IsDraft));
+            if (result is not Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok createdOk)
             {
+                var error = DescribeFailure(result);
+
                 // Defensive: a 422 "already exists" race → fall back to the reuse path.
-                if (IsAlreadyExistsError(result.Error))
+                if (IsAlreadyExistsError(error))
                 {
-                    var retry = await github.GetGitHubOpenPullRequestForBranchAsync(repository, headBranch, baseBranch);
-                    if (retry.Success && retry.Data is { } raced)
+                    var retry = await client.ListOpenPullRequestsForBranchAsync(owner, repoName, headBranch, baseBranch);
+                    if (retry is Tamma.Platforms.Abstractions.PlatformResult<IReadOnlyList<Tamma.Platforms.Abstractions.Models.PullRequest>>.Ok retryOk
+                        && retryOk.Value.Count > 0)
                     {
-                        var updated = await github.UpdateGitHubPullRequestAsync(repository, raced.Number, request);
-                        if (updated.Success)
-                            return PrCreationOutcome.Reuse(
-                                updated.Data!.Number ?? raced.Number, updated.Data.Url ?? raced.Url, raced.IsDraft);
+                        var reused = await UpdateExistingAsync(client, owner, repoName, retryOk.Value[0], request, logger);
+                        if (reused.Outcome is not null) return reused.Outcome;
                     }
                 }
 
-                logger?.LogError("Failed to create PR: {Error}", result.Error);
-                return PrCreationOutcome.Failed(ClassifyError(result.Error));
+                logger?.LogError("Failed to create PR: {Error}", error);
+                return PrCreationOutcome.Failed(ClassifyError(error));
             }
 
+            // Best-effort post-create metadata (labels + reviewers) — the live
+            // path's TryAdd*/TryRequest* posture: a failure here MUST NOT fail
+            // PR creation (Story 2.8 AC3 — degrade gracefully).
+            await TryApplyMetadataAsync(client, owner, repoName, createdOk.Value.Number, request, logger);
+
             logger?.LogInformation("Created {Kind} PR #{Number}",
-                draft ? "draft" : "ready", result.Data!.Number);
-            return PrCreationOutcome.Create(result.Data.Number ?? 0, result.Data.Url, draft);
+                draft ? "draft" : "ready", createdOk.Value.Number);
+            return PrCreationOutcome.Create(
+                ParsePrNumber(createdOk.Value.Number), createdOk.Value.HtmlUrl, draft);
         }
         catch (Exception ex)
         {
@@ -248,6 +267,87 @@ public class CreatePullRequestActivity : Activity
             return PrCreationOutcome.Failed(ClassifyError(ex.Message));
         }
     }
+
+    /// <summary>Update the existing PR's title/body + best-effort metadata —
+    /// the reuse ("Updated") path. Null outcome = the update failed.</summary>
+    private static async Task<(PrCreationOutcome? Outcome, string? Error)> UpdateExistingAsync(
+        Tamma.Platforms.Abstractions.IGitPlatformClient client,
+        string owner,
+        string repoName,
+        Tamma.Platforms.Abstractions.Models.PullRequest open,
+        CreatePullRequestRequest request,
+        ILogger? logger)
+    {
+        var updated = await client.UpdatePullRequestAsync(
+            new Tamma.Platforms.Abstractions.Models.UpdatePullRequestRequest(
+                owner, repoName, open.Number, request.Title, request.Body));
+        if (updated is not Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok updatedOk)
+        {
+            return (null, DescribeFailure(updated));
+        }
+
+        await TryApplyMetadataAsync(client, owner, repoName, open.Number, request, logger);
+
+        return (PrCreationOutcome.Reuse(
+            ParsePrNumber(updatedOk.Value.Number),
+            string.IsNullOrEmpty(updatedOk.Value.HtmlUrl) ? open.HtmlUrl : updatedOk.Value.HtmlUrl,
+            open.IsDraft), null);
+    }
+
+    /// <summary>Best-effort labels + reviewers (never fails the PR step).</summary>
+    private static async Task TryApplyMetadataAsync(
+        Tamma.Platforms.Abstractions.IGitPlatformClient client,
+        string owner,
+        string repoName,
+        string prNumber,
+        CreatePullRequestRequest request,
+        ILogger? logger)
+    {
+        if (request.Labels is { Count: > 0 })
+        {
+            try
+            {
+                var labels = await client.AddPullRequestLabelsAsync(
+                    new Tamma.Platforms.Abstractions.Models.AddPullRequestLabelsRequest(
+                        owner, repoName, prNumber, request.Labels));
+                if (labels is not Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok)
+                    logger?.LogWarning("Label assignment for PR #{Number} failed (continuing)", prNumber);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Failed to add labels to PR #{Number} (continuing)", prNumber);
+            }
+        }
+
+        if (request.Reviewers is { Count: > 0 })
+        {
+            try
+            {
+                var reviewers = await client.RequestReviewersAsync(
+                    new Tamma.Platforms.Abstractions.Models.RequestReviewersRequest(
+                        owner, repoName, prNumber, request.Reviewers));
+                if (reviewers is not Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok)
+                    logger?.LogWarning("Reviewer request for PR #{Number} failed (continuing)", prNumber);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Failed to request reviewers on PR #{Number} (continuing)", prNumber);
+            }
+        }
+    }
+
+    private static string DescribeFailure<T>(Tamma.Platforms.Abstractions.PlatformResult<T> result) =>
+        result switch
+        {
+            Tamma.Platforms.Abstractions.PlatformResult<T>.Failed f =>
+                Tamma.Platforms.Abstractions.PlatformErrorText.ToLegacyString(f.Error),
+            Tamma.Platforms.Abstractions.PlatformResult<T>.ServiceUnavailable =>
+                "503: platform unavailable",
+            _ => "unknown platform result",
+        };
+
+    private static int ParsePrNumber(string number) =>
+        int.TryParse(number, out var n) ? n : 0;
 
     private void SetSuccessOutputs(ActivityExecutionContext context, int number, string? url, bool isDraft, List<string> labels)
     {

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
 using Tamma.Activities.ADL;
-using Tamma.Core.Interfaces;
+using Tamma.Platforms.Abstractions;
 
 namespace Tamma.Activities.Tests.ADL;
 
@@ -78,16 +78,36 @@ public class MergePullRequestActivityTests
     }
 
     // ================================================================
-    // ExecuteCoreAsync helpers
+    // ExecuteCoreAsync helpers — Epic 31 P2: the core is retyped onto
+    // IGitPlatformClient (pre-merge read = GetPullRequestAsync with the new
+    // Mergeable/MergeCommitSha read-backs; merge = MergePullRequestAsync;
+    // close = CloseIssueAsync; delete = DeleteBranchAsync). Coarse error
+    // classes are preserved via the legacy-string projection.
     // ================================================================
 
-    private static Mock<IGitHubIntegrationService> OpenMergeablePr()
+    private static Tamma.Platforms.Abstractions.Models.PullRequest MPr(
+        Tamma.Platforms.Abstractions.Models.PullRequestState state,
+        bool? mergeable = null,
+        string? mergeableState = null,
+        string? mergeSha = null) =>
+        new("7", "t", null, "b", "main", state, false, "u", "bot",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        { Mergeable = mergeable, MergeableState = mergeableState, MergeCommitSha = mergeSha };
+
+    private static PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest> PrOk(
+        Tamma.Platforms.Abstractions.Models.PullRequest pr) =>
+        PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.FromOk(pr);
+
+    private static Tamma.Platforms.Abstractions.Models.Issue ClosedIssue() =>
+        new("12", "t", null, Tamma.Platforms.Abstractions.Models.IssueState.Closed, "u", Array.Empty<string>());
+
+    private static Mock<IGitPlatformClient> OpenMergeablePr()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.GetGitHubPullRequestAsync("o/r", 7))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(new GitHubPullRequestDetail
-            { Number = 7, State = "open", Merged = false, Mergeable = true, MergeableState = "clean" }));
-        return gh;
+        var client = new Mock<IGitPlatformClient>();
+        client.Setup(c => c.GetPullRequestAsync("o", "r", "7", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrOk(MPr(Tamma.Platforms.Abstractions.Models.PullRequestState.Open,
+                mergeable: true, mergeableState: "clean")));
+        return client;
     }
 
     // ================================================================
@@ -97,17 +117,19 @@ public class MergePullRequestActivityTests
     [Test]
     public async Task ExecuteCore_HappyPath_Merges_ClosesIssue_DeletesBranch()
     {
-        var gh = OpenMergeablePr();
-        gh.Setup(g => g.MergeGitHubPullRequestAsync("o/r", 7, "squash"))
-            .ReturnsAsync(IntegrationResult<GitHubMergeResult>.Ok(new GitHubMergeResult
-            { Success = true, MergeSha = "merge-sha-1" }));
-        gh.Setup(g => g.CloseGitHubIssueAsync("o/r", 12, It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
-        gh.Setup(g => g.DeleteGitHubBranchAsync("o/r", "adl/12-x"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        var client = OpenMergeablePr();
+        client.Setup(c => c.MergePullRequestAsync(
+                It.Is<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(r =>
+                    r.Method == Tamma.Platforms.Abstractions.Models.MergeMethod.Squash && r.PrNumber == "7"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrOk(MPr(Tamma.Platforms.Abstractions.Models.PullRequestState.Merged, mergeSha: "merge-sha-1")));
+        client.Setup(c => c.CloseIssueAsync("o", "r", "12", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.Issue>.FromOk(ClosedIssue()));
+        client.Setup(c => c.DeleteBranchAsync("o", "r", "adl/12-x", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<bool>.FromOk(true));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "adl/12-x", "squash", autoDeleteBranch: true, closeIssue: true);
+            client.Object, "o/r", 7, 12, "adl/12-x", "squash", autoDeleteBranch: true, closeIssue: true);
 
         outcome.Outcome.Should().Be("Merged");
         outcome.MergeSucceeded.Should().BeTrue();
@@ -121,25 +143,29 @@ public class MergePullRequestActivityTests
     [Test]
     public async Task ExecuteCore_HappyPath_PassesConfiguredStrategy()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.GetGitHubPullRequestAsync("o/r", 7))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(new GitHubPullRequestDetail
-            { Number = 7, State = "open", Merged = false, Mergeable = true }));
-        gh.Setup(g => g.MergeGitHubPullRequestAsync("o/r", 7, "rebase"))
-            .ReturnsAsync(IntegrationResult<GitHubMergeResult>.Ok(new GitHubMergeResult
-            { Success = true, MergeSha = "sha" }));
-        gh.Setup(g => g.CloseGitHubIssueAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
-        gh.Setup(g => g.DeleteGitHubBranchAsync(It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        var client = OpenMergeablePr();
+        client.Setup(c => c.MergePullRequestAsync(
+                It.Is<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(r =>
+                    r.Method == Tamma.Platforms.Abstractions.Models.MergeMethod.Rebase),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrOk(MPr(Tamma.Platforms.Abstractions.Models.PullRequestState.Merged, mergeSha: "sha")));
+        client.Setup(c => c.CloseIssueAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.Issue>.FromOk(ClosedIssue()));
+        client.Setup(c => c.DeleteBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<bool>.FromOk(true));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "rebase", true, true);
+            client.Object, "o/r", 7, 12, "b", "rebase", true, true);
 
         outcome.Outcome.Should().Be("Merged");
-        gh.Verify(g => g.MergeGitHubPullRequestAsync("o/r", 7, "rebase"), Times.Once);
-        // The squash-only overload must NOT be used (strategy was honoured).
-        gh.Verify(g => g.MergeGitHubPullRequestAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        // The configured strategy is honoured: exactly one merge call, rebase.
+        client.Verify(c => c.MergePullRequestAsync(
+            It.Is<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(r =>
+                r.Method == Tamma.Platforms.Abstractions.Models.MergeMethod.Rebase),
+            It.IsAny<CancellationToken>()), Times.Once);
+        client.Verify(c => c.MergePullRequestAsync(
+            It.IsAny<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ================================================================
@@ -150,48 +176,53 @@ public class MergePullRequestActivityTests
     [Test]
     public async Task ExecuteCore_MergeReturnsFailure_ReturnsError_NoFalseSuccess()
     {
-        var gh = OpenMergeablePr();
-        gh.Setup(g => g.MergeGitHubPullRequestAsync("o/r", 7, "squash"))
-            .ReturnsAsync(IntegrationResult<GitHubMergeResult>.Fail("409: merge conflict"));
+        var client = OpenMergeablePr();
+        client.Setup(c => c.MergePullRequestAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.FromError(
+                new PlatformError.InvalidRequest("merge_conflict", "merge conflict")));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "squash", true, true);
+            client.Object, "o/r", 7, 12, "b", "squash", true, true);
 
         outcome.Outcome.Should().Be("Error");
         outcome.MergeSucceeded.Should().BeFalse();
         outcome.FailureCode.Should().Be("merge_conflict");
         outcome.MergeSha.Should().BeNullOrEmpty();
         // A failed merge must NOT close the issue or delete the branch.
-        gh.Verify(g => g.CloseGitHubIssueAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
-        gh.Verify(g => g.DeleteGitHubBranchAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        client.Verify(c => c.CloseIssueAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        client.Verify(c => c.DeleteBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task ExecuteCore_ConfirmedConflict_FailsBeforeMerge_NoBlindMerge()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.GetGitHubPullRequestAsync("o/r", 7))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(new GitHubPullRequestDetail
-            { Number = 7, State = "open", Merged = false, Mergeable = false, MergeableState = "dirty" }));
+        var client = new Mock<IGitPlatformClient>();
+        client.Setup(c => c.GetPullRequestAsync("o", "r", "7", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrOk(MPr(Tamma.Platforms.Abstractions.Models.PullRequestState.Open,
+                mergeable: false, mergeableState: "dirty")));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "squash", true, true);
+            client.Object, "o/r", 7, 12, "b", "squash", true, true);
 
         outcome.Outcome.Should().Be("Error");
         outcome.FailureCode.Should().Be("merge_conflict");
         // mergeable==false must short-circuit — never attempt a doomed merge.
-        gh.Verify(g => g.MergeGitHubPullRequestAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        client.Verify(c => c.MergePullRequestAsync(
+            It.IsAny<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task ExecuteCore_PermissionDenied_ReturnsError()
     {
-        var gh = OpenMergeablePr();
-        gh.Setup(g => g.MergeGitHubPullRequestAsync("o/r", 7, "squash"))
-            .ReturnsAsync(IntegrationResult<GitHubMergeResult>.Fail("403 Forbidden"));
+        var client = OpenMergeablePr();
+        client.Setup(c => c.MergePullRequestAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.FromError(
+                new PlatformError.PermissionDenied()));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "squash", true, true);
+            client.Object, "o/r", 7, 12, "b", "squash", true, true);
 
         outcome.Outcome.Should().Be("Error");
         outcome.FailureCode.Should().Be("permission_denied");
@@ -200,44 +231,46 @@ public class MergePullRequestActivityTests
     [Test]
     public async Task ExecuteCore_ClosedUnmergedPr_ReturnsError_NotMergeable()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.GetGitHubPullRequestAsync("o/r", 7))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(new GitHubPullRequestDetail
-            { Number = 7, State = "closed", Merged = false }));
+        var client = new Mock<IGitPlatformClient>();
+        client.Setup(c => c.GetPullRequestAsync("o", "r", "7", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrOk(MPr(Tamma.Platforms.Abstractions.Models.PullRequestState.Closed)));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "squash", true, true);
+            client.Object, "o/r", 7, 12, "b", "squash", true, true);
 
         outcome.Outcome.Should().Be("Error");
         outcome.FailureCode.Should().Be("not_mergeable");
-        gh.Verify(g => g.MergeGitHubPullRequestAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        client.Verify(c => c.MergePullRequestAsync(
+            It.IsAny<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task ExecuteCore_PreMergeReadFails_ReturnsError_NoBlindMerge()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.GetGitHubPullRequestAsync("o/r", 7))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Fail("503 service unavailable"));
+        var client = new Mock<IGitPlatformClient>();
+        client.Setup(c => c.GetPullRequestAsync("o", "r", "7", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.FromError(
+                new PlatformError.ServiceUnavailable()));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "squash", true, true);
+            client.Object, "o/r", 7, 12, "b", "squash", true, true);
 
         outcome.Outcome.Should().Be("Error");
         outcome.FailureCode.Should().Be("api_error");
-        gh.Verify(g => g.MergeGitHubPullRequestAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        client.Verify(c => c.MergePullRequestAsync(
+            It.IsAny<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Test]
     public async Task ExecuteCore_MergeSuccessButNoSha_TreatedAsFailure()
     {
-        var gh = OpenMergeablePr();
-        gh.Setup(g => g.MergeGitHubPullRequestAsync("o/r", 7, "squash"))
-            .ReturnsAsync(IntegrationResult<GitHubMergeResult>.Ok(new GitHubMergeResult
-            { Success = true, MergeSha = "" }));
+        var client = OpenMergeablePr();
+        client.Setup(c => c.MergePullRequestAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrOk(MPr(Tamma.Platforms.Abstractions.Models.PullRequestState.Merged, mergeSha: "")));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "squash", true, true);
+            client.Object, "o/r", 7, 12, "b", "squash", true, true);
 
         outcome.Outcome.Should().Be("Error");
         outcome.FailureCode.Should().Be("api_error");
@@ -246,12 +279,12 @@ public class MergePullRequestActivityTests
     [Test]
     public async Task ExecuteCore_NeverThrows_OnUnexpectedException()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.GetGitHubPullRequestAsync(It.IsAny<string>(), It.IsAny<int>()))
+        var client = new Mock<IGitPlatformClient>();
+        client.Setup(c => c.GetPullRequestAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "squash", true, true);
+            client.Object, "o/r", 7, 12, "b", "squash", true, true);
 
         outcome.Outcome.Should().Be("Error");
         outcome.FailureCode.Should().Be("api_error");
@@ -265,23 +298,23 @@ public class MergePullRequestActivityTests
     [Test]
     public async Task ExecuteCore_AlreadyMerged_ReturnsSuccess_NoReMerge()
     {
-        var gh = new Mock<IGitHubIntegrationService>();
-        gh.Setup(g => g.GetGitHubPullRequestAsync("o/r", 7))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(new GitHubPullRequestDetail
-            { Number = 7, State = "closed", Merged = true, MergeCommitSha = "existing-sha" }));
-        gh.Setup(g => g.CloseGitHubIssueAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
-        gh.Setup(g => g.DeleteGitHubBranchAsync(It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        var client = new Mock<IGitPlatformClient>();
+        client.Setup(c => c.GetPullRequestAsync("o", "r", "7", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrOk(MPr(Tamma.Platforms.Abstractions.Models.PullRequestState.Merged, mergeSha: "existing-sha")));
+        client.Setup(c => c.CloseIssueAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.Issue>.FromOk(ClosedIssue()));
+        client.Setup(c => c.DeleteBranchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<bool>.FromOk(true));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "squash", true, true);
+            client.Object, "o/r", 7, 12, "b", "squash", true, true);
 
         outcome.Outcome.Should().Be("Merged");
         outcome.AlreadyMerged.Should().BeTrue();
         outcome.MergeSha.Should().Be("existing-sha");
         // Must NOT re-attempt the merge (that 405s on a merged PR).
-        gh.Verify(g => g.MergeGitHubPullRequestAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        client.Verify(c => c.MergePullRequestAsync(
+            It.IsAny<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ================================================================
@@ -291,17 +324,18 @@ public class MergePullRequestActivityTests
     [Test]
     public async Task ExecuteCore_MergeOk_IssueCloseFails_ReturnsMergedWithWarnings()
     {
-        var gh = OpenMergeablePr();
-        gh.Setup(g => g.MergeGitHubPullRequestAsync("o/r", 7, "squash"))
-            .ReturnsAsync(IntegrationResult<GitHubMergeResult>.Ok(new GitHubMergeResult
-            { Success = true, MergeSha = "sha" }));
-        gh.Setup(g => g.CloseGitHubIssueAsync("o/r", 12, It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<bool>.Fail("404 not found"));
-        gh.Setup(g => g.DeleteGitHubBranchAsync("o/r", "b"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        var client = OpenMergeablePr();
+        client.Setup(c => c.MergePullRequestAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrOk(MPr(Tamma.Platforms.Abstractions.Models.PullRequestState.Merged, mergeSha: "sha")));
+        client.Setup(c => c.CloseIssueAsync("o", "r", "12", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.Issue>.FromError(
+                new PlatformError.NotFound()));
+        client.Setup(c => c.DeleteBranchAsync("o", "r", "b", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<bool>.FromOk(true));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "squash", true, true);
+            client.Object, "o/r", 7, 12, "b", "squash", true, true);
 
         outcome.Outcome.Should().Be("MergedWithWarnings");
         outcome.MergeSucceeded.Should().BeTrue("the merge stands even though a post-merge action failed");
@@ -314,17 +348,18 @@ public class MergePullRequestActivityTests
     [Test]
     public async Task ExecuteCore_MergeOk_BranchDeleteFails_ReturnsMergedWithWarnings_StillSuccess()
     {
-        var gh = OpenMergeablePr();
-        gh.Setup(g => g.MergeGitHubPullRequestAsync("o/r", 7, "squash"))
-            .ReturnsAsync(IntegrationResult<GitHubMergeResult>.Ok(new GitHubMergeResult
-            { Success = true, MergeSha = "sha" }));
-        gh.Setup(g => g.CloseGitHubIssueAsync("o/r", 12, It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
-        gh.Setup(g => g.DeleteGitHubBranchAsync("o/r", "b"))
-            .ReturnsAsync(IntegrationResult<bool>.Fail("422 protected"));
+        var client = OpenMergeablePr();
+        client.Setup(c => c.MergePullRequestAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrOk(MPr(Tamma.Platforms.Abstractions.Models.PullRequestState.Merged, mergeSha: "sha")));
+        client.Setup(c => c.CloseIssueAsync("o", "r", "12", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<Tamma.Platforms.Abstractions.Models.Issue>.FromOk(ClosedIssue()));
+        client.Setup(c => c.DeleteBranchAsync("o", "r", "b", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<bool>.FromError(
+                new PlatformError.InvalidRequest("validation_failed", "protected")));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "squash", true, true);
+            client.Object, "o/r", 7, 12, "b", "squash", true, true);
 
         outcome.Outcome.Should().Be("MergedWithWarnings");
         outcome.MergeSucceeded.Should().BeTrue("a failed branch-delete is a warning, not a merge failure");
@@ -336,19 +371,19 @@ public class MergePullRequestActivityTests
     [Test]
     public async Task ExecuteCore_CloseDisabled_DoesNotCallClose_StillClean()
     {
-        var gh = OpenMergeablePr();
-        gh.Setup(g => g.MergeGitHubPullRequestAsync("o/r", 7, "squash"))
-            .ReturnsAsync(IntegrationResult<GitHubMergeResult>.Ok(new GitHubMergeResult
-            { Success = true, MergeSha = "sha" }));
-        gh.Setup(g => g.DeleteGitHubBranchAsync("o/r", "b"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        var client = OpenMergeablePr();
+        client.Setup(c => c.MergePullRequestAsync(
+                It.IsAny<Tamma.Platforms.Abstractions.Models.MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrOk(MPr(Tamma.Platforms.Abstractions.Models.PullRequestState.Merged, mergeSha: "sha")));
+        client.Setup(c => c.DeleteBranchAsync("o", "r", "b", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<bool>.FromOk(true));
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            gh.Object, "o/r", 7, 12, "b", "squash", autoDeleteBranch: true, closeIssue: false);
+            client.Object, "o/r", 7, 12, "b", "squash", autoDeleteBranch: true, closeIssue: false);
 
         outcome.Outcome.Should().Be("Merged", "skipping a disabled close is not a warning");
         outcome.IssueClosed.Should().BeFalse();
-        gh.Verify(g => g.CloseGitHubIssueAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        client.Verify(c => c.CloseIssueAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ================================================================

@@ -148,9 +148,80 @@ public sealed class GitHubPlatformClient : IGitPlatformClient
             Protected: false));
     }
 
+    /// <inheritdoc />
+    public async Task<PlatformResult<Branch>> GetBranchAsync(
+        string owner, string repoName, string branchName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(branchName);
+
+        // GET /repos/{o}/{r}/branches/{branch} — the live path's
+        // BranchExistsAsync probe (404 = absent).
+        var path = $"/repos/{Encode(owner)}/{Encode(repoName)}/branches/{EncodePath(branchName)}";
+        var result = await _http.GetJsonAsync<GitHubBranchDto>(path, ct).ConfigureAwait(false);
+        return result.Map(MapBranch);
+    }
+
+    /// <inheritdoc />
+    public Task<PlatformResult<bool>> DeleteBranchAsync(
+        string owner, string repoName, string branchName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(branchName);
+
+        // DELETE /repos/{o}/{r}/git/refs/heads/{branch} → 204 (the live
+        // DeleteGitHubBranchAsync shape).
+        var path = $"/repos/{Encode(owner)}/{Encode(repoName)}/git/refs/heads/{EncodePath(branchName)}";
+        return _http.SendNoContentAsync(HttpMethod.Delete, path, body: null, ct);
+    }
+
     // ================================================================
     // Pull requests
     // ================================================================
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<IReadOnlyList<PullRequest>>> ListOpenPullRequestsForBranchAsync(
+        string owner, string repoName, string sourceBranch, string targetBranch,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceBranch);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetBranch);
+
+        // The live GetGitHubOpenPullRequestForBranchAsync lookup — head
+        // filter wants owner:branch.
+        var headFilter = $"{owner}:{sourceBranch}";
+        var path = $"/repos/{Encode(owner)}/{Encode(repoName)}/pulls" +
+                   $"?state=open&head={Encode(headFilter)}&base={Encode(targetBranch)}&per_page=10";
+        var result = await _http
+            .GetJsonAsync<List<GitHubPullRequestDto>>(path, ct)
+            .ConfigureAwait(false);
+        return result.Map(list =>
+        {
+            IReadOnlyList<PullRequest> prs = list.Select(MapPullRequest).ToList();
+            return prs;
+        });
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<PullRequest>> UpdatePullRequestAsync(
+        UpdatePullRequestRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var body = new Dictionary<string, object?>();
+        if (request.Title is not null) body["title"] = request.Title;
+        if (request.Body is not null) body["body"] = request.Body;
+
+        var result = await _http
+            .PatchJsonAsync<GitHubPullRequestDto>(
+                PullPath(request.Owner, request.RepoName, request.PrNumber), body, ct)
+            .ConfigureAwait(false);
+        return result.Map(MapPullRequest);
+    }
 
     /// <inheritdoc />
     public async Task<PlatformResult<PullRequest>> OpenPullRequestAsync(
@@ -256,7 +327,7 @@ public sealed class GitHubPlatformClient : IGitPlatformClient
             commit_id = request.CommitSha,
             path = request.Path,
             line = request.Line,
-            side = "RIGHT",
+            side = string.IsNullOrWhiteSpace(request.Side) ? "RIGHT" : request.Side,
         };
         var result = await _http.PostJsonAsync<GitHubCommentDto>(path, body, ct).ConfigureAwait(false);
         return result.Map(MapIssueComment);
@@ -870,7 +941,14 @@ public sealed class GitHubPlatformClient : IGitPlatformClient
             HtmlUrl: dto.HtmlUrl ?? string.Empty,
             AuthorLogin: dto.User?.Login ?? "unknown",
             CreatedAt: dto.CreatedAt,
-            UpdatedAt: dto.UpdatedAt);
+            UpdatedAt: dto.UpdatedAt)
+        {
+            // Epic 31 P2 — merge read-backs consumed by the retyped
+            // merge core (idempotency + confirmed-conflict gate).
+            MergeCommitSha = dto.MergeCommitSha,
+            Mergeable = dto.Mergeable,
+            MergeableState = dto.MergeableState,
+        };
     }
 
     internal static PrFile MapPrFile(GitHubPrFileDto dto)

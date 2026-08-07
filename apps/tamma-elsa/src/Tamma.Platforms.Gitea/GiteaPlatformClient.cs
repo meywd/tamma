@@ -127,6 +127,81 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
     }
 
     /// <inheritdoc />
+    public async Task<PlatformResult<Branch>> GetBranchAsync(
+        string owner, string repoName, string branchName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(branchName);
+
+        // GET /repos/{o}/{r}/branches/{branch} — 404 = absent.
+        var path = $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}/branches/{EncodePath(branchName)}";
+        var result = await _http.GetJsonAsync<GiteaBranchDto>(path, ct).ConfigureAwait(false);
+        return result.Map(MapBranch);
+    }
+
+    /// <inheritdoc />
+    public Task<PlatformResult<bool>> DeleteBranchAsync(
+        string owner, string repoName, string branchName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(branchName);
+
+        // DELETE /repos/{o}/{r}/branches/{branch} → 204.
+        var path = $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}/branches/{EncodePath(branchName)}";
+        return _http.DeleteNoContentAsync(path, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<IReadOnlyList<PullRequest>>> ListOpenPullRequestsForBranchAsync(
+        string owner, string repoName, string sourceBranch, string targetBranch,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceBranch);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetBranch);
+
+        // Gitea has no head/base filter on the list endpoint — list open
+        // PRs (first page) and filter client-side, the same shape the
+        // idempotent-open lookup uses.
+        var path = $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}" +
+                   $"/pulls?state=open&page=1&limit={PageSize}";
+        var result = await _http
+            .GetJsonAsync<List<GiteaPullRequestDto>>(path, ct)
+            .ConfigureAwait(false);
+        return result.Map(list =>
+        {
+            IReadOnlyList<PullRequest> prs = list
+                .Where(dto =>
+                    string.Equals(dto.Head?.Ref, sourceBranch, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(dto.Base?.Ref, targetBranch, StringComparison.OrdinalIgnoreCase))
+                .Select(MapPullRequest)
+                .ToList();
+            return prs;
+        });
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<PullRequest>> UpdatePullRequestAsync(
+        UpdatePullRequestRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var body = new Dictionary<string, object?>();
+        if (request.Title is not null) body["title"] = request.Title;
+        if (request.Body is not null) body["body"] = request.Body;
+
+        var path = $"/api/v1/repos/{Encode(request.Owner)}/{Encode(request.RepoName)}" +
+                   $"/pulls/{Encode(request.PrNumber)}";
+        var result = await _http
+            .PatchJsonAsync<GiteaPullRequestDto>(path, body, ct)
+            .ConfigureAwait(false);
+        return result.Map(MapPullRequest);
+    }
+
+    /// <inheritdoc />
     public async Task<PlatformResult<PullRequest>> OpenPullRequestAsync(
         OpenPullRequestRequest request, CancellationToken ct = default)
     {

@@ -227,10 +227,12 @@ public class MergePullRequestActivity : TammaOutcomeActivity
     /// a merge that did not happen is ALWAYS an Error (never a fabricated SHA).
     /// Returns a typed outcome so happy / idempotency / conflict / permission /
     /// partial paths are unit-testable against a mocked
-    /// <see cref="IGitHubIntegrationService"/>.
+    /// <see cref="Tamma.Platforms.Abstractions.IGitPlatformClient"/> (Epic 31 P2
+    /// — retyped from the GitHub-specific client onto the platform abstraction;
+    /// coarse error classes preserved via the legacy-string projection).
     /// </summary>
     public static async Task<MergeOutcome> ExecuteCoreAsync(
-        IGitHubIntegrationService github,
+        Tamma.Platforms.Abstractions.IGitPlatformClient client,
         string repository,
         int prNumber,
         int issueNumber,
@@ -242,32 +244,36 @@ public class MergePullRequestActivity : TammaOutcomeActivity
     {
         try
         {
+            var (owner, repoName) = GitRepoName.Split(repository);
+            var prNumberText = prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
             // ── 1. Pre-merge read: idempotency + confirmed-conflict gate ──
-            var detail = await github.GetGitHubPullRequestAsync(repository, prNumber);
-            if (!detail.Success)
+            var detail = await client.GetPullRequestAsync(owner, repoName, prNumberText);
+            if (detail is not Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok detailOk)
             {
                 // A transient read failure must NOT be mistaken for "go ahead and
                 // merge blind". Classify and fail explicit (the merge gate already
                 // gave human approval; a read outage is a real failure here).
-                var code = ClassifyError(detail.Error);
-                logger?.LogError("Pre-merge PR #{Pr} read failed: {Error}", prNumber, detail.Error);
-                return MergeOutcome.Failed(code, detail.Error ?? "pre-merge PR read failed");
+                var error = DescribeFailure(detail);
+                var code = ClassifyError(error);
+                logger?.LogError("Pre-merge PR #{Pr} read failed: {Error}", prNumber, error);
+                return MergeOutcome.Failed(code, error);
             }
 
-            var pr = detail.Data;
-            if (pr is not null && pr.Merged)
+            var pr = detailOk.Value;
+            if (pr.State == Tamma.Platforms.Abstractions.Models.PullRequestState.Merged)
             {
                 // Idempotent re-dispatch / webhook double-fire — already merged.
                 // Reuse the existing merge SHA, run the post-merge cleanup, treat
                 // as success. Never re-PUT /merge (that 405s on a merged PR).
                 logger?.LogInformation("PR #{Pr} already merged ({Sha}) — idempotent path", prNumber, pr.MergeCommitSha ?? "?");
                 return await CompletePostMergeAsync(
-                    github, repository, issueNumber, branchName,
+                    client, owner, repoName, issueNumber, branchName,
                     pr.MergeCommitSha ?? "", alreadyMerged: true,
                     autoDeleteBranch, closeIssue, logger);
             }
 
-            if (pr is not null && string.Equals(pr.State, "closed", StringComparison.OrdinalIgnoreCase))
+            if (pr.State == Tamma.Platforms.Abstractions.Models.PullRequestState.Closed)
             {
                 // Closed but NOT merged → there is nothing to merge; failing
                 // explicit beats a blind merge that 405s.
@@ -275,9 +281,9 @@ public class MergePullRequestActivity : TammaOutcomeActivity
                 return MergeOutcome.Failed("not_mergeable", $"PR #{prNumber} is closed but not merged");
             }
 
-            if (pr is not null && pr.Mergeable == false)
+            if (pr.Mergeable == false)
             {
-                // GitHub has CONFIRMED a conflict (mergeable == false). Fail
+                // The platform has CONFIRMED a conflict (mergeable == false). Fail
                 // explicit with the conflict reason — never attempt a doomed
                 // merge. (Mergeable == null = not yet computed → fall through; the
                 // merge call is then the authoritative gate.)
@@ -289,15 +295,18 @@ public class MergePullRequestActivity : TammaOutcomeActivity
             }
 
             // ── 2. Merge (configurable strategy) ──
-            var mergeResult = await github.MergeGitHubPullRequestAsync(repository, prNumber, strategy);
-            if (!mergeResult.Success)
+            var mergeResult = await client.MergePullRequestAsync(
+                new Tamma.Platforms.Abstractions.Models.MergePullRequestRequest(
+                    owner, repoName, prNumberText, ToMergeMethod(strategy)));
+            if (mergeResult is not Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok mergedOk)
             {
-                var code = ClassifyError(mergeResult.Error);
-                logger?.LogError("Failed to merge PR #{Pr}: {Error}", prNumber, mergeResult.Error);
-                return MergeOutcome.Failed(code, mergeResult.Error ?? "merge failed");
+                var error = DescribeFailure(mergeResult);
+                var code = ClassifyError(error);
+                logger?.LogError("Failed to merge PR #{Pr}: {Error}", prNumber, error);
+                return MergeOutcome.Failed(code, error);
             }
 
-            var mergeSha = mergeResult.Data?.MergeSha ?? "";
+            var mergeSha = mergedOk.Value.MergeCommitSha ?? "";
             if (string.IsNullOrEmpty(mergeSha))
             {
                 // The merge call reported success but no SHA — do not fabricate
@@ -310,7 +319,7 @@ public class MergePullRequestActivity : TammaOutcomeActivity
 
             // ── 3. Verified post-merge cleanup ──
             return await CompletePostMergeAsync(
-                github, repository, issueNumber, branchName, mergeSha,
+                client, owner, repoName, issueNumber, branchName, mergeSha,
                 alreadyMerged: false, autoDeleteBranch, closeIssue, logger);
         }
         catch (Exception ex)
@@ -319,6 +328,25 @@ public class MergePullRequestActivity : TammaOutcomeActivity
             return MergeOutcome.Failed("api_error", ex.Message);
         }
     }
+
+    /// <summary>Normalized strategy token → the abstraction's merge method.</summary>
+    internal static Tamma.Platforms.Abstractions.Models.MergeMethod ToMergeMethod(string strategy) =>
+        (strategy ?? "").Trim().ToLowerInvariant() switch
+        {
+            "merge" => Tamma.Platforms.Abstractions.Models.MergeMethod.Merge,
+            "rebase" => Tamma.Platforms.Abstractions.Models.MergeMethod.Rebase,
+            _ => Tamma.Platforms.Abstractions.Models.MergeMethod.Squash,
+        };
+
+    private static string DescribeFailure<T>(Tamma.Platforms.Abstractions.PlatformResult<T> result) =>
+        result switch
+        {
+            Tamma.Platforms.Abstractions.PlatformResult<T>.Failed f =>
+                Tamma.Platforms.Abstractions.PlatformErrorText.ToLegacyString(f.Error),
+            Tamma.Platforms.Abstractions.PlatformResult<T>.ServiceUnavailable =>
+                "503: platform unavailable",
+            _ => "unknown platform result",
+        };
 
     /// <summary>
     /// Post-merge close-issue (verified) + branch-delete (best-effort). A failed
@@ -329,8 +357,9 @@ public class MergePullRequestActivity : TammaOutcomeActivity
     /// emitted as <c>BRANCH.DELETED.FAILED</c> by the workflow.
     /// </summary>
     private static async Task<MergeOutcome> CompletePostMergeAsync(
-        IGitHubIntegrationService github,
-        string repository,
+        Tamma.Platforms.Abstractions.IGitPlatformClient client,
+        string owner,
+        string repoName,
         int issueNumber,
         string branchName,
         string mergeSha,
@@ -349,11 +378,18 @@ public class MergePullRequestActivity : TammaOutcomeActivity
             try
             {
                 var comment = $"Resolved by PR (merge SHA: {mergeSha}).";
-                var close = await github.CloseGitHubIssueAsync(repository, issueNumber, comment);
-                issueClosed = close.Success && close.Data;
+                var close = await client.CloseIssueAsync(
+                    owner, repoName,
+                    issueNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    comment);
+                issueClosed =
+                    close is Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.Issue>.Ok closedOk
+                    && closedOk.Value.State == Tamma.Platforms.Abstractions.Models.IssueState.Closed;
                 if (!issueClosed)
                 {
-                    var reason = close.Error ?? "issue close returned an unsuccessful result";
+                    var reason = close is Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.Issue>.Ok
+                        ? "issue close returned an unsuccessful result"
+                        : DescribeFailure(close);
                     logger?.LogWarning("Failed to close issue #{Issue} after merge: {Error}", issueNumber, reason);
                     warnings.Add($"issue-close-failed: {reason}");
                 }
@@ -375,11 +411,14 @@ public class MergePullRequestActivity : TammaOutcomeActivity
         {
             try
             {
-                var del = await github.DeleteGitHubBranchAsync(repository, branchName);
-                branchDeleted = del.Success && del.Data;
+                var del = await client.DeleteBranchAsync(owner, repoName, branchName);
+                branchDeleted =
+                    del is Tamma.Platforms.Abstractions.PlatformResult<bool>.Ok delOk && delOk.Value;
                 if (!branchDeleted)
                 {
-                    var reason = del.Error ?? "branch delete returned an unsuccessful result";
+                    var reason = del is Tamma.Platforms.Abstractions.PlatformResult<bool>.Ok
+                        ? "branch delete returned an unsuccessful result"
+                        : DescribeFailure(del);
                     logger?.LogWarning("Failed to delete branch {Branch} after merge: {Error}", branchName, reason);
                     warnings.Add($"branch-delete-failed: {reason}");
                 }

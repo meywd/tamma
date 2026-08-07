@@ -421,6 +421,22 @@ public class TammaApiClient
         return GetAsync<GitCallResponse>(url, tenantId, ct);
     }
 
+    /// <summary>
+    /// Epic 31 P2 (plan §4) — the READ-ONLY capability probe:
+    /// <c>GET /api/v1/git/{owner}/{repo}/capabilities</c>. Consulted by
+    /// <c>CheckPlatformCapabilityActivity</c> BEFORE a capability-gated action
+    /// step runs; it asks what the tenant's resolved platform driver supports
+    /// and changes nothing anywhere. Returns null on any non-2xx / transport
+    /// failure (the check step then treats support as UNKNOWN and lets the
+    /// action step's typed safety-net outcome decide).
+    /// </summary>
+    public virtual Task<GitCapabilitiesResponse?> GetGitPlatformCapabilitiesAsync(
+        string repo, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/capabilities";
+        return GetAsync<GitCapabilitiesResponse>(url, tenantId, ct);
+    }
+
     // ----- GitHub extra ops (Story 38 Phase 1 — commits / file-changes / delete) --
 
     /// <summary>Story 38 (Phase 1) — read recent commits on a branch via

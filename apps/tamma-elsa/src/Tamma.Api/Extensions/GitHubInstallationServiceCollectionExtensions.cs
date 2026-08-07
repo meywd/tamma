@@ -33,6 +33,23 @@ public static class GitHubInstallationServiceCollectionExtensions
     {
         services.AddScoped<IInstallationRouterService, InstallationRouterService>();
 
+        // Epic 31 P2 (seam 14) — registry unification: the App callback also
+        // upserts a tenant_platform_installations row (App-installation
+        // credential REFERENCE, never a PAT), and the startup backfill sweeps
+        // installations linked before the bridge existed. The bridge resolves
+        // ISecretRevealService optionally, so hosts without the secret cabinet
+        // still boot (bridging degrades to a logged no-op).
+        services.AddScoped<Tamma.Api.Services.Platforms.IGitHubInstallationBridge>(sp =>
+            new Tamma.Api.Services.Platforms.GitHubInstallationBridge(
+                sp.GetRequiredService<Tamma.Data.Repositories.ITenantPlatformInstallationRepository>(),
+                sp.GetRequiredService<Tamma.Platforms.IPlatformInstallationEventEmitter>(),
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<
+                    Tamma.Api.Services.Platforms.GitHubInstallationBridge>>(),
+                sp.GetService<Tamma.Api.Services.Secrets.Reveal.ISecretRevealService>()));
+        services.AddHostedService<Tamma.Api.Services.Platforms.GitHubInstallationBridgeBackfillService>();
+
         if (IsGitHubAppConfigured(configuration))
         {
             // Bind options from the GitHub:* config section and register the

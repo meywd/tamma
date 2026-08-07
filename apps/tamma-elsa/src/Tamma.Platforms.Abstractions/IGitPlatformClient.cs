@@ -53,6 +53,48 @@ public interface IGitPlatformClient
     Task<PlatformResult<Branch>> CreateBranchAsync(
         CreateBranchRequest request, CancellationToken ct = default);
 
+    // ── Epic 31 P2 — core verbs the mediation swap needs that were
+    //    missing from the P1 stage-1 additions: single-branch read
+    //    (existence + tip SHA), branch delete, open-PR-for-branch
+    //    lookup (the idempotent create-or-update dance), and PR
+    //    title/body update. Core verbs like GetRepo/CreateBranch —
+    //    every wired driver implements them for real; the null seam
+    //    answers the bare ServiceUnavailable stub. ──
+
+    /// <summary>
+    /// Read a single branch. <see cref="PlatformError.NotFound"/> when
+    /// the branch does not exist — callers use this as the existence
+    /// probe (the live path's <c>BranchExistsAsync</c> shape).
+    /// </summary>
+    Task<PlatformResult<Branch>> GetBranchAsync(
+        string owner, string repoName, string branchName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Delete a branch ref. Returns true on success. Deleting an
+    /// absent branch answers <see cref="PlatformError.NotFound"/> (the
+    /// caller decides whether that is a failure).
+    /// </summary>
+    Task<PlatformResult<bool>> DeleteBranchAsync(
+        string owner, string repoName, string branchName, CancellationToken ct = default);
+
+    /// <summary>
+    /// List the OPEN pull requests whose source branch is
+    /// <paramref name="sourceBranch"/> and target branch is
+    /// <paramref name="targetBranch"/> (0 or 1 entries on every
+    /// platform that forbids duplicate open PRs per branch pair).
+    /// Powers the create-PR idempotency lookup.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<PullRequest>>> ListOpenPullRequestsForBranchAsync(
+        string owner, string repoName, string sourceBranch, string targetBranch,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Update an existing PR's title and/or body (null = leave as-is).
+    /// Returns the updated PR.
+    /// </summary>
+    Task<PlatformResult<PullRequest>> UpdatePullRequestAsync(
+        UpdatePullRequestRequest request, CancellationToken ct = default);
+
     /// <summary>
     /// Open a new PR. See type-level remarks on idempotency.
     /// </summary>

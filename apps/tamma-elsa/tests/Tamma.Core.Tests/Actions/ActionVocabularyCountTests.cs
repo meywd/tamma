@@ -103,8 +103,12 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void BackgroundActor_has_29_members()
+    public void BackgroundActor_has_31_members()
     {
+        // 29 → 31 (Epic 31 P2, 2026-08-07): + PlatformDriverCacheInvalidator
+        // (Story 31-2's designed cache-invalidation subscriber, built in P2)
+        // and + GitHubInstallationBridgeBackfill (the seam-14 registry-
+        // unification startup sweep) — both IHostedServices in Tamma.Api.
         // 28 → 29 (Story 43-5): + GovernancePolicySnapshotPrimingService — the
         // action-assignments snapshot's cold-start primer is itself an
         // IHostedService, and the sweep binds the governance machinery too.
@@ -120,7 +124,7 @@ public class ActionVocabularyCountTests
         // → 26. Cross-checked: 26 non-abstract IHostedService classes exist
         // across both host assemblies (BackgroundActorCatalogSweepTests binds
         // them by type name). +1 (Story 41-30): TenantScheduledTriggerService.
-        Enum.GetValues<BackgroundActor>().Should().HaveCount(29);
+        Enum.GetValues<BackgroundActor>().Should().HaveCount(31);
     }
 
     [Test]
@@ -151,8 +155,11 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_219()
+    public void TotalCatalogMembers_is_221()
     {
+        // 96 + 17 + 8 + 61 + 31 + 8 = 221 — was 219 (automation 29): Epic 31 P2
+        // added the two platform-plane hosted services (driver-cache invalidator +
+        // installation-bridge backfill) as automation:* machinery members.
         // 96 + 17 + 8 + 61 + 29 + 8 = 219 — was 217 (effect 59): the 43-17 follow-up
         // catalogued the two unowned engine callbacks (see ExternalEffect_has_61_members).
         // 96 + 17 + 8 + 59 + 29 + 8 = 217 — was 206 (effect 48): Story 31-13 added
@@ -176,7 +183,7 @@ public class ActionVocabularyCountTests
         // (80 + 10 + 22 + 26 + …); the agent-action plane grew by 16 (Story
         // 41-1a), the document-type plane by 6 (Story 41-1b), and
         // effect/automation by 3 + 1 (Story 41-30).
-        ActionCatalog.All.Should().HaveCount(219);
-        ActionCatalog.ByKey.Should().HaveCount(219);
+        ActionCatalog.All.Should().HaveCount(221);
+        ActionCatalog.ByKey.Should().HaveCount(221);
     }
 }

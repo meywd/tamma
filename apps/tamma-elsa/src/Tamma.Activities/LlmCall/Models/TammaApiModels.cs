@@ -517,6 +517,21 @@ public sealed record GitCallResponse
     [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }
 }
 
+/// <summary>
+/// Epic 31 P2 (plan §4) — wire response of the READ-ONLY capability probe
+/// (<c>GET /api/v1/git/{owner}/{repo}/capabilities</c>). Mirrors
+/// <c>Tamma.Api.Services.Git.GitCapabilitiesResult</c>. KEY-FREE.
+/// </summary>
+public sealed record GitCapabilitiesResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; init; }
+    [JsonPropertyName("platformKind")] public string? PlatformKind { get; init; }
+    [JsonPropertyName("capabilities")] public IReadOnlyList<string>? Capabilities { get; init; }
+    [JsonPropertyName("credentialSource")] public string? CredentialSource { get; init; }
+    [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
+    [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
+}
+
 /// <summary>A key-free PR review comment. Mirrors <c>Tamma.Api.Services.Git.PrCommentDto</c>.</summary>
 public sealed record GitCommentDto
 {

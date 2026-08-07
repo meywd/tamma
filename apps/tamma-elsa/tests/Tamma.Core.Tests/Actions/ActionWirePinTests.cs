@@ -111,7 +111,11 @@ public class ActionWirePinTests
             // 43-5 — the policy-snapshot cold-start primer (the same rule:
             // every IHostedService class is catalogued, governance included).
             "governance-policy-snapshot-priming-service",
-            "platform-task-worker");
+            "platform-task-worker",
+            // Epic 31 P2 — the platform-plane subscriber + the seam-14 backfill
+            // (same rule: every IHostedService class is catalogued).
+            "platform-driver-cache-invalidator",
+            "github-installation-bridge-backfill");
     }
 
     [Test]

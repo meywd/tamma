@@ -24,6 +24,12 @@ public class MachineryInventoryTests
     /// <summary>
     /// THE 42 — Story 43-11 "Machinery inventory (audited, never dial-gated)",
     /// transcribed 2026-08-03. Do not edit without a 43-11 amendment.
+    /// AMENDED 2026-08-07 (Epic 31 P2): + automation:platform-driver-cache-
+    /// invalidator (Story 31-2's designed cache-invalidation subscriber, built
+    /// in P2) and + automation:github-installation-bridge-backfill (the seam-14
+    /// registry-unification startup sweep) — 42 → 44. Both are background
+    /// services with no human in the loop, the exact class this inventory
+    /// exists for; neither is a new dial-gated capability.
     /// </summary>
     private static readonly string[] MachineryInventory =
     {
@@ -34,7 +40,7 @@ public class MachineryInventoryTests
         "effect:engine.document.persist",
         "effect:engine.document.set-status",
 
-        // ── Background services — all 29 automation:* ─────────────────────
+        // ── Background services — all 31 automation:* ─────────────────────
         "automation:action-catalog-startup-validator",
         "automation:governance-policy-snapshot-priming-service",
         "automation:provider-settings-store-priming-service",
@@ -64,6 +70,8 @@ public class MachineryInventoryTests
         "automation:secret-auto-rotation-scheduler",
         "automation:tenant-cleanup-requested-trigger",
         "automation:tenant-delete-requested-trigger",
+        "automation:platform-driver-cache-invalidator",
+        "automation:github-installation-bridge-backfill",
 
         // ── Task handlers — all 8 platform-task:* ──────────────────────────
         "platform-task:RETIRE_SECRET_VERSION",
@@ -114,7 +122,7 @@ public class MachineryInventoryTests
             .ToHashSet(StringComparer.Ordinal);
         var fixture = MachineryInventory.ToHashSet(StringComparer.Ordinal);
 
-        MachineryInventory.Should().HaveCount(42, "5 + 29 + 8 = 42 (43-11's count check)");
+        MachineryInventory.Should().HaveCount(44, "5 + 31 + 8 = 44 (43-11's count check, amended by Epic 31 P2: +2 automation)");
         MachineryInventory.Should().OnlyHaveUniqueItems();
 
         flagged.Except(fixture).Should().BeEmpty(

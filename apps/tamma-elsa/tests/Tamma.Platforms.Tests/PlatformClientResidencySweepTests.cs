@@ -115,12 +115,11 @@ public class PlatformClientResidencySweepTests
 
     internal static readonly IReadOnlyList<Entry> Baseline =
     [
-        new("src/Tamma.Activities/ADL/CreateBranchActivity.cs",
-            "seam 1 adjunct: ExecuteCoreAsync helper typed on IGitHubIntegrationService; P2 retypes it onto IGitPlatformClient"),
-        new("src/Tamma.Activities/ADL/CreatePullRequestActivity.cs",
-            "seam 1 adjunct: ExecuteCoreAsync helper typed on IGitHubIntegrationService; P2 retypes it onto IGitPlatformClient"),
-        new("src/Tamma.Activities/ADL/MergePullRequestActivity.cs",
-            "seam 1 adjunct: ExecuteCoreAsync helper typed on IGitHubIntegrationService; P2 retypes it onto IGitPlatformClient"),
+        // P2 (2026-08-07) DELETED five entries — the ratchet's first turn after
+        // seeding: the three ADL ExecuteCoreAsync helpers (retyped onto
+        // IGitPlatformClient), GitMediationService.cs (17 op cores swapped onto
+        // IPlatformResolver → driver.Client), and IGitHubClientFactory.cs (the
+        // chokepoint, deleted outright). Pin 26 → 21.
         new("src/Tamma.Activities/AgentDispatch/IGitHubActionsClient.cs",
             "seam 6: the IGitHubActionsClient seam definition; P3 swaps consumers onto driver.Actions and deletes the surface"),
         new("src/Tamma.Activities/AgentDispatch/NullGitHubActionsClient.cs",
@@ -145,10 +144,6 @@ public class PlatformClientResidencySweepTests
             "seam 5: null implementation of the engine-callback seam; deleted with the seam in P3"),
         new("src/Tamma.Api/Services/Engine/OctokitGitHubEngineCallbackService.cs",
             "seam 5: Octokit implementation of the engine-callback seam; P3 moves the bodies into the GitHub driver"),
-        new("src/Tamma.Api/Services/Git/GitMediationService.cs",
-            "seam 1: 17 op cores mint token-bound GitHubIntegrationService via IGitHubClientFactory; P2 swaps them onto IPlatformResolver"),
-        new("src/Tamma.Api/Services/Git/IGitHubClientFactory.cs",
-            "seams 1-2: the GitHub-only factory chokepoint; P2 deletes it"),
         new("src/Tamma.Api/Services/GitHub/IGitHubAppClient.cs",
             "seam 7: the App-level Octokit client seam definition; P2/P3 move it inside the GitHub driver"),
         new("src/Tamma.Api/Services/GitHub/InstallationRouterService.cs",
@@ -179,7 +174,7 @@ public class PlatformClientResidencySweepTests
     /// neither appears in the baseline at all. May only go DOWN; every
     /// decrement ships with the deleted entries in the same diff.
     /// </summary>
-    internal const int PinnedCount = 26;
+    internal const int PinnedCount = 21;
 
     /// <summary>
     /// The pin's recorded history, oldest first; every element after the seed
@@ -188,7 +183,11 @@ public class PlatformClientResidencySweepTests
     /// from prose into a diffable literal). Raising the pin requires
     /// appending a value that makes this fixture RED.
     /// </summary>
-    internal static readonly int[] PinHistory = [26];
+    /// <para><b>26 → 21 (2026-08-07, Epic 31 P2).</b> The mediation swap:
+    /// GitMediationService.cs + IGitHubClientFactory.cs (deleted) + the three
+    /// ADL ExecuteCoreAsync helpers (retyped onto IGitPlatformClient) left the
+    /// baseline in the same diff.</para>
+    internal static readonly int[] PinHistory = [26, 21];
 
     // ====================================================================
     // The sweep against reality.

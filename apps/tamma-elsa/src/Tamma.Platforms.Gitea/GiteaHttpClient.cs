@@ -112,6 +112,49 @@ internal sealed class GiteaHttpClient
     }
 
     /// <summary>
+    /// Epic 31 P2 — PATCH a JSON body and deserialize the JSON
+    /// response (PR title/body update).
+    /// </summary>
+    public async Task<PlatformResult<T>> PatchJsonAsync<T>(
+        string relativePath,
+        object body,
+        CancellationToken ct)
+    {
+        return await SendAsync<T>(HttpMethod.Patch, relativePath, body, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Epic 31 P2 — DELETE without expecting a JSON response (branch
+    /// delete answers 204). 2xx → Ok(true).
+    /// </summary>
+    public async Task<PlatformResult<bool>> DeleteNoContentAsync(
+        string relativePath,
+        CancellationToken ct)
+    {
+        var response = await SendRawAsync(HttpMethod.Delete, relativePath, body: null, ct)
+            .ConfigureAwait(false);
+        if (response is null)
+        {
+            return PlatformResult<bool>.FromServiceUnavailable();
+        }
+        try
+        {
+            UpdateRateLimit(response);
+            if (response.IsSuccessStatusCode)
+            {
+                return PlatformResult<bool>.FromOk(true);
+            }
+            var err = await GiteaErrorMapper.MapAsync(response, ct).ConfigureAwait(false);
+            return PlatformResult<bool>.FromError(err);
+        }
+        finally
+        {
+            response.Dispose();
+        }
+    }
+
+    /// <summary>
     /// POST without expecting a JSON response (used by cancel-run +
     /// merge-PR; we treat 2xx as success and return Ok(true)).
     /// </summary>

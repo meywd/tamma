@@ -148,6 +148,22 @@ public enum BackgroundActor
     /// <c>AddHostedService&lt;&gt;</c> line — catalogued explicitly so it is not
     /// invisible to a registration grep.</summary>
     [Wire("platform-task-worker")] PlatformTaskWorker,
+
+    // ── Epic 31 P2 — the platform-plane subscribers/sweeps ──
+
+    /// <summary><c>Tamma.Api.Services.Platforms.PlatformDriverCacheInvalidator</c>
+    /// — the Story 31-2-designed cache-invalidation subscriber (built in Epic
+    /// 31 P2): CREDENTIAL_ROTATED / DISCONNECTED / SWITCH_ORG platform events
+    /// evict the tenant's cached drivers immediately. Process-local, in-memory
+    /// eviction only — it touches no external system.</summary>
+    [Wire("platform-driver-cache-invalidator")] PlatformDriverCacheInvalidator,
+
+    /// <summary><c>Tamma.Api.Services.Platforms.GitHubInstallationBridgeBackfillService</c>
+    /// — Epic 31 P2 (seam 14) one-shot startup backfill: every tenant-linked
+    /// <c>github_installations</c> row is idempotently bridged into
+    /// <c>tenant_platform_installations</c> so App-installed tenants are
+    /// visible to the driver plane. Re-runs are no-ops by construction.</summary>
+    [Wire("github-installation-bridge-backfill")] GitHubInstallationBridgeBackfill,
 }
 
 /// <summary><see cref="BackgroundActor"/> wire helper.</summary>

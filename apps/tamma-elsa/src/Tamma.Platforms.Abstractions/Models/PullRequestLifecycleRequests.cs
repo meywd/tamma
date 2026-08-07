@@ -16,6 +16,18 @@ public sealed record RequestReviewersRequest(
     IReadOnlyList<string> Reviewers,
     IReadOnlyList<string>? TeamReviewers = null);
 
+/// <summary>
+/// Epic 31 P2 — input for
+/// <see cref="IGitPlatformClient.UpdatePullRequestAsync"/>. Null
+/// title/body = leave that field unchanged.
+/// </summary>
+public sealed record UpdatePullRequestRequest(
+    string Owner,
+    string RepoName,
+    string PrNumber,
+    string? Title = null,
+    string? Body = null);
+
 /// <summary>Input for <see cref="IGitPlatformClient.AddPullRequestLabelsAsync"/>.</summary>
 public sealed record AddPullRequestLabelsRequest(
     string Owner,

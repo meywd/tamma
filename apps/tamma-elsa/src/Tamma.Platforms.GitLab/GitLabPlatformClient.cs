@@ -183,6 +183,137 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
         }
     }
 
+    /// <inheritdoc />
+    public async Task<PlatformResult<Branch>> GetBranchAsync(
+        string owner, string repoName, string branchName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(branchName);
+        var pid = EncodeProjectRef(owner, repoName);
+        try
+        {
+            var (resp, dto) = await _http.GetJsonAsync<GitLabBranchDto>(
+                $"projects/{pid}/repository/branches/{Uri.EscapeDataString(branchName)}", ct)
+                .ConfigureAwait(false);
+            using (resp)
+            {
+                if (!resp.Response.IsSuccessStatusCode)
+                {
+                    return PlatformResult<Branch>.FromError(
+                        GitLabErrorMapper.Map(resp.Response.StatusCode, resp.Body, resp.RetryAfter));
+                }
+                if (dto is null)
+                {
+                    return PlatformResult<Branch>.FromError(new PlatformError.NotFound());
+                }
+                return PlatformResult<Branch>.FromOk(new Branch(
+                    Name: dto.Name ?? branchName,
+                    Sha: dto.Commit?.Id ?? string.Empty,
+                    Protected: dto.Protected));
+            }
+        }
+        catch (HttpRequestException)
+        {
+            return PlatformResult<Branch>.FromError(new PlatformError.ServiceUnavailable());
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<bool>> DeleteBranchAsync(
+        string owner, string repoName, string branchName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(branchName);
+        var pid = EncodeProjectRef(owner, repoName);
+        try
+        {
+            using var resp = await _http.DeleteAsync(
+                $"projects/{pid}/repository/branches/{Uri.EscapeDataString(branchName)}", ct)
+                .ConfigureAwait(false);
+            if (!resp.Response.IsSuccessStatusCode)
+            {
+                return PlatformResult<bool>.FromError(
+                    GitLabErrorMapper.Map(resp.Response.StatusCode, resp.Body, resp.RetryAfter));
+            }
+            return PlatformResult<bool>.FromOk(true);
+        }
+        catch (HttpRequestException)
+        {
+            return PlatformResult<bool>.FromError(new PlatformError.ServiceUnavailable());
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<IReadOnlyList<PullRequest>>> ListOpenPullRequestsForBranchAsync(
+        string owner, string repoName, string sourceBranch, string targetBranch,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceBranch);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetBranch);
+        var pid = EncodeProjectRef(owner, repoName);
+        var path = $"projects/{pid}/merge_requests" +
+                   $"?state=opened" +
+                   $"&source_branch={Uri.EscapeDataString(sourceBranch)}" +
+                   $"&target_branch={Uri.EscapeDataString(targetBranch)}";
+        try
+        {
+            var results = new List<PullRequest>();
+            await foreach (var mr in _http.EnumeratePagesAsync<GitLabMergeRequest>(path, ct: ct).ConfigureAwait(false))
+            {
+                results.Add(MrToPullRequestMapper.Map(mr));
+            }
+            return PlatformResult<IReadOnlyList<PullRequest>>.FromOk(results);
+        }
+        catch (GitLabRequestException ex)
+        {
+            return PlatformResult<IReadOnlyList<PullRequest>>.FromError(
+                GitLabErrorMapper.Map(ex.Status, ex.Body, ex.RetryAfter));
+        }
+        catch (HttpRequestException)
+        {
+            return PlatformResult<IReadOnlyList<PullRequest>>.FromError(new PlatformError.ServiceUnavailable());
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<PullRequest>> UpdatePullRequestAsync(
+        UpdatePullRequestRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var pid = EncodeProjectRef(request.Owner, request.RepoName);
+
+        var body = new Dictionary<string, object?>();
+        if (request.Title is not null) body["title"] = request.Title;
+        if (request.Body is not null) body["description"] = request.Body;
+
+        try
+        {
+            var (resp, mr) = await _http.PutJsonAsync<object, GitLabMergeRequest>(
+                $"projects/{pid}/merge_requests/{request.PrNumber}", body, ct).ConfigureAwait(false);
+            using (resp)
+            {
+                if (!resp.Response.IsSuccessStatusCode)
+                {
+                    return PlatformResult<PullRequest>.FromError(
+                        GitLabErrorMapper.Map(resp.Response.StatusCode, resp.Body, resp.RetryAfter));
+                }
+                if (mr is null)
+                {
+                    return PlatformResult<PullRequest>.FromError(new PlatformError.Unknown("empty body"));
+                }
+                return PlatformResult<PullRequest>.FromOk(MrToPullRequestMapper.Map(mr));
+            }
+        }
+        catch (HttpRequestException)
+        {
+            return PlatformResult<PullRequest>.FromError(new PlatformError.ServiceUnavailable());
+        }
+    }
+
     public async Task<PlatformResult<PullRequest>> OpenPullRequestAsync(
         OpenPullRequestRequest request, CancellationToken ct = default)
     {

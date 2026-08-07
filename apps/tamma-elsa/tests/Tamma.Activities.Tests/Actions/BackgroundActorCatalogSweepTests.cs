@@ -78,8 +78,13 @@ public class BackgroundActorCatalogSweepTests
     }
 
     [Test]
-    public void The_hosted_service_count_is_pinned_at_29()
+    public void The_hosted_service_count_is_pinned_at_31()
     {
+        // 29 → 31 (Epic 31 P2, 2026-08-07): + PlatformDriverCacheInvalidator
+        // (the Story 31-2 cache-invalidation subscriber) and
+        // + GitHubInstallationBridgeBackfillService (the seam-14 registry
+        // backfill), both in Tamma.Api.Services.Platforms and both catalogued
+        // as automation:* members.
         // Derivation 2026-07-29 (Story 43-5): 6 ElsaServer (incl. Story 41-30's
         // TenantScheduledTriggerService — the tenant-aware scheduled-trigger
         // seam, registered inside the conditional control-plane block) + 22
@@ -89,6 +94,6 @@ public class BackgroundActorCatalogSweepTests
         // GovernancePolicySnapshotPrimingService — both registered via
         // TryAddEnumerable in AddActionCatalogGovernance) +
         // PlatformTaskWorker = 29.
-        HostedServiceTypes().Should().HaveCount(29);
+        HostedServiceTypes().Should().HaveCount(31);
     }
 }

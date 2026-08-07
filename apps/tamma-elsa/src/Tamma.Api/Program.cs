@@ -667,22 +667,27 @@ builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IBudgetGuard,
 builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.ILlmCallResponseMapper,
     Tamma.Api.Services.Agents.LlmCallResponseMapper>();
 
-// Story 38-1 (Epic 38) — git-platform step mediation (Class A). The engine's
-// thin ADL git activities (CreateBranch / CreatePullRequest / MergePullRequest /
-// UpdateIssueStatus / AnalyzeReview) POST to /api/v1/git/{owner}/{repo}/... here
-// instead of resolving the co-hosted IGitHubIntegrationService. The API holds the
-// per-tenant token: it authorizes tenant↔repo FIRST (the cross-tenant guard),
-// resolves the token BYOK→platform, performs the platform call with THAT token,
-// and emits one terminal GIT.* DCB event. IGitHubIntegrationService stays
-// API-only; the GitHubClientFactory mints a token-bound instance per request.
+// Story 38-1 (Epic 38) / Epic 31 P2 — git-platform step mediation (Class A).
+// The engine's thin ADL git activities (CreateBranch / CreatePullRequest /
+// MergePullRequest / UpdateIssueStatus / AnalyzeReview) POST to
+// /api/v1/git/{owner}/{repo}/... here. The API authorizes tenant↔repo FIRST
+// (the cross-tenant guard), resolves the tenant's PLATFORM DRIVER through
+// IPlatformResolver (tenant installation → Platform: config tier), performs the
+// platform call through the driver's IGitPlatformClient, and emits one terminal
+// GIT.* DCB event. The P2 swap deleted the IGitHubClientFactory chokepoint —
+// credentials live inside the resolved driver, never in mediation.
+// IGitTokenResolver remains registered for the CI mediation plane (P3) and
+// raw-git clone/push credential resolution.
 builder.Services.AddScoped<Tamma.Api.Services.Git.IGitRepoAuthorizer,
     Tamma.Api.Services.Git.GitRepoAuthorizer>();
 builder.Services.AddScoped<Tamma.Api.Services.Git.IGitTokenResolver,
     Tamma.Api.Services.Git.GitTokenResolver>();
-builder.Services.AddSingleton<Tamma.Api.Services.Git.IGitHubClientFactory,
-    Tamma.Api.Services.Git.GitHubClientFactory>();
 builder.Services.AddScoped<Tamma.Api.Services.Git.IGitMediationService,
     Tamma.Api.Services.Git.GitMediationService>();
+// Epic 31 P2 — the read-only capability probe behind
+// GET /api/v1/git/{owner}/{repo}/capabilities (the §4 check-step's surface).
+builder.Services.AddScoped<Tamma.Api.Services.Git.IGitPlatformCapabilityService,
+    Tamma.Api.Services.Git.GitPlatformCapabilityService>();
 // Story 43-12 — the merge route's per-request key selector (multi-binding: it picks
 // git.merge.dev|qa|main from the PR base branch, failing closed to git.merge.main).
 // Registered as itself; the enforcement seam resolves it by the type the route's
@@ -862,12 +867,45 @@ else
         Tamma.Platforms.Abstractions.IPlatformCredentialReader,
         Tamma.Api.Services.Platforms.NullPlatformCredentialReader>();
 }
+// Epic 31 P2 — the Platform: config section (single-user activation; the SaaS
+// deployment-level system tier). Bound once at startup; when the section is
+// absent but a legacy GitHub:Token is configured, the options synthesize a
+// github-kind PAT tier so pre-P2 single-user deployments keep resolving a
+// working driver with zero config changes.
+builder.Services.AddSingleton(sp =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var options = new Tamma.Platforms.SingleUserPlatformOptions();
+    cfg.GetSection(Tamma.Platforms.SingleUserPlatformOptions.SectionName).Bind(options);
+    if (!options.IsConfigured)
+    {
+        var legacyToken = cfg["GitHub:Token"];
+        if (!string.IsNullOrWhiteSpace(legacyToken))
+        {
+            options.Kind = "github";
+            options.Credential = legacyToken;
+        }
+    }
+    return options;
+});
 builder.Services.AddScoped<
     Tamma.Platforms.Abstractions.IPlatformResolver,
     Tamma.Platforms.PlatformResolver>();
+// Epic 31 P2 — the emitter's post-append hook publishes each installation
+// lifecycle event onto the in-process platform event bus so the driver-cache
+// invalidator (below) evicts immediately instead of waiting out the TTL.
 builder.Services.AddScoped<
-    Tamma.Platforms.IPlatformInstallationEventEmitter,
-    Tamma.Platforms.PlatformInstallationEventEmitter>();
+    Tamma.Platforms.IPlatformInstallationEventEmitter>(sp =>
+    new Tamma.Platforms.PlatformInstallationEventEmitter(
+        sp.GetRequiredService<Tamma.Data.Repositories.IPlatformEventRepository>(),
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<
+            Tamma.Platforms.PlatformInstallationEventEmitter>>(),
+        (evt, ct) => sp.GetRequiredService<
+            Tamma.Api.Services.PlatformEvents.IPlatformEventBus>().PublishAsync(evt, ct)));
+// Epic 31 P2 — the never-built 31-2 subscriber: CREDENTIAL_ROTATED /
+// DISCONNECTED / SWITCH_ORG evict the tenant's cached drivers.
+builder.Services.AddHostedService<
+    Tamma.Api.Services.Platforms.PlatformDriverCacheInvalidator>();
 
 // Story 31-9 — onboarding platform picker connect service. Composes
 // the secret-cabinet (29-1/29-3 reveal-on-create), the 31-2 platform
@@ -3501,6 +3539,15 @@ app.MapGet("/api/v1/git/{owner}/{repo}/commits", GitEndpoints.GetCommits)
 app.MapGet("/api/v1/git/{owner}/{repo}/file-changes", GitEndpoints.GetFileChanges)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitGetFileChanges");
+// Epic 31 P2 (plan §4) — the READ-ONLY capability probe consumed by the engine's
+// CheckPlatformCapabilityActivity before each capability-gated action step. A GET
+// (no mutation) on the same engine-only plane as the mediation reads above — it
+// mints no catalog member and carries no .Governs binding for the same reason
+// the other GET reads don't: it is the QUESTION, not the act (the KnownUngoverned-
+// Endpoints sweep scopes mutating endpoints only, so no baseline entry either).
+app.MapGet("/api/v1/git/{owner}/{repo}/capabilities", GitEndpoints.GetCapabilities)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitGetCapabilities");
 app.MapDelete("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.DeleteBranch)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitDeleteBranch")

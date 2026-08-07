@@ -535,10 +535,27 @@ public class MediationClientEffectSweepTests
             + "seam. (Circularity clause added 2026-08-01 under review F3: the argument was always "
             + "the reason for this entry, but until F3 nothing required an exception to WRITE it, "
             + "so a copied baseline label bought an exception just as well.)"),
+
+        new("GetGitPlatformCapabilitiesAsync", "2026-08-07", "Epic 31 P2",
+            "read-only: the §4 is-supported CHECK STEP's probe (GET /api/v1/git/{owner}/{repo}/"
+            + "capabilities). It ASKS what the tenant's resolved platform driver supports so the "
+            + "workflow can choose between the action step and its defined alternative step BEFORE "
+            + "the action runs, and it changes nothing outside Tamma; the action it asks ABOUT is "
+            + "separately catalogued and separately bound (e.g. effect:git.pull-request.set-draft). "
+            + "Mapping the probe to an ExternalEffect would catalogue the question as though it "
+            + "were the answer, and the result would be circular in exactly the "
+            + "EvaluateGovernanceAsync direction: the check step exists so the governed action is "
+            + "never even ATTEMPTED on a platform that cannot perform it — gating the check on the "
+            + "action's own governance would require clearing the gate to ask whether the gated "
+            + "step should run at all, so the first denial would wedge every capability-degraded "
+            + "workflow at its check node instead of routing to the alternative step."),
     ];
 
-    /// <summary>The exception set's own count pin — shrink-only, seeded 2026-08-01.</summary>
-    internal static readonly int[] NonEffectExceptionPinHistory = [1];
+    /// <summary>The exception set's own count pin — RE-SEEDED 2026-08-07 (Epic 31
+    /// P2) at 2 when GetGitPlatformCapabilitiesAsync was admitted; a re-seed is a
+    /// two-file edit (this seed + the RatchetDisciplineTests registry) made
+    /// deliberately visible in the diff, per the D17 admission rule.</summary>
+    internal static readonly int[] NonEffectExceptionPinHistory = [2];
 
     /// <summary>
     /// The value <see cref="NonEffectExceptionPinHistory"/> was SEEDED at, and the
@@ -547,7 +564,7 @@ public class MediationClientEffectSweepTests
     /// named seed rather than an invisible edit to the array's first element
     /// (review F3).
     /// </summary>
-    internal const int NonEffectExceptionPinSeed = 1;
+    internal const int NonEffectExceptionPinSeed = 2;
 
     /// <summary>See <see cref="NonEffectExceptionPinSeed"/>.</summary>
     internal const int NonEffectPinSeed = 19;
@@ -746,9 +763,14 @@ public class MediationClientEffectSweepTests
         // (Close/Reopen/CommentOn/ReviewCommentOn/RequestReviewers/SetLabels/SetDraft),
         // each carrying [PerformsEffect] and mapped in EffectPerformingSites. This pin
         // is a bump-with-review, not a ratchet — "move this number in the same commit".
-        discovered.Should().HaveCount(44,
+        // 44 → 45 (Epic 31 P2, 2026-08-07): + GetGitPlatformCapabilitiesAsync, the §4
+        // check-step's READ-ONLY capability probe. Accounted for by a second D17
+        // reviewed exception (see ReviewedNonEffectExceptions — the probe is the
+        // QUESTION whose answer decides which workflow branch runs; cataloguing the
+        // question as an effect would be the EvaluateGovernanceAsync circularity again).
+        discovered.Should().HaveCount(45,
             "the mediation surface is pinned exactly: 24 effect-performing + 19 baselined "
-            + "non-effect + 1 reviewed-exception method. A change here is a new (or removed) "
+            + "non-effect + 2 reviewed-exception methods. A change here is a new (or removed) "
             + "mediation method — decide whether it is a governed effect, then move this number "
             + "in the same commit.");
     }
@@ -935,10 +957,12 @@ public class MediationClientEffectSweepTests
         // the MEMBERSHIP makes admitting a method a sentence a reviewer reads.
         ReviewedNonEffectExceptions.Select(e => e.Method)
             .Should().BeEquivalentTo(
-                new[] { "EvaluateGovernanceAsync" },
-                "this method, and only this method, is a D17 reviewed exception. Admitting a "
-                + "second is a governance decision: name it here, argue the circularity in its "
-                + "justification, and do NOT pay for it by dropping the baseline pin.");
+                new[] { "EvaluateGovernanceAsync", "GetGitPlatformCapabilitiesAsync" },
+                "these methods, and only these methods, are D17 reviewed exceptions "
+                + "(EvaluateGovernanceAsync: Story 43-9; GetGitPlatformCapabilitiesAsync: Epic 31 "
+                + "P2's §4 capability probe). Admitting another is a governance decision: name it "
+                + "here, argue the circularity in its justification, and do NOT pay for it by "
+                + "dropping the baseline pin.");
     }
 
     [Test]

@@ -265,7 +265,7 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void PlatformAutomation_has_the_43_expected_members()
+    public void PlatformAutomation_has_the_45_expected_members()
     {
         var expected = new List<string>
         {
@@ -276,7 +276,8 @@ public class ActionGroupMembershipTests
             // work-product surface).
             "effect:schedule.create", "effect:schedule.update", "effect:schedule.delete",
         };
-        // The 27 automation members outside the secrets group (41-30 added
+        // The 29 automation members outside the secrets group (Epic 31 P2 added
+        // the driver-cache invalidator + the installation-bridge backfill; 41-30 added
         // TenantScheduledTriggerService; 43-4 added the catalog startup
         // validator; 43-5 added the governance snapshot primer — the
         // governance machinery is itself a swept hosted service).
@@ -286,13 +287,16 @@ public class ActionGroupMembershipTests
         // All 8 platform tasks.
         expected.AddRange(Enum.GetValues<PlatformTaskKind>().Select(p => $"platform-task:{p.ToWire()}"));
 
-        expected.Should().HaveCount(43, "5 engine effects + 3 schedule effects + 27 automation + 8 platform tasks");
+        expected.Should().HaveCount(45, "5 engine effects + 3 schedule effects + 29 automation + 8 platform tasks");
         WiresIn(ActionGroup.PlatformAutomation).Should().BeEquivalentTo(expected);
     }
 
     [Test]
-    public void The_per_group_counts_sum_to_219()
+    public void The_per_group_counts_sum_to_221()
     {
+        // 219 → 221 (Epic 31 P2): platform-automation 43 → 45 (+the driver-cache
+        // invalidator + the installation-bridge backfill, both automation machinery)
+        // — nothing else moves.
         // 217 → 219 (43-17 follow-up): ci-and-test 3 → 4 (+ci.workflow.dispatch) and
         // model-invocation 7 → 8 (+llm.task.execute) — the two unowned engine callbacks.
         // 206 → 217 (Story 31-13): source-control-write 10 → 17 (+7 PR ops) and
@@ -331,10 +335,11 @@ public class ActionGroupMembershipTests
             [ActionGroup.ExternalComms] = 2,
             [ActionGroup.ModelInvocation] = 8,
             [ActionGroup.Secrets] = 5,
-            [ActionGroup.PlatformAutomation] = 43,
+            [ActionGroup.PlatformAutomation] = 45,
         };
 
-        counts.Values.Sum().Should().Be(219);
+        // 219 → 221 (Epic 31 P2): +2 platform-automation machinery members.
+        counts.Values.Sum().Should().Be(221);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }

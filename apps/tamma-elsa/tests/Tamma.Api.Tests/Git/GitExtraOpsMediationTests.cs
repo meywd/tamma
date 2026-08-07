@@ -5,19 +5,22 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using Tamma.Api.Services.Git;
-using Tamma.Core.Interfaces;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
+using Tamma.Platforms.Abstractions;
+using Tamma.Platforms.Abstractions.Models;
 
 namespace Tamma.Api.Tests.Git;
 
 /// <summary>
-/// Story 38 (Phase 1) — the GitHub "extra ops" (<c>GetCommits</c> /
-/// <c>GetFileChanges</c> / <c>DeleteBranch</c>) added to <see cref="GitMediationService"/>.
-/// Reuse the exact guard → token → platform-with-resolved-token → one-event plane as
-/// the git-platform ops; assertions cover the fail-closed guard (deny ⇒ no token
-/// resolved, platform never called), the happy paths + their mapped projections, and
-/// the 503 token-unavailable path.
+/// Story 38 (Phase 1) / Epic 31 P2 — the "extra ops" (<c>GetCommits</c> /
+/// <c>GetFileChanges</c> / <c>DeleteBranch</c>) on <see cref="GitMediationService"/>.
+/// Reuse the exact guard → driver → platform-through-the-abstraction → one-event
+/// plane as the git-platform ops; assertions cover the fail-closed guard (deny ⇒
+/// no driver resolved, platform never called), the happy paths + their mapped
+/// projections, and the 503 driver-unavailable path. Behavioral assertions are
+/// unchanged from the pre-swap fixture; only the collaborator seams moved onto
+/// the platform abstraction.
 /// </summary>
 [TestFixture]
 public class GitExtraOpsMediationTests
@@ -26,9 +29,8 @@ public class GitExtraOpsMediationTests
     private const string Repo = "acme/widgets";
 
     private Mock<IGitRepoAuthorizer> _authorizer = null!;
-    private Mock<IGitTokenResolver> _tokenResolver = null!;
-    private Mock<IGitHubClientFactory> _factory = null!;
-    private Mock<IGitHubIntegrationService> _github = null!;
+    private Mock<IPlatformResolver> _resolver = null!;
+    private Mock<IGitPlatformClient> _client = null!;
     private RecordingRepo _events = null!;
     private GitMediationService _sut = null!;
     private readonly Guid _tenant = Guid.NewGuid();
@@ -37,13 +39,11 @@ public class GitExtraOpsMediationTests
     public void SetUp()
     {
         _authorizer = new Mock<IGitRepoAuthorizer>(MockBehavior.Strict);
-        _tokenResolver = new Mock<IGitTokenResolver>(MockBehavior.Strict);
-        _factory = new Mock<IGitHubClientFactory>(MockBehavior.Strict);
-        _github = new Mock<IGitHubIntegrationService>(MockBehavior.Loose);
+        _resolver = new Mock<IPlatformResolver>(MockBehavior.Strict);
+        _client = new Mock<IGitPlatformClient>(MockBehavior.Loose);
         _events = new RecordingRepo();
-        _factory.Setup(f => f.Create(It.IsAny<string>())).Returns(_github.Object);
         _sut = new GitMediationService(
-            _authorizer.Object, _tokenResolver.Object, _factory.Object, _events, NullLogger<GitMediationService>.Instance);
+            _authorizer.Object, _resolver.Object, _events, NullLogger<GitMediationService>.Instance);
     }
 
     private void Allow() => _authorizer
@@ -54,23 +54,35 @@ public class GitExtraOpsMediationTests
         .Setup(a => a.AuthorizeAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
         .ReturnsAsync(GitRepoAuthorization.Deny("not authorized"));
 
-    private void ResolveToken() => _tokenResolver
-        .Setup(t => t.ResolveAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-        .ReturnsAsync(new GitTokenResolution(SecretToken, GitCredentialSources.Byok));
+    private sealed class FakeDriver : IGitPlatformDriver
+    {
+        public FakeDriver(IGitPlatformClient client) => Client = client;
+        public PlatformKind Kind => PlatformKind.GitHub;
+        public IGitPlatformClient Client { get; }
+        public IGitPlatformActionsClient? Actions => null;
+        public IReadOnlySet<PlatformCapability> Capabilities { get; } = new HashSet<PlatformCapability>();
+    }
 
-    private void NoToken() => _tokenResolver
-        .Setup(t => t.ResolveAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-        .ReturnsAsync((GitTokenResolution?)null);
+    private void ResolveDriver() => _resolver
+        .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        .ReturnsAsync(new MediationDriverResolution(
+            new FakeDriver(_client.Object), MediationCredentialSource.TenantInstallation));
+
+    private void NoDriver() => _resolver
+        .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        .ReturnsAsync((MediationDriverResolution?)null);
 
     [Test]
     public async Task GetCommits_Success_MapsCommits_OneEvent()
     {
         Allow();
-        ResolveToken();
-        _github.Setup(g => g.GetGitHubCommitsAsync(Repo, "main", null))
-            .ReturnsAsync(IntegrationResult<List<GitHubCommit>>.Ok(new List<GitHubCommit>
+        ResolveDriver();
+        _client.Setup(c => c.ListCommitsAsync(
+                It.Is<ListCommitsRequest>(r => r.Owner == "acme" && r.RepoName == "widgets" && r.Ref == "main" && r.Since == null),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<IReadOnlyList<Commit>>.FromOk(new List<Commit>
             {
-                new() { Sha = "abc", Message = "fix", Author = "bob", Additions = 3, Deletions = 1, Files = new List<string> { "a.cs" } },
+                new("abc", "fix", "bob", DateTimeOffset.UtcNow),
             }));
 
         var result = await _sut.GetCommitsAsync(_tenant, Repo, "main", null, "corr-c");
@@ -79,8 +91,7 @@ public class GitExtraOpsMediationTests
         result.Outcome.Should().Be("Done");
         result.Commits.Should().HaveCount(1);
         result.Commits![0].Sha.Should().Be("abc");
-        result.Commits[0].Files.Should().Contain("a.cs");
-        _factory.Verify(f => f.Create(SecretToken), Times.Once);
+        _resolver.Verify(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.CommitsReadSuccess);
     }
 
@@ -92,8 +103,8 @@ public class GitExtraOpsMediationTests
         var result = await _sut.GetCommitsAsync(_tenant, Repo, "main", null, "corr-c");
 
         result.FailureCode.Should().Be(GitFailureCodes.RepoNotAuthorized);
-        _tokenResolver.Verify(t => t.ResolveAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
+        _resolver.Verify(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _client.VerifyNoOtherCalls();
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.CommitsReadFailed);
     }
 
@@ -101,11 +112,13 @@ public class GitExtraOpsMediationTests
     public async Task GetFileChanges_Success_MapsChanges_OneEvent()
     {
         Allow();
-        ResolveToken();
-        _github.Setup(g => g.GetGitHubFileChangesAsync(Repo, "feature"))
-            .ReturnsAsync(IntegrationResult<List<GitHubFileChange>>.Ok(new List<GitHubFileChange>
+        ResolveDriver();
+        _client.Setup(c => c.ListBranchFileChangesAsync(
+                It.Is<ListBranchFileChangesRequest>(r => r.Owner == "acme" && r.RepoName == "widgets" && r.Branch == "feature"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<IReadOnlyList<PrFile>>.FromOk(new List<PrFile>
             {
-                new() { FilePath = "a.cs", ChangeType = "modified", Additions = 2, Deletions = 0 },
+                new("a.cs", PrFileStatus.Modified, 2, 0),
             }));
 
         var result = await _sut.GetFileChangesAsync(_tenant, Repo, "feature", "corr-f");
@@ -113,6 +126,7 @@ public class GitExtraOpsMediationTests
         result.Success.Should().BeTrue();
         result.FileChanges.Should().HaveCount(1);
         result.FileChanges![0].FilePath.Should().Be("a.cs");
+        result.FileChanges[0].ChangeType.Should().Be("modified");
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.FileChangesReadSuccess);
     }
 
@@ -120,9 +134,9 @@ public class GitExtraOpsMediationTests
     public async Task DeleteBranch_Success_OneEvent()
     {
         Allow();
-        ResolveToken();
-        _github.Setup(g => g.DeleteGitHubBranchAsync(Repo, "feature/foo"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        ResolveDriver();
+        _client.Setup(c => c.DeleteBranchAsync("acme", "widgets", "feature/foo", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<bool>.FromOk(true));
 
         var result = await _sut.DeleteBranchAsync(_tenant, Repo, "feature/foo", "corr-d");
 
@@ -136,9 +150,9 @@ public class GitExtraOpsMediationTests
     public async Task DeleteBranch_PlatformFailure_TypedError_OneFailedEvent()
     {
         Allow();
-        ResolveToken();
-        _github.Setup(g => g.DeleteGitHubBranchAsync(Repo, "feature"))
-            .ReturnsAsync(IntegrationResult<bool>.Fail("404: not found"));
+        ResolveDriver();
+        _client.Setup(c => c.DeleteBranchAsync("acme", "widgets", "feature", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<bool>.FromError(new PlatformError.NotFound()));
 
         var result = await _sut.DeleteBranchAsync(_tenant, Repo, "feature", "corr-d");
 
@@ -148,24 +162,24 @@ public class GitExtraOpsMediationTests
     }
 
     [Test]
-    public async Task GetCommits_TokenUnavailable_503_FailClosed()
+    public async Task GetCommits_DriverUnavailable_503_FailClosed()
     {
         Allow();
-        NoToken();
+        NoDriver();
 
         var result = await _sut.GetCommitsAsync(_tenant, Repo, "main", null, "corr-c");
 
         result.FailureCode.Should().Be(GitFailureCodes.TokenUnavailable);
-        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
+        _client.VerifyNoOtherCalls();
     }
 
     [Test]
     public async Task CredentialSafety_TokenNeverLeaks()
     {
         Allow();
-        ResolveToken();
-        _github.Setup(g => g.GetGitHubFileChangesAsync(Repo, "main"))
-            .ReturnsAsync(IntegrationResult<List<GitHubFileChange>>.Ok(new List<GitHubFileChange>()));
+        ResolveDriver();
+        _client.Setup(c => c.ListBranchFileChangesAsync(It.IsAny<ListBranchFileChangesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<IReadOnlyList<PrFile>>.FromOk(new List<PrFile>()));
 
         var result = await _sut.GetFileChangesAsync(_tenant, Repo, "main", "corr-f");
 

@@ -39,6 +39,10 @@
   <ItemGroup>
     <ProjectReference Include="..\Tamma.Core\Tamma.Core.csproj" />
     <ProjectReference Include="..\Tamma.Data\Tamma.Data.csproj" />
+    <!-- Epic 31 P2 — the ADL ExecuteCoreAsync helpers are retyped onto the
+         platform-neutral IGitPlatformClient (never a platform-specific client;
+         the residency ratchet enforces that). -->
+    <ProjectReference Include="..\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
   </ItemGroup>
 
   <!-- Story 38-4 — rule-1 build-time guardrail (TAMMA001). Referenced as an ANALYZER so

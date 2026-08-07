@@ -19,6 +19,9 @@
     <PackageReference Include="Moq" Version="4.20.70" />
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
+    <!-- Epic 31 P2 — the config-tier integration test builds the real GitHub
+         driver factory over a named HttpClient with a scripted handler. -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
     <!-- 9.0.11 (not 8.0.0): Tamma.Platforms.GitHub → Tamma.Activities pins
          Logging.Abstractions 9.x; the lower version fails CS1705 at compile. -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.11" />

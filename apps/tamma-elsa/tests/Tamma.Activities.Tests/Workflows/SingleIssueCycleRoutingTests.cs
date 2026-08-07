@@ -411,7 +411,8 @@ public class SingleIssueCycleRoutingTests
             c.Target.Activity.Id == "CiGate")
             .Should().BeTrue("the CI gate must be entered when the TDD loop is done");
 
-        // Reachability, not adjacency: the CI-passed edge now runs through
+        // Reachability, not adjacency: the CI-passed edge now runs through the
+        // Epic 31 P2 §4 check step (CheckUndraftSupported) and then
         // MarkPrReadyForReview (the cycle opens its PR as a DRAFT and GitHub cannot
         // merge a draft, so it is un-drafted before the gate). The invariant this
         // test protects is unchanged — only a CI PASS may reach the merge gate.
@@ -420,8 +421,13 @@ public class SingleIssueCycleRoutingTests
         _flowchart.Connections.Any(c =>
             c.Source.Activity.Id == "CiOk" &&
             c.Source.Port == "True" &&
+            c.Target.Activity.Id == "CheckUndraftSupported")
+            .Should().BeTrue("the CI-passed edge runs the §4 is-supported check first");
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "CheckUndraftSupported" &&
+            c.Source.Port == "Supported" &&
             c.Target.Activity.Id == "MarkPrReadyForReview")
-            .Should().BeTrue("the CI-passed edge marks the draft PR ready before the gate");
+            .Should().BeTrue("a supported un-draft marks the draft PR ready before the gate");
     }
 
     [Test]

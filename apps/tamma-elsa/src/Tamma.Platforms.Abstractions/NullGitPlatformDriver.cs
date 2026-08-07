@@ -54,6 +54,25 @@ public sealed class NullGitPlatformDriver : IGitPlatformDriver
             CreateBranchRequest request, CancellationToken ct = default) =>
             Task.FromResult(PlatformResult<Branch>.FromServiceUnavailable());
 
+        // Epic 31 P2 core-verb additions — same not-wired stub as the
+        // other core verbs.
+        public Task<PlatformResult<Branch>> GetBranchAsync(
+            string owner, string repoName, string branchName, CancellationToken ct = default) =>
+            Task.FromResult(PlatformResult<Branch>.FromServiceUnavailable());
+
+        public Task<PlatformResult<bool>> DeleteBranchAsync(
+            string owner, string repoName, string branchName, CancellationToken ct = default) =>
+            Task.FromResult(PlatformResult<bool>.FromServiceUnavailable());
+
+        public Task<PlatformResult<IReadOnlyList<PullRequest>>> ListOpenPullRequestsForBranchAsync(
+            string owner, string repoName, string sourceBranch, string targetBranch,
+            CancellationToken ct = default) =>
+            Task.FromResult(PlatformResult<IReadOnlyList<PullRequest>>.FromServiceUnavailable());
+
+        public Task<PlatformResult<PullRequest>> UpdatePullRequestAsync(
+            UpdatePullRequestRequest request, CancellationToken ct = default) =>
+            Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());
+
         public Task<PlatformResult<PullRequest>> OpenPullRequestAsync(
             OpenPullRequestRequest request, CancellationToken ct = default) =>
             Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());

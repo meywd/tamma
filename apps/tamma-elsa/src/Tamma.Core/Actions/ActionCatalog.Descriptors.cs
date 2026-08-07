@@ -720,6 +720,13 @@ public static partial class ActionCatalog
             "Tamma.Api.Services.Actions.GovernancePolicySnapshotPrimingService"),
         Automation(BackgroundActor.PlatformTaskWorker, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Platform task worker", "Drains the platform task queue (one task at a time per process; RunOnStartup ships false).",
             "Tamma.Api.Services.PlatformTasks.PlatformTaskWorker"),
+        // Epic 31 P2 — the two platform-plane hosted services the P2 swap added.
+        // ReadOnly: the invalidator only evicts a process-local in-memory cache
+        // (the ProviderSettingsStorePrimingService risk-honesty precedent).
+        Automation(BackgroundActor.PlatformDriverCacheInvalidator, ActionGroup.PlatformAutomation, ActionRisk.ReadOnly, "Platform driver-cache invalidator", "Evicts cached platform drivers on CREDENTIAL_ROTATED / DISCONNECTED / SWITCH_ORG platform events (Story 31-2's designed subscriber, built in Epic 31 P2). Process-local in-memory eviction only.",
+            "Tamma.Api.Services.Platforms.PlatformDriverCacheInvalidator"),
+        Automation(BackgroundActor.GitHubInstallationBridgeBackfill, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "GitHub installation bridge backfill", "One-shot startup sweep bridging tenant-linked github_installations rows into tenant_platform_installations (Epic 31 P2 seam-14 registry unification); idempotent, so re-runs are no-ops.",
+            "Tamma.Api.Services.Platforms.GitHubInstallationBridgeBackfillService"),
 
         // ── platform-task (8) — all platform-automation ──────────────────────
 

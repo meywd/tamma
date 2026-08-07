@@ -96,14 +96,27 @@ public sealed class PlatformInstallationEventEmitter
 {
     private readonly IPlatformEventRepository _events;
     private readonly ILogger<PlatformInstallationEventEmitter> _logger;
+    private readonly Func<PlatformEvent, CancellationToken, Task>? _postAppend;
 
+    /// <param name="events">Durable platform-event log.</param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="postAppend">
+    /// Epic 31 P2 — optional hook invoked AFTER a successful append.
+    /// The composition root wires it to the in-process
+    /// platform-event bus so subscribers (the driver-cache
+    /// invalidator) see rotation / disconnect / switch-org events
+    /// without polling the table. Failures are swallowed + logged —
+    /// fan-out must never block the lifecycle transition.
+    /// </param>
     public PlatformInstallationEventEmitter(
         IPlatformEventRepository events,
-        ILogger<PlatformInstallationEventEmitter>? logger = null)
+        ILogger<PlatformInstallationEventEmitter>? logger = null,
+        Func<PlatformEvent, CancellationToken, Task>? postAppend = null)
     {
         ArgumentNullException.ThrowIfNull(events);
         _events = events;
         _logger = logger ?? NullLogger<PlatformInstallationEventEmitter>.Instance;
+        _postAppend = postAppend;
     }
 
     /// <inheritdoc />
@@ -178,6 +191,24 @@ public sealed class PlatformInstallationEventEmitter
         try
         {
             await _events.AppendAsync(evt, ct).ConfigureAwait(false);
+
+            if (_postAppend is not null)
+            {
+                // In-process fan-out (cache invalidation). Best-effort:
+                // a subscriber failure must not block the transition.
+                try
+                {
+                    await _postAppend(evt, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Post-append fan-out for {EventType} failed (tenant {TenantId}); the "
+                        + "durable event is already appended — cache TTL self-heals",
+                        type, tenantId);
+                }
+            }
         }
         catch (Exception ex)
         {

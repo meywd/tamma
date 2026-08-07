@@ -1,44 +1,53 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.ADL;
-using Tamma.Core.Interfaces;
 using Tamma.Core.Logging;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
+using Tamma.Platforms.Abstractions;
+using PModels = Tamma.Platforms.Abstractions.Models;
 
 namespace Tamma.Api.Services.Git;
 
 /// <summary>
-/// Story 38-1 — composes the git-mediation sequence entirely inside
-/// <c>Tamma.Api</c>: cross-tenant guard → per-tenant token (BYOK→platform) →
-/// platform call with the RESOLVED token → exactly-one terminal DCB event.
+/// Story 38-1 / Epic 31 P2 — composes the git-mediation sequence entirely inside
+/// <c>Tamma.Api</c>: cross-tenant guard → per-tenant DRIVER resolution
+/// (tenant installation → <c>Platform:</c> config tier) → platform call through
+/// the resolved driver's <see cref="IGitPlatformClient"/> → exactly-one terminal
+/// DCB event.
 ///
-/// <para>The platform call reuses the existing, well-tested ADL orchestration
-/// cores (<c>CreateBranchActivity.ExecuteCoreAsync</c> etc.) but against a
-/// TOKEN-BOUND <see cref="IGitHubIntegrationService"/> minted by
-/// <see cref="IGitHubClientFactory"/> — so "the token used == the token
-/// resolved". The resolved token lives only on that request-scoped service
-/// instance; it is NEVER logged, returned, or written to the audit event
-/// (only the <c>credentialSource</c> LABEL is surfaced).</para>
+/// <para><b>P2 swap.</b> The 17 op cores used to mint a token-bound GitHub
+/// client per call (<c>IGitHubClientFactory</c> — deleted). They now resolve
+/// <see cref="IPlatformResolver.ResolveForMediationAsync"/> and speak only the
+/// platform abstraction; the driver owns credentials, base URL and platform
+/// dialect. The mediation CONTRACT is unchanged: one terminal event, no-throw,
+/// the same typed key-free failure taxonomy, and the same coarse wire strings
+/// (<see cref="PlatformErrorText.ToLegacyString"/> reproduces the live path's
+/// status-prefixed error shape so <see cref="ParsePlatformStatus"/> and the ADL
+/// classifiers land in the same classes). The resolved credential lives only
+/// inside the driver; it is NEVER logged, returned, or written to the audit
+/// event (only the <c>credentialSource</c> LABEL is surfaced).</para>
+///
+/// <para><b>capability_unsupported (plan §4).</b> A driver's typed capability
+/// refusal surfaces FIRST-CLASS: <c>failureCode = "capability_unsupported"</c>
+/// (exact code, never coarsened into PLATFORM_ERROR) so the workflow's check
+/// step / safety-net outcome can branch on it. No route or SiteKey changed.</para>
 /// </summary>
 public sealed class GitMediationService : IGitMediationService
 {
     private readonly IGitRepoAuthorizer _authorizer;
-    private readonly IGitTokenResolver _tokenResolver;
-    private readonly IGitHubClientFactory _githubFactory;
+    private readonly IPlatformResolver _platformResolver;
     private readonly IEventRepository _events;
     private readonly ILogger<GitMediationService> _logger;
 
     public GitMediationService(
         IGitRepoAuthorizer authorizer,
-        IGitTokenResolver tokenResolver,
-        IGitHubClientFactory githubFactory,
+        IPlatformResolver platformResolver,
         IEventRepository events,
         ILogger<GitMediationService> logger)
     {
         _authorizer = authorizer ?? throw new ArgumentNullException(nameof(authorizer));
-        _tokenResolver = tokenResolver ?? throw new ArgumentNullException(nameof(tokenResolver));
-        _githubFactory = githubFactory ?? throw new ArgumentNullException(nameof(githubFactory));
+        _platformResolver = platformResolver ?? throw new ArgumentNullException(nameof(platformResolver));
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -159,7 +168,7 @@ public sealed class GitMediationService : IGitMediationService
 
     /// <summary>
     /// F3 — run one mediation op body; convert any unexpected exception (DB read,
-    /// secret decrypt, client mint, transport) into a typed key-free
+    /// secret decrypt, driver compose, transport) into a typed key-free
     /// PLATFORM_ERROR result plus exactly one terminal GIT.* FAILED event. A
     /// cancellation is not a platform failure and propagates.
     /// </summary>
@@ -200,6 +209,47 @@ public sealed class GitMediationService : IGitMediationService
     }
 
     // ===================================================================
+    // Driver resolution (the P2 seam): tenant installation → Platform:
+    // config tier → fail-closed GIT_TOKEN_UNAVAILABLE. The source LABEL
+    // maps onto the pre-swap taxonomy: TenantInstallation ⇒ "byok",
+    // PlatformDefault ⇒ "platform".
+    // ===================================================================
+
+    private sealed record ResolvedClient(IGitPlatformClient Client, string Source);
+
+    private async Task<ResolvedClient?> ResolveClientAsync(Guid? tenantId, CancellationToken ct)
+    {
+        var resolution = await _platformResolver
+            .ResolveForMediationAsync(tenantId, ct)
+            .ConfigureAwait(false);
+        if (resolution is null) return null;
+
+        var source = resolution.Source == MediationCredentialSource.TenantInstallation
+            ? GitCredentialSources.Byok
+            : GitCredentialSources.Platform;
+        return new ResolvedClient(resolution.Driver.Client, source);
+    }
+
+    /// <summary>Legacy-string + capability projection of a non-Ok platform result.</summary>
+    private readonly record struct PlatformFailure(string Reason, bool CapabilityUnsupported);
+
+    private static PlatformFailure Describe<T>(PlatformResult<T> result) => result switch
+    {
+        PlatformResult<T>.Failed f => new(
+            PlatformErrorText.ToLegacyString(f.Error),
+            PlatformErrorText.IsCapabilityUnsupported(f.Error)),
+        PlatformResult<T>.ServiceUnavailable => new("503: platform unavailable", false),
+        _ => new("unknown platform result", false),
+    };
+
+    private static string PrStateWire(PModels.PullRequestState state) => state switch
+    {
+        PModels.PullRequestState.Closed => "closed",
+        PModels.PullRequestState.Merged => "merged",
+        _ => "open",
+    };
+
+    // ===================================================================
     // Create branch
     // ===================================================================
 
@@ -211,17 +261,16 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.BranchCreatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.BranchCreatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
         var strategy = string.IsNullOrWhiteSpace(body.ConflictStrategy)
             ? CreateBranchActivity.DefaultConflictStrategy
             : body.ConflictStrategy!;
 
         var outcome = await CreateBranchActivity.ExecuteCoreAsync(
-            github, repo, body.IssueNumber, body.BranchName, body.BaseRef, strategy, _logger).ConfigureAwait(false);
+            cred.Client, repo, body.IssueNumber, body.BranchName, body.BaseRef, strategy, _logger).ConfigureAwait(false);
 
         if (outcome.Outcome == "Created")
         {
@@ -268,12 +317,11 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrOpenedFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrOpenedFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var coreRequest = new CreatePullRequestRequest
+        var coreRequest = new Tamma.Core.Interfaces.CreatePullRequestRequest
         {
             Title = body.Title,
             Body = body.Body ?? string.Empty,
@@ -285,7 +333,7 @@ public sealed class GitMediationService : IGitMediationService
         };
 
         var outcome = await CreatePullRequestActivity.ExecuteCoreAsync(
-            github, repo, body.HeadRef, body.BaseRef, body.IsDraft, coreRequest, _logger).ConfigureAwait(false);
+            cred.Client, repo, body.HeadRef, body.BaseRef, body.IsDraft, coreRequest, _logger).ConfigureAwait(false);
 
         if (outcome.Outcome is "Created" or "Updated")
         {
@@ -332,15 +380,14 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrMergeFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrMergeFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
         var strategy = MergePullRequestActivity.NormalizeStrategy(body.MergeStrategy);
 
         var outcome = await MergePullRequestActivity.ExecuteCoreAsync(
-            github, repo, prNumber, body.IssueNumber, body.BranchName ?? string.Empty, strategy,
+            cred.Client, repo, prNumber, body.IssueNumber, body.BranchName ?? string.Empty, strategy,
             body.AutoDeleteBranch, body.CloseAssociatedIssue, _logger).ConfigureAwait(false);
 
         if (outcome.MergeSucceeded)
@@ -392,35 +439,37 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.IssueUpdatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.IssueUpdatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var issueText = issueNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         // Post the status comment, then add / remove labels. The first failure
         // surfaces a loud typed failure (no partial false success).
         if (!string.IsNullOrWhiteSpace(body.Body))
         {
-            var comment = await github.PostIssueCommentAsync(repo, issueNumber, body.Body!).ConfigureAwait(false);
-            if (!comment.Success)
-                return await IssueFailAsync(tenantId, repo, issueNumber, body.CorrelationId, cred.Source, comment.Error, ct).ConfigureAwait(false);
+            var comment = await cred.Client.CreateIssueCommentAsync(owner, repoName, issueText, body.Body!, ct).ConfigureAwait(false);
+            if (comment is not PlatformResult<PModels.IssueComment>.Ok)
+                return await IssueFailAsync(tenantId, repo, issueNumber, body.CorrelationId, cred.Source, Describe(comment), ct).ConfigureAwait(false);
         }
 
         if (body.AddLabels is { Count: > 0 })
         {
-            var added = await github.AddIssueLabelsAsync(repo, issueNumber, body.AddLabels.ToArray()).ConfigureAwait(false);
-            if (!added.Success)
-                return await IssueFailAsync(tenantId, repo, issueNumber, body.CorrelationId, cred.Source, added.Error, ct).ConfigureAwait(false);
+            var added = await cred.Client.AddIssueLabelsAsync(
+                new PModels.AddIssueLabelsRequest(owner, repoName, issueText, body.AddLabels.ToList()), ct).ConfigureAwait(false);
+            if (added is not PlatformResult<IReadOnlyList<string>>.Ok)
+                return await IssueFailAsync(tenantId, repo, issueNumber, body.CorrelationId, cred.Source, Describe(added), ct).ConfigureAwait(false);
         }
 
         if (body.RemoveLabels is { Count: > 0 })
         {
             foreach (var label in body.RemoveLabels)
             {
-                var removed = await github.RemoveIssueLabelAsync(repo, issueNumber, label).ConfigureAwait(false);
-                if (!removed.Success)
-                    return await IssueFailAsync(tenantId, repo, issueNumber, body.CorrelationId, cred.Source, removed.Error, ct).ConfigureAwait(false);
+                var removed = await cred.Client.RemoveIssueLabelAsync(owner, repoName, issueText, label, ct).ConfigureAwait(false);
+                if (removed is not PlatformResult<IReadOnlyList<string>>.Ok)
+                    return await IssueFailAsync(tenantId, repo, issueNumber, body.CorrelationId, cred.Source, Describe(removed), ct).ConfigureAwait(false);
             }
         }
 
@@ -428,9 +477,15 @@ public sealed class GitMediationService : IGitMediationService
         // the wire supports it for completeness).
         if (string.Equals(body.Status, "closed", StringComparison.OrdinalIgnoreCase))
         {
-            var closed = await github.CloseGitHubIssueAsync(repo, issueNumber).ConfigureAwait(false);
-            if (!closed.Success || !closed.Data)
-                return await IssueFailAsync(tenantId, repo, issueNumber, body.CorrelationId, cred.Source, closed.Error, ct).ConfigureAwait(false);
+            var closed = await cred.Client.CloseIssueAsync(owner, repoName, issueText, comment: null, ct).ConfigureAwait(false);
+            if (closed is not PlatformResult<PModels.Issue>.Ok closedOk
+                || closedOk.Value.State != PModels.IssueState.Closed)
+            {
+                var failure = closed is PlatformResult<PModels.Issue>.Ok
+                    ? new PlatformFailure("issue close returned an unsuccessful result", false)
+                    : Describe(closed);
+                return await IssueFailAsync(tenantId, repo, issueNumber, body.CorrelationId, cred.Source, failure, ct).ConfigureAwait(false);
+            }
         }
 
         var ok = new GitMediationResult
@@ -447,17 +502,19 @@ public sealed class GitMediationService : IGitMediationService
     }
 
     private async Task<GitMediationResult> IssueFailAsync(
-        Guid? tenantId, string repo, int issueNumber, string correlationId, string credentialSource, string? reason, CancellationToken ct)
+        Guid? tenantId, string repo, int issueNumber, string correlationId, string credentialSource, PlatformFailure failure, CancellationToken ct)
     {
-        var failCode = MapIssueFailure(reason);
+        var failCode = failure.CapabilityUnsupported
+            ? GitFailureCodes.CapabilityUnsupported
+            : MapIssueFailure(failure.Reason);
         var fail = new GitMediationResult
         {
             Success = false,
             CredentialSource = credentialSource,
             Outcome = "Failed",
             FailureCode = failCode,
-            FailureReason = reason,
-            PlatformStatusCode = ParsePlatformStatus(reason),
+            FailureReason = failure.Reason,
+            PlatformStatusCode = ParsePlatformStatus(failure.Reason),
             CorrelationId = correlationId,
         };
         await EmitAsync(GitEventTypes.IssueUpdatedFailed, GitEventTypes.IssueUpdateOperation, tenantId, repo, correlationId, credentialSource, failCode,
@@ -476,24 +533,28 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrCommentsReadFailed, correlationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrCommentsReadFailed, correlationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var res = await github.GetPullRequestReviewCommentsAsync(repo, prNumber).ConfigureAwait(false);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var res = await cred.Client.ListPullRequestReviewCommentsAsync(
+            owner, repoName, prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), ct).ConfigureAwait(false);
 
-        if (!res.Success)
+        if (res is not PlatformResult<IReadOnlyList<PModels.PullRequestReviewComment>>.Ok resOk)
         {
-            var failCode = MapReadFailure(res.Error);
+            var failure = Describe(res);
+            var failCode = failure.CapabilityUnsupported
+                ? GitFailureCodes.CapabilityUnsupported
+                : MapReadFailure(failure.Reason);
             var fail = new GitMediationResult
             {
                 Success = false,
                 CredentialSource = cred.Source,
                 Outcome = "Error",
                 FailureCode = failCode,
-                FailureReason = res.Error,
-                PlatformStatusCode = ParsePlatformStatus(res.Error),
+                FailureReason = failure.Reason,
+                PlatformStatusCode = ParsePlatformStatus(failure.Reason),
                 CorrelationId = correlationId,
             };
             await EmitAsync(GitEventTypes.PrCommentsReadFailed, op, tenantId, repo, correlationId, cred.Source, failCode,
@@ -501,15 +562,15 @@ public sealed class GitMediationService : IGitMediationService
             return fail;
         }
 
-        var comments = (res.Data ?? new List<GitHubReviewComment>())
+        var comments = resOk.Value
             .Select(c => new PrCommentDto
             {
-                Id = c.Id,
+                Id = long.TryParse(c.Id, out var id) ? id : 0,
                 Body = c.Body,
                 Path = c.Path,
                 Line = c.Line,
-                Author = c.Author,
-                CreatedAt = c.CreatedAt,
+                Author = c.AuthorLogin,
+                CreatedAt = c.CreatedAt.UtcDateTime,
             })
             .ToList();
 
@@ -537,32 +598,33 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrDetailsReadFailed, correlationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrDetailsReadFailed, correlationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var res = await github.GetGitHubPullRequestAsync(repo, prNumber).ConfigureAwait(false);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var res = await cred.Client.GetPullRequestAsync(
+            owner, repoName, prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), ct).ConfigureAwait(false);
 
-        if (!res.Success || res.Data is null)
-            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrDetailsReadFailed, correlationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+        if (res is not PlatformResult<PModels.PullRequest>.Ok resOk)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrDetailsReadFailed, correlationId, cred.Source, Describe(res), new { prNumber }, ct).ConfigureAwait(false);
 
         var ok = new GitMediationResult
         {
             Success = true,
             CredentialSource = cred.Source,
             Outcome = "Done",
-            PrNumber = res.Data.Number,
-            TargetBranch = res.Data.BaseBranch,
+            PrNumber = int.TryParse(resOk.Value.Number, out var n) ? n : prNumber,
+            TargetBranch = resOk.Value.TargetBranch,
             CorrelationId = correlationId,
         };
         await EmitAsync(GitEventTypes.PrDetailsReadSuccess, op, tenantId, repo, correlationId, cred.Source, null,
-            new { prNumber, baseBranch = res.Data.BaseBranch }, ct).ConfigureAwait(false);
+            new { prNumber, baseBranch = resOk.Value.TargetBranch }, ct).ConfigureAwait(false);
         return ok;
     }
 
     // ===================================================================
-    // GitHub extra ops (Story 38 Phase 1) — commits / file-changes reads + delete
+    // Extra ops (Story 38 Phase 1) — commits / file-changes reads + delete
     // ===================================================================
 
     private async Task<GitMediationResult> GetCommitsCoreAsync(Guid? tenantId, string repo, string branch, DateTime? since, string correlationId, CancellationToken ct)
@@ -572,26 +634,28 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.CommitsReadFailed, correlationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.CommitsReadFailed, correlationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var res = await github.GetGitHubCommitsAsync(repo, branch, since).ConfigureAwait(false);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var res = await cred.Client.ListCommitsAsync(
+            new PModels.ListCommitsRequest(owner, repoName, branch,
+                since is { } s ? new DateTimeOffset(DateTime.SpecifyKind(s, DateTimeKind.Utc)) : null), ct).ConfigureAwait(false);
 
-        if (!res.Success)
-            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.CommitsReadFailed, correlationId, cred.Source, res.Error, new { branch }, ct).ConfigureAwait(false);
+        if (res is not PlatformResult<IReadOnlyList<PModels.Commit>>.Ok resOk)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.CommitsReadFailed, correlationId, cred.Source, Describe(res), new { branch }, ct).ConfigureAwait(false);
 
-        var commits = (res.Data ?? new List<GitHubCommit>())
+        var commits = resOk.Value
             .Select(c => new GitCommitDto
             {
                 Sha = c.Sha,
                 Message = c.Message,
-                Author = c.Author,
-                Timestamp = c.Timestamp,
-                Additions = c.Additions,
-                Deletions = c.Deletions,
-                Files = c.Files.ToList(),
+                Author = c.AuthorName,
+                Timestamp = c.Timestamp.UtcDateTime,
+                Additions = 0,
+                Deletions = 0,
+                Files = new List<string>(),
             })
             .ToList();
 
@@ -615,21 +679,22 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.FileChangesReadFailed, correlationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.FileChangesReadFailed, correlationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var res = await github.GetGitHubFileChangesAsync(repo, branch).ConfigureAwait(false);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var res = await cred.Client.ListBranchFileChangesAsync(
+            new PModels.ListBranchFileChangesRequest(owner, repoName, branch), ct).ConfigureAwait(false);
 
-        if (!res.Success)
-            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.FileChangesReadFailed, correlationId, cred.Source, res.Error, new { branch }, ct).ConfigureAwait(false);
+        if (res is not PlatformResult<IReadOnlyList<PModels.PrFile>>.Ok resOk)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.FileChangesReadFailed, correlationId, cred.Source, Describe(res), new { branch }, ct).ConfigureAwait(false);
 
-        var changes = (res.Data ?? new List<GitHubFileChange>())
+        var changes = resOk.Value
             .Select(f => new GitFileChangeDto
             {
-                FilePath = f.FilePath,
-                ChangeType = f.ChangeType,
+                FilePath = f.Path,
+                ChangeType = FileStatusWire(f.Status),
                 Additions = f.Additions,
                 Deletions = f.Deletions,
             })
@@ -648,6 +713,16 @@ public sealed class GitMediationService : IGitMediationService
         return ok;
     }
 
+    private static string FileStatusWire(PModels.PrFileStatus status) => status switch
+    {
+        PModels.PrFileStatus.Added => "added",
+        PModels.PrFileStatus.Modified => "modified",
+        PModels.PrFileStatus.Removed => "removed",
+        PModels.PrFileStatus.Renamed => "renamed",
+        PModels.PrFileStatus.Copied => "copied",
+        _ => "changed",
+    };
+
     private async Task<GitMediationResult> DeleteBranchCoreAsync(Guid? tenantId, string repo, string branchName, string correlationId, CancellationToken ct)
     {
         var op = GitEventTypes.BranchDeleteOperation;
@@ -655,15 +730,15 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.BranchDeletedFailed, correlationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.BranchDeletedFailed, correlationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var res = await github.DeleteGitHubBranchAsync(repo, branchName).ConfigureAwait(false);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var res = await cred.Client.DeleteBranchAsync(owner, repoName, branchName, ct).ConfigureAwait(false);
 
-        if (!res.Success)
-            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.BranchDeletedFailed, correlationId, cred.Source, res.Error, new { branchName }, ct).ConfigureAwait(false);
+        if (res is not PlatformResult<bool>.Ok)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.BranchDeletedFailed, correlationId, cred.Source, Describe(res), new { branchName }, ct).ConfigureAwait(false);
 
         var ok = new GitMediationResult
         {
@@ -691,56 +766,59 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.ReleaseCreatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.ReleaseCreatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var request = new Tamma.Core.Interfaces.ReleaseCreationRequest
-        {
-            TagName = body.TagName,
-            TargetCommitish = body.TargetRef,
-            Name = string.IsNullOrWhiteSpace(body.Name) ? body.TagName : body.Name,
-            Body = body.Body,
-            Draft = body.Draft,
-            Prerelease = body.Prerelease,
-        };
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var res = await cred.Client.CreateReleaseAsync(
+            new PModels.CreateReleaseRequest(
+                Owner: owner,
+                RepoName: repoName,
+                TagName: body.TagName,
+                Name: string.IsNullOrWhiteSpace(body.Name) ? body.TagName : body.Name,
+                Body: body.Body,
+                TargetCommitish: body.TargetRef,
+                Draft: body.Draft,
+                Prerelease: body.Prerelease), ct).ConfigureAwait(false);
 
-        var res = await github.CreateGitHubReleaseAsync(repo, request).ConfigureAwait(false);
+        if (res is not PlatformResult<PModels.Release>.Ok resOk)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.ReleaseCreatedFailed, body.CorrelationId, cred.Source, Describe(res), new { tag = body.TagName }, ct).ConfigureAwait(false);
 
-        if (!res.Success)
-            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.ReleaseCreatedFailed, body.CorrelationId, cred.Source, res.Error, new { tag = body.TagName }, ct).ConfigureAwait(false);
-
+        var releaseId = long.TryParse(resOk.Value.Id, out var rid) ? rid : 0;
         var ok = new GitMediationResult
         {
             Success = true,
             CredentialSource = cred.Source,
             Outcome = "Created",
-            ReleaseId = res.Data!.Id,
-            ReleaseUrl = res.Data.HtmlUrl,
-            ReleaseTag = res.Data.TagName ?? body.TagName,
+            ReleaseId = releaseId,
+            ReleaseUrl = resOk.Value.HtmlUrl,
+            ReleaseTag = string.IsNullOrEmpty(resOk.Value.TagName) ? body.TagName : resOk.Value.TagName,
             CorrelationId = body.CorrelationId,
         };
         await EmitAsync(GitEventTypes.ReleaseCreatedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
-            new { tag = ok.ReleaseTag, releaseId = res.Data.Id }, ct).ConfigureAwait(false);
+            new { tag = ok.ReleaseTag, releaseId }, ct).ConfigureAwait(false);
         return ok;
     }
 
-    /// <summary>Shared typed-failure path for the extra read/delete ops — key-free
-    /// PLATFORM_ERROR / NOT_FOUND (via the same 404 heuristic) + one FAILED event.</summary>
+    /// <summary>Shared typed-failure path for the read / delete / lifecycle ops —
+    /// key-free NOT_FOUND / PLATFORM_ERROR (via the same 404 heuristic), or the
+    /// first-class <c>capability_unsupported</c> code, + one FAILED event.</summary>
     private async Task<GitMediationResult> ReadFailAsync(
         Guid? tenantId, string repo, string operation, string failedEventType, string correlationId,
-        string credentialSource, string? reason, object data, CancellationToken ct)
+        string credentialSource, PlatformFailure failure, object data, CancellationToken ct)
     {
-        var failCode = MapReadFailure(reason);
+        var failCode = failure.CapabilityUnsupported
+            ? GitFailureCodes.CapabilityUnsupported
+            : MapReadFailure(failure.Reason);
         var fail = new GitMediationResult
         {
             Success = false,
             CredentialSource = credentialSource,
             Outcome = "Error",
             FailureCode = failCode,
-            FailureReason = reason,
-            PlatformStatusCode = ParsePlatformStatus(reason),
+            FailureReason = failure.Reason,
+            PlatformStatusCode = ParsePlatformStatus(failure.Reason),
             CorrelationId = correlationId,
         };
         await EmitAsync(failedEventType, operation, tenantId, repo, correlationId, credentialSource, failCode, data, ct).ConfigureAwait(false);
@@ -748,9 +826,10 @@ public sealed class GitMediationService : IGitMediationService
     }
 
     // ===================================================================
-    // Story 31-13 — PR-lifecycle verb cores (guard → token → platform →
+    // Story 31-13 — PR-lifecycle verb cores (guard → driver → platform →
     // exactly one terminal event). Failures route through the shared
-    // ReadFailAsync helper (key-free NOT_FOUND / PLATFORM_ERROR + one FAILED event).
+    // ReadFailAsync helper (key-free NOT_FOUND / PLATFORM_ERROR /
+    // capability_unsupported + one FAILED event).
     // ===================================================================
 
     private async Task<GitMediationResult> ClosePullRequestCoreAsync(Guid? tenantId, string repo, int prNumber, ClosePrRequest body, CancellationToken ct)
@@ -760,27 +839,28 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrClosedFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrClosedFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var res = await github.ClosePullRequestAsync(repo, prNumber).ConfigureAwait(false);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var res = await cred.Client.ClosePullRequestAsync(
+            owner, repoName, prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), ct).ConfigureAwait(false);
 
-        if (!res.Success || res.Data is null)
-            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrClosedFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+        if (res is not PlatformResult<PModels.PullRequest>.Ok resOk)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrClosedFailed, body.CorrelationId, cred.Source, Describe(res), new { prNumber }, ct).ConfigureAwait(false);
 
         var ok = new GitMediationResult
         {
             Success = true,
             CredentialSource = cred.Source,
             Outcome = "Closed",
-            PrNumber = res.Data.Number,
-            PrState = res.Data.State,
+            PrNumber = int.TryParse(resOk.Value.Number, out var n) ? n : prNumber,
+            PrState = PrStateWire(resOk.Value.State),
             CorrelationId = body.CorrelationId,
         };
         await EmitAsync(GitEventTypes.PrClosedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
-            new { prNumber, state = res.Data.State }, ct).ConfigureAwait(false);
+            new { prNumber, state = ok.PrState }, ct).ConfigureAwait(false);
         return ok;
     }
 
@@ -791,27 +871,28 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrReopenedFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrReopenedFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var res = await github.ReopenPullRequestAsync(repo, prNumber).ConfigureAwait(false);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var res = await cred.Client.ReopenPullRequestAsync(
+            owner, repoName, prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), ct).ConfigureAwait(false);
 
-        if (!res.Success || res.Data is null)
-            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReopenedFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+        if (res is not PlatformResult<PModels.PullRequest>.Ok resOk)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReopenedFailed, body.CorrelationId, cred.Source, Describe(res), new { prNumber }, ct).ConfigureAwait(false);
 
         var ok = new GitMediationResult
         {
             Success = true,
             CredentialSource = cred.Source,
             Outcome = "Reopened",
-            PrNumber = res.Data.Number,
-            PrState = res.Data.State,
+            PrNumber = int.TryParse(resOk.Value.Number, out var n) ? n : prNumber,
+            PrState = PrStateWire(resOk.Value.State),
             CorrelationId = body.CorrelationId,
         };
         await EmitAsync(GitEventTypes.PrReopenedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
-            new { prNumber, state = res.Data.State }, ct).ConfigureAwait(false);
+            new { prNumber, state = ok.PrState }, ct).ConfigureAwait(false);
         return ok;
     }
 
@@ -822,16 +903,18 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrCommentedFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrCommentedFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        // A PR IS an issue on GitHub — reuse the issue-comment path with the PR number.
-        var res = await github.PostIssueCommentAsync(repo, prNumber, body.Body).ConfigureAwait(false);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        // A PR IS an issue on every supported platform's comment surface —
+        // reuse the issue-comment verb with the PR number.
+        var res = await cred.Client.CreateIssueCommentAsync(
+            owner, repoName, prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), body.Body, ct).ConfigureAwait(false);
 
-        if (!res.Success)
-            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrCommentedFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+        if (res is not PlatformResult<PModels.IssueComment>.Ok)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrCommentedFailed, body.CorrelationId, cred.Source, Describe(res), new { prNumber }, ct).ConfigureAwait(false);
 
         var ok = new GitMediationResult
         {
@@ -853,15 +936,34 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var res = await github.PostPullRequestReviewCommentAsync(repo, prNumber, body.Body, body.CommitId, body.Path, body.Line, body.Side).ConfigureAwait(false);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var prText = prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        if (!res.Success || res.Data is null)
-            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+        // Anchor SHA: the caller's commit id, else the PR head branch tip (the
+        // live path's head-SHA fallback, reproduced over the abstraction).
+        var commitSha = body.CommitId;
+        if (string.IsNullOrWhiteSpace(commitSha))
+        {
+            var prRead = await cred.Client.GetPullRequestAsync(owner, repoName, prText, ct).ConfigureAwait(false);
+            if (prRead is not PlatformResult<PModels.PullRequest>.Ok prOk)
+                return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, cred.Source, Describe(prRead), new { prNumber }, ct).ConfigureAwait(false);
+
+            var headRead = await cred.Client.GetBranchAsync(owner, repoName, prOk.Value.SourceBranch, ct).ConfigureAwait(false);
+            if (headRead is not PlatformResult<PModels.Branch>.Ok headOk)
+                return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, cred.Source, Describe(headRead), new { prNumber }, ct).ConfigureAwait(false);
+            commitSha = headOk.Value.Sha;
+        }
+
+        var res = await cred.Client.CreatePullRequestReviewCommentAsync(
+            new PModels.CreatePullRequestReviewCommentRequest(
+                owner, repoName, prText, body.Path, body.Line, body.Body, commitSha!, body.Side), ct).ConfigureAwait(false);
+
+        if (res is not PlatformResult<PModels.IssueComment>.Ok resOk)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, cred.Source, Describe(res), new { prNumber }, ct).ConfigureAwait(false);
 
         var ok = new GitMediationResult
         {
@@ -869,11 +971,11 @@ public sealed class GitMediationService : IGitMediationService
             CredentialSource = cred.Source,
             Outcome = "Commented",
             PrNumber = prNumber,
-            CommentId = res.Data.Id,
+            CommentId = int.TryParse(resOk.Value.Id, out var cid) ? cid : 0,
             CorrelationId = body.CorrelationId,
         };
         await EmitAsync(GitEventTypes.PrReviewCommentedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
-            new { prNumber, commentId = res.Data.Id }, ct).ConfigureAwait(false);
+            new { prNumber, commentId = ok.CommentId }, ct).ConfigureAwait(false);
         return ok;
     }
 
@@ -884,15 +986,17 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrReviewersRequestedFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrReviewersRequestedFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var res = await github.RequestReviewersAsync(repo, prNumber, body.Reviewers).ConfigureAwait(false);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var res = await cred.Client.RequestReviewersAsync(
+            new PModels.RequestReviewersRequest(
+                owner, repoName, prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), body.Reviewers), ct).ConfigureAwait(false);
 
-        if (!res.Success)
-            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReviewersRequestedFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+        if (res is not PlatformResult<PModels.PullRequest>.Ok)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReviewersRequestedFailed, body.CorrelationId, cred.Source, Describe(res), new { prNumber }, ct).ConfigureAwait(false);
 
         var ok = new GitMediationResult
         {
@@ -914,28 +1018,30 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrLabelsUpdatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrLabelsUpdatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var prText = prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        // D2 — add then remove in ONE op; a PR IS an issue on GitHub (pass the PR
-        // number). The first failure surfaces a loud typed failure (no partial success).
+        // D2 — add then remove in ONE op; labels ride the issue side of a PR.
+        // The first failure surfaces a loud typed failure (no partial success).
         if (body.AddLabels is { Count: > 0 })
         {
-            var added = await github.AddIssueLabelsAsync(repo, prNumber, body.AddLabels.ToArray()).ConfigureAwait(false);
-            if (!added.Success)
-                return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrLabelsUpdatedFailed, body.CorrelationId, cred.Source, added.Error, new { prNumber }, ct).ConfigureAwait(false);
+            var added = await cred.Client.AddPullRequestLabelsAsync(
+                new PModels.AddPullRequestLabelsRequest(owner, repoName, prText, body.AddLabels), ct).ConfigureAwait(false);
+            if (added is not PlatformResult<PModels.PullRequest>.Ok)
+                return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrLabelsUpdatedFailed, body.CorrelationId, cred.Source, Describe(added), new { prNumber }, ct).ConfigureAwait(false);
         }
 
         if (body.RemoveLabels is { Count: > 0 })
         {
             foreach (var label in body.RemoveLabels)
             {
-                var removed = await github.RemoveIssueLabelAsync(repo, prNumber, label).ConfigureAwait(false);
-                if (!removed.Success)
-                    return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrLabelsUpdatedFailed, body.CorrelationId, cred.Source, removed.Error, new { prNumber }, ct).ConfigureAwait(false);
+                var removed = await cred.Client.RemovePullRequestLabelAsync(owner, repoName, prText, label, ct).ConfigureAwait(false);
+                if (removed is not PlatformResult<PModels.PullRequest>.Ok)
+                    return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrLabelsUpdatedFailed, body.CorrelationId, cred.Source, Describe(removed), new { prNumber }, ct).ConfigureAwait(false);
             }
         }
 
@@ -959,27 +1065,29 @@ public sealed class GitMediationService : IGitMediationService
         var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrDraftSetFailed, body.CorrelationId, ct).ConfigureAwait(false);
         if (gate is not null) return gate;
 
-        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        var cred = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
         if (cred is null)
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrDraftSetFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
-        var github = _githubFactory.Create(cred.Token);
-        var res = await github.SetPullRequestDraftAsync(repo, prNumber, body.Draft).ConfigureAwait(false);
+        var (owner, repoName) = GitRepoName.Split(repo);
+        var res = await cred.Client.SetDraftAsync(
+            new PModels.SetPullRequestDraftRequest(
+                owner, repoName, prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), body.Draft), ct).ConfigureAwait(false);
 
-        if (!res.Success || res.Data is null)
-            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrDraftSetFailed, body.CorrelationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+        if (res is not PlatformResult<PModels.PullRequest>.Ok resOk)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrDraftSetFailed, body.CorrelationId, cred.Source, Describe(res), new { prNumber }, ct).ConfigureAwait(false);
 
         var ok = new GitMediationResult
         {
             Success = true,
             CredentialSource = cred.Source,
             Outcome = "DraftSet",
-            PrNumber = res.Data.Number,
-            IsDraft = res.Data.IsDraft,
+            PrNumber = int.TryParse(resOk.Value.Number, out var n) ? n : prNumber,
+            IsDraft = resOk.Value.IsDraft,
             CorrelationId = body.CorrelationId,
         };
         await EmitAsync(GitEventTypes.PrDraftSetSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
-            new { prNumber, isDraft = res.Data.IsDraft }, ct).ConfigureAwait(false);
+            new { prNumber, isDraft = resOk.Value.IsDraft }, ct).ConfigureAwait(false);
         return ok;
     }
 
@@ -988,8 +1096,8 @@ public sealed class GitMediationService : IGitMediationService
     // ===================================================================
 
     /// <summary>Run the cross-tenant guard. On deny, emit the terminal FAILED
-    /// event and return the 403 result; the platform is NEVER called and no token
-    /// is resolved. On allow, returns null so the caller proceeds.</summary>
+    /// event and return the 403 result; the platform is NEVER called and no
+    /// driver is resolved. On allow, returns null so the caller proceeds.</summary>
     private async Task<GitMediationResult?> GuardOrDenyAsync(
         Guid? tenantId, string repo, string operation, string failedEventType, string correlationId, CancellationToken ct)
     {
@@ -1004,7 +1112,7 @@ public sealed class GitMediationService : IGitMediationService
             FailureReason = authz.Reason,
             CorrelationId = correlationId,
         };
-        // credentialSource is null — no token was resolved (fail-closed).
+        // credentialSource is null — no driver was resolved (fail-closed).
         await EmitAsync(failedEventType, operation, tenantId, repo, correlationId, credentialSource: null,
             GitFailureCodes.RepoNotAuthorized, new { }, ct).ConfigureAwait(false);
         return result;
@@ -1103,7 +1211,7 @@ public sealed class GitMediationService : IGitMediationService
     }
 
     /// <summary>Best-effort extraction of a leading numeric HTTP status from the
-    /// integration layer's status-prefixed error (e.g. <c>"403: ..."</c>). Null
+    /// legacy status-prefixed error (e.g. <c>"403: ..."</c>). Null
     /// when the message carries no numeric prefix (the coarse failureCode still
     /// classifies it).</summary>
     private static int? ParsePlatformStatus(string? reason)

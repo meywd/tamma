@@ -82,6 +82,9 @@ internal sealed class GitHubPullRequestDto
     [JsonPropertyName("state")] public string? State { get; set; }
     [JsonPropertyName("merged")] public bool Merged { get; set; }
     [JsonPropertyName("merged_at")] public DateTimeOffset? MergedAt { get; set; }
+    [JsonPropertyName("merge_commit_sha")] public string? MergeCommitSha { get; set; }
+    [JsonPropertyName("mergeable")] public bool? Mergeable { get; set; }
+    [JsonPropertyName("mergeable_state")] public string? MergeableState { get; set; }
     [JsonPropertyName("draft")] public bool Draft { get; set; }
     [JsonPropertyName("html_url")] public string? HtmlUrl { get; set; }
     [JsonPropertyName("user")] public GitHubOwnerDto? User { get; set; }
