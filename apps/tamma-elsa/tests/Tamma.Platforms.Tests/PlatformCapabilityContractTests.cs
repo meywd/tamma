@@ -1,7 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
-using Tamma.Activities.AgentDispatch;
 using Tamma.Platforms.Abstractions;
 using Tamma.Platforms.Abstractions.Models;
 using Tamma.Platforms.Gitea;
@@ -11,10 +10,10 @@ using Tamma.Platforms.GitLab;
 namespace Tamma.Platforms.Tests;
 
 /// <summary>
-/// Epic 31 P1 (stage 1) — the capability CONTRACT test: for every shipped
-/// driver kind, the driver-computed capability set must agree with verb
-/// reality, in both directions, for every capability-gated verb family on
-/// <see cref="IGitPlatformClient"/>:
+/// Epic 31 P1 — the capability CONTRACT test: for every shipped driver
+/// kind, the driver-computed capability set must agree with verb
+/// reality, in both directions, for every capability-gated verb family
+/// on <see cref="IGitPlatformClient"/>:
 ///
 /// <list type="number">
 ///   <item><b>Advertised ⇒ implemented.</b> A driver advertising a capability
@@ -28,35 +27,39 @@ namespace Tamma.Platforms.Tests;
 ///   capability must answer that capability's verbs with
 ///   <see cref="PlatformError.InvalidRequest"/> code
 ///   <c>capability_unsupported</c> — never a throw, never a silent
-///   stub — and must do so without touching the network.</item>
+///   stub — and must do so without touching the network. Two probe rows
+///   relax this arm (see <c>RelaxedWhenNotAdvertised</c>): PrFileReview and
+///   ListAccessibleRepos predate the typed-refusal convention — their
+///   interface contract lets an unwired driver answer the bare stub / an
+///   empty sequence, so the relaxed arm only demands "no lie", not the
+///   exact refusal code.</item>
 /// </list>
 ///
-/// <para><b>The exemption list</b> (<see cref="KnownCapabilityLies"/>) is
-/// pinned and SHRINK-ONLY, the governance-sweep shape: it enumerates today's
-/// known lies exactly (one: GitHub's matrix advertises
-/// <see cref="PlatformCapability.PrLifecycle"/> while
-/// <see cref="GitHubPlatformClient"/> stubs all six lifecycle verbs). A NEW
-/// lie fails the main test; GROWING the exemption list fails the membership
-/// pin; a FIXED lie fails the staleness test until its entry is deleted.</para>
+/// <para><b>Stage 2 note (2026-08-07)</b>: the exemption list is now EMPTY —
+/// P1 stage 2 made the GitHub driver real (all lifecycle + loop verbs + the
+/// probe-bearing repo listing make HTTP), deleting the single pinned
+/// GitHub/PrLifecycle lie and appending the terminal 0 to
+/// <see cref="ExemptionPinHistory"/>. The ratchet discipline stays: any NEW
+/// lie fails the main test, and the membership pin forbids the list ever
+/// growing again.</para>
 /// </summary>
 [TestFixture]
 public class PlatformCapabilityContractTests
 {
     // ====================================================================
-    // The capability → verb map. Only verb families whose interface
-    // contract names capability_unsupported are listed; the pre-31-13 core
-    // verbs (GetRepo, OpenPullRequest, …) answer ServiceUnavailable when a
-    // driver is unwired and are outside this contract. PrFileReview and
-    // ListAccessibleRepos are deliberately NOT mapped yet: GitHub's driver
-    // stubs both while the matrix advertises them, and P1 stage 2 (which
-    // makes the GitHub driver real) is the stage that can map them without
-    // widening the exemption list beyond its pinned single entry.
+    // The capability → verb map. Only verb families whose capability the
+    // matrix gates are listed. The pre-31-13 core verbs (GetRepo,
+    // OpenPullRequest, …) answer ServiceUnavailable when a driver is
+    // unwired and are outside this contract. P1 stage 2 added the
+    // PrFileReview and ListAccessibleRepos rows once the GitHub driver
+    // stopped stubbing both.
     // ====================================================================
 
     private sealed record VerbProbe(
         PlatformCapability Capability,
         string VerbName,
-        Func<IGitPlatformClient, Task<VerbAnswer>> Invoke);
+        Func<DriverCase, Task<VerbAnswer>> Invoke,
+        bool RelaxedWhenNotAdvertised = false);
 
     /// <summary>How a verb answered, classified per the result contract.</summary>
     private sealed record VerbAnswer(bool CapabilityUnsupported, bool NotWiredStub);
@@ -68,159 +71,216 @@ public class PlatformCapabilityContractTests
             && string.Equals(ir.Code, "capability_unsupported", StringComparison.Ordinal),
         NotWiredStub: result is PlatformResult<T>.ServiceUnavailable);
 
+    /// <summary>
+    /// The accessible-repos listing has no <see cref="PlatformResult{T}"/>
+    /// envelope. Classification: a REAL implementation either yields, or
+    /// attempts HTTP (visible on the case's request counter — every case
+    /// scripts a 500 server), or throws its typed failure. Completing
+    /// silently-empty WITHOUT any HTTP is the old GitHub
+    /// <c>yield break</c> stub — the vacuous-probe lie.
+    /// </summary>
+    private static async Task<VerbAnswer> ClassifyListAccessibleRepos(DriverCase driver)
+    {
+        var before = driver.RequestCount();
+        var yielded = false;
+        var threw = false;
+        try
+        {
+            await foreach (var _ in driver.Client.ListAccessibleReposAsync())
+            {
+                yielded = true;
+                break;
+            }
+        }
+        catch
+        {
+            threw = true;
+        }
+        var attemptedHttp = driver.RequestCount() > before;
+        return new VerbAnswer(
+            CapabilityUnsupported: false,
+            NotWiredStub: !yielded && !threw && !attemptedHttp);
+    }
+
     private static readonly VerbProbe[] CapabilityVerbs =
     [
         // Story 31-13 — the six PR lifecycle verbs.
         new(PlatformCapability.PrLifecycle, "ClosePullRequestAsync",
-            async c => Classify(await c.ClosePullRequestAsync("o", "r", "1"))),
+            async d => Classify(await d.Client.ClosePullRequestAsync("o", "r", "1"))),
         new(PlatformCapability.PrLifecycle, "ReopenPullRequestAsync",
-            async c => Classify(await c.ReopenPullRequestAsync("o", "r", "1"))),
+            async d => Classify(await d.Client.ReopenPullRequestAsync("o", "r", "1"))),
         new(PlatformCapability.PrLifecycle, "RequestReviewersAsync",
-            async c => Classify(await c.RequestReviewersAsync(
+            async d => Classify(await d.Client.RequestReviewersAsync(
                 new RequestReviewersRequest("o", "r", "1", ["alice"])))),
         new(PlatformCapability.PrLifecycle, "AddPullRequestLabelsAsync",
-            async c => Classify(await c.AddPullRequestLabelsAsync(
+            async d => Classify(await d.Client.AddPullRequestLabelsAsync(
                 new AddPullRequestLabelsRequest("o", "r", "1", ["bug"])))),
         new(PlatformCapability.PrLifecycle, "RemovePullRequestLabelAsync",
-            async c => Classify(await c.RemovePullRequestLabelAsync("o", "r", "1", "bug"))),
+            async d => Classify(await d.Client.RemovePullRequestLabelAsync("o", "r", "1", "bug"))),
         new(PlatformCapability.PrLifecycle, "SetDraftAsync",
-            async c => Classify(await c.SetDraftAsync(
+            async d => Classify(await d.Client.SetDraftAsync(
                 new SetPullRequestDraftRequest("o", "r", "1", Draft: false)))),
 
         // Epic 31 P1 stage 1 — the loop verbs.
         new(PlatformCapability.IssueLifecycle, "CloseIssueAsync",
-            async c => Classify(await c.CloseIssueAsync("o", "r", "1"))),
+            async d => Classify(await d.Client.CloseIssueAsync("o", "r", "1"))),
         new(PlatformCapability.IssueLifecycle, "AddIssueLabelsAsync",
-            async c => Classify(await c.AddIssueLabelsAsync(
+            async d => Classify(await d.Client.AddIssueLabelsAsync(
                 new AddIssueLabelsRequest("o", "r", "1", ["bug"])))),
         new(PlatformCapability.IssueLifecycle, "RemoveIssueLabelAsync",
-            async c => Classify(await c.RemoveIssueLabelAsync("o", "r", "1", "bug"))),
+            async d => Classify(await d.Client.RemoveIssueLabelAsync("o", "r", "1", "bug"))),
         new(PlatformCapability.Releases, "CreateReleaseAsync",
-            async c => Classify(await c.CreateReleaseAsync(
+            async d => Classify(await d.Client.CreateReleaseAsync(
                 new CreateReleaseRequest("o", "r", "v1.0.0")))),
         new(PlatformCapability.PrReviewCommentRead, "ListPullRequestReviewCommentsAsync",
-            async c => Classify(await c.ListPullRequestReviewCommentsAsync("o", "r", "1"))),
+            async d => Classify(await d.Client.ListPullRequestReviewCommentsAsync("o", "r", "1"))),
         new(PlatformCapability.CommitReads, "ListCommitsAsync",
-            async c => Classify(await c.ListCommitsAsync(
+            async d => Classify(await d.Client.ListCommitsAsync(
                 new ListCommitsRequest("o", "r", "main")))),
         new(PlatformCapability.CommitReads, "ListBranchFileChangesAsync",
-            async c => Classify(await c.ListBranchFileChangesAsync(
+            async d => Classify(await d.Client.ListBranchFileChangesAsync(
                 new ListBranchFileChangesRequest("o", "r", "feature")))),
+
+        // Epic 31 P1 stage 2 — the two capabilities GitHub used to stub
+        // while the matrix advertised them. Relaxed not-advertised arm:
+        // their interface contract predates the typed-refusal convention
+        // (an unwired driver answers the bare stub / an empty sequence).
+        new(PlatformCapability.PrFileReview, "CreatePullRequestReviewCommentAsync",
+            async d => Classify(await d.Client.CreatePullRequestReviewCommentAsync(
+                new CreatePullRequestReviewCommentRequest("o", "r", "1", "f.cs", 1, "b", "sha"))),
+            RelaxedWhenNotAdvertised: true),
+        new(PlatformCapability.ListAccessibleRepos, "ListAccessibleReposAsync",
+            ClassifyListAccessibleRepos,
+            RelaxedWhenNotAdvertised: true),
     ];
 
     // ====================================================================
     // Driver cases — one per shipped driver kind, plus the null seam.
     // Clients are built exactly the way the factories build them, minus the
-    // startup version probe, over an HttpClient whose handler answers 500 —
-    // a verb that is really implemented would surface a Failed(...) error
-    // envelope from that 500, never capability_unsupported and never the
-    // bare not-wired ServiceUnavailable result, so the classification stays
-    // honest even if a stub grows HTTP by accident.
+    // startup version probe, over an HttpClient whose counting handler
+    // answers 500 — a verb that is really implemented surfaces a
+    // Failed(...) error envelope from that 500 (never capability_unsupported
+    // and never the bare not-wired ServiceUnavailable result), so the
+    // classification stays honest even if a stub grows HTTP by accident.
     // ====================================================================
 
     public sealed record DriverCase(
         string Name,
         IReadOnlySet<PlatformCapability> Capabilities,
-        IGitPlatformClient Client)
+        IGitPlatformClient Client,
+        Func<int> RequestCount)
     {
         public override string ToString() => Name;
     }
 
-    private sealed class Always500Handler : HttpMessageHandler
+    private sealed class CountingAlways500Handler : HttpMessageHandler
     {
+        private int _count;
+        public int Count => Volatile.Read(ref _count);
+
         protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError)
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _count);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError)
             {
                 Content = new StringContent("{}"),
             });
+        }
     }
 
-    private static IGitPlatformClient GiteaStyleClient()
+    private static DriverCase GitHubCase()
     {
+        var handler = new CountingAlways500Handler();
+        var http = new GitHubHttpClient(
+            new HttpClient(handler),
+            "https://api.github.com",
+            new GitHubAuth.Pat("test-token"));
+        return new DriverCase(
+            "GitHub",
+            // PAT-mode compute — the fullest source-host set (only the
+            // App-auth flag is narrowed away, which no probe gates).
+            GitHubPlatformDriver.ComputeCapabilities(new GitHubAuth.Pat("test-token")),
+            new GitHubPlatformClient(http, "github.com"),
+            () => handler.Count);
+    }
+
+    private static DriverCase GiteaStyleCase(string name, IReadOnlySet<PlatformCapability> capabilities)
+    {
+        var handler = new CountingAlways500Handler();
         var http = new GiteaHttpClient(
-            new HttpClient(new Always500Handler()),
+            new HttpClient(handler),
             Guid.NewGuid(),
             "https://gitea.example",
             new GiteaAuth.BotToken("test-token"),
             new GiteaOAuth2TokenCache());
-        return new GiteaPlatformClient(http, "gitea.example");
+        return new DriverCase(
+            name,
+            capabilities,
+            new GiteaPlatformClient(http, "gitea.example"),
+            () => handler.Count);
     }
 
     private static IEnumerable<DriverCase> DriverCases()
     {
-        yield return new DriverCase(
-            "GitHub",
-            PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitHub),
-            new GitHubPlatformClient(new NullGitHubActionsClient(), "github.com"));
+        yield return GitHubCase();
 
         // Version 1.22 ≥ MinimumActionsVersion so nothing is narrowed away —
         // the fullest capability set the driver can compute.
-        yield return new DriverCase(
-            "Gitea",
-            GiteaPlatformDriver.ComputeCapabilities(new Version(1, 22)),
-            GiteaStyleClient());
+        yield return GiteaStyleCase(
+            "Gitea", GiteaPlatformDriver.ComputeCapabilities(new Version(1, 22)));
 
-        yield return new DriverCase(
-            "Forgejo",
-            ForgejoPlatformDriver.ComputeCapabilities(new Version(1, 22)),
-            GiteaStyleClient());
+        yield return GiteaStyleCase(
+            "Forgejo", ForgejoPlatformDriver.ComputeCapabilities(new Version(1, 22)));
 
+        var gitlabHandler = new CountingAlways500Handler();
         yield return new DriverCase(
             "GitLab",
             PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitLab),
             new GitLabPlatformClient(
                 new GitLabHttpClient(
-                    new HttpClient(new Always500Handler()),
+                    new HttpClient(gitlabHandler),
                     new GitLabAuth.PersonalAccessToken("test-token"),
                     "https://gitlab.example"),
-                NullLogger<GitLabPlatformClient>.Instance));
+                NullLogger<GitLabPlatformClient>.Instance),
+            () => gitlabHandler.Count);
 
         yield return new DriverCase(
             "Null",
             new HashSet<PlatformCapability>(),
-            NullGitPlatformDriver.Instance.Client);
+            NullGitPlatformDriver.Instance.Client,
+            () => 0);
     }
 
     // ====================================================================
-    // The pinned, shrink-only exemption list.
+    // The exemption list — DRAINED in P1 stage 2 and pinned empty.
     // ====================================================================
 
     private sealed record CapabilityLie(string DriverCase, PlatformCapability Capability, string Reason);
 
     /// <summary>
-    /// Today's known lies, exactly. ONE entry: the GitHub matrix advertises
-    /// PrLifecycle (Story 31-13 — the LIVE surface, GitHubIntegrationService,
-    /// does perform the lifecycle) while the DRIVER stubs all six verbs.
-    /// <b>Stage 2 of P1 removes this entry</b> when the GitHub driver absorbs
-    /// the live REST/GraphQL bodies — at which point
-    /// <c>Exemptions_areStillRealLies_notStaleEntries</c> forces the delete.
+    /// Today's known lies, exactly: NONE. The single seeded entry
+    /// (GitHub / PrLifecycle — the matrix advertising the 31-13 lifecycle
+    /// over a fully-stubbed driver) was deleted in P1 stage 2 when the
+    /// GitHub driver absorbed the live REST/GraphQL bodies. A new lie is
+    /// a defect to fix in the driver, never a new entry here.
     /// </summary>
-    private static readonly CapabilityLie[] KnownCapabilityLies =
-    [
-        new("GitHub", PlatformCapability.PrLifecycle,
-            "matrix advertises the 31-13 lifecycle over a fully-stubbed driver; "
-            + "the working implementation lives on GitHubIntegrationService until "
-            + "Epic 31 P1 stage 2 moves it into Tamma.Platforms.GitHub"),
-    ];
+    private static readonly CapabilityLie[] KnownCapabilityLies = [];
 
     /// <summary>
     /// The exemption pin's recorded high-water history, oldest first —
-    /// strictly decreasing after the seed, the sweep-ratchet shape. Seeded at
-    /// 1 (2026-08-07, Epic 31 P1 stage 1). It reaches 0 in P1 stage 2 and
-    /// never grows: a NEW capability lie is not a reason to add an entry, it
-    /// is the defect this fixture exists to catch.
+    /// strictly decreasing after the seed, the sweep-ratchet shape. Seeded
+    /// at 1 (2026-08-07, Epic 31 P1 stage 1: the GitHub PrLifecycle lie);
+    /// reached its terminal 0 in P1 stage 2 (GitHub driver made real). It
+    /// can never grow again.
     /// </summary>
-    private static readonly int[] ExemptionPinHistory = [1];
+    private static readonly int[] ExemptionPinHistory = [1, 0];
 
     /// <summary>
-    /// Membership pin — the ONLY entry this list may ever contain. A new
-    /// (driver, capability) pair here must instead be fixed in the driver.
+    /// Membership pin — permanently empty. A new (driver, capability)
+    /// pair must be fixed in the driver, not exempted.
     /// </summary>
-    private static readonly (string DriverCase, PlatformCapability Capability)[] AllowedExemptions =
-    [
-        ("GitHub", PlatformCapability.PrLifecycle),
-    ];
+    private static readonly (string DriverCase, PlatformCapability Capability)[] AllowedExemptions = [];
 
     private static bool IsExempt(string driverCase, PlatformCapability capability) =>
         KnownCapabilityLies.Any(l =>
@@ -240,7 +300,7 @@ public class PlatformCapabilityContractTests
         foreach (var probe in CapabilityVerbs)
         {
             var advertised = driver.Capabilities.Contains(probe.Capability);
-            var answer = await probe.Invoke(driver.Client);
+            var answer = await probe.Invoke(driver);
 
             if (advertised && !IsExempt(driver.Name, probe.Capability))
             {
@@ -255,10 +315,11 @@ public class PlatformCapabilityContractTests
                     problems.Add(
                         $"  {driver.Name}.{probe.VerbName}: advertises {probe.Capability} but answers the "
                         + "bare ServiceUnavailable stub (\"driver isn't wired\") — a capability flag over "
-                        + "a stub is the GitHub lie this test pins; do not add an exemption, fix the driver.");
+                        + "a stub is the GitHub lie this test pinned (fixed in P1 stage 2); do not add an "
+                        + "exemption, fix the driver.");
                 }
             }
-            else if (!advertised)
+            else if (!advertised && !probe.RelaxedWhenNotAdvertised)
             {
                 if (!answer.CapabilityUnsupported)
                 {
@@ -285,7 +346,7 @@ public class PlatformCapabilityContractTests
     {
         // Growth is a RED build by construction: a new lie fails
         // AdvertisedCapabilities_MatchVerbReality, and a new exemption entry
-        // fails here because it is outside the pinned membership.
+        // fails here because it is outside the (empty) pinned membership.
         foreach (var lie in KnownCapabilityLies)
         {
             AllowedExemptions.Should().Contain(
@@ -297,7 +358,7 @@ public class PlatformCapabilityContractTests
 
         KnownCapabilityLies.Should().HaveCount(
             ExemptionPinHistory[^1],
-            "the exemption count is pinned; it may only shrink (P1 stage 2 takes it to zero)");
+            "the exemption count is pinned; P1 stage 2 took it to its terminal zero");
     }
 
     [Test]
@@ -311,15 +372,15 @@ public class PlatformCapabilityContractTests
                 $"pin history entry #{i} must be strictly smaller than #{i - 1}: an exemption "
                 + "leaves this list by the driver becoming real, never by the list growing");
         }
+        ExemptionPinHistory[^1].Should().Be(0,
+            "P1 stage 2 drained the list; the terminal 0 is permanent");
     }
 
     [Test]
     public async Task Exemptions_AreStillRealLies_NotStaleEntries()
     {
-        // The staleness arm: the moment P1 stage 2 implements the GitHub
-        // lifecycle verbs, this fails until the exemption entry is deleted
-        // (and ExemptionPinHistory gains its 0) — the list drains instead of
-        // rotting.
+        // The staleness arm — kept even though the list is empty so any
+        // future (forbidden) exemption addition immediately re-arms it.
         var cases = DriverCases().ToDictionary(c => c.Name, StringComparer.Ordinal);
 
         foreach (var lie in KnownCapabilityLies)
@@ -338,7 +399,7 @@ public class PlatformCapabilityContractTests
             var stillLying = false;
             foreach (var probe in verbs)
             {
-                var answer = await probe.Invoke(driver.Client);
+                var answer = await probe.Invoke(driver);
                 if (answer.CapabilityUnsupported || answer.NotWiredStub)
                 {
                     stillLying = true;
@@ -365,9 +426,12 @@ public class PlatformCapabilityContractTests
             PlatformCapability.Releases,
             PlatformCapability.PrReviewCommentRead,
             PlatformCapability.CommitReads,
+            PlatformCapability.PrFileReview,
+            PlatformCapability.ListAccessibleRepos,
         ]);
-        CapabilityVerbs.Should().HaveCount(13,
+        CapabilityVerbs.Should().HaveCount(15,
             "6 lifecycle + 3 issue-lifecycle + 1 release + 1 review-comment-read + 2 commit-read "
-            + "verbs; a new capability-gated verb must be added here in the same commit");
+            + "+ 1 pr-file-review + 1 accessible-repos verbs; a new capability-gated verb must be "
+            + "added here in the same commit");
     }
 }

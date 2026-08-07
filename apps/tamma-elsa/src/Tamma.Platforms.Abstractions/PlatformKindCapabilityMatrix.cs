@@ -41,10 +41,18 @@ public static class PlatformKindCapabilityMatrix
                 PlatformCapability.WebhookHmac,
                 PlatformCapability.PerAppInstallationAuth,
                 PlatformCapability.ListAccessibleRepos,
-                // Story 31-13 — GitHub is the only driver that performs the full
-                // PR lifecycle (close/reopen/reviewers/labels/draft) today; the
-                // live surface is GitHubIntegrationService + GitMediationService.
+                // Story 31-13 / Epic 31 P1 stage 2 — the GitHub DRIVER
+                // (Tamma.Platforms.GitHub) now implements the full PR
+                // lifecycle (close/reopen/reviewers/labels/draft-via-GraphQL)
+                // for real; the flag is no longer a lie over a stub.
                 PlatformCapability.PrLifecycle,
+                // Epic 31 P1 stage 2 — the loop verbs are real in the GitHub
+                // driver: issue close/labels, release create, review-comment
+                // listing, commit + branch-file-change reads.
+                PlatformCapability.IssueLifecycle,
+                PlatformCapability.Releases,
+                PlatformCapability.CommitReads,
+                PlatformCapability.PrReviewCommentRead,
             }.ToFrozenSet(),
 
             [PlatformKind.Gitea] = new[]

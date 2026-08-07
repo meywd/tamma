@@ -48,6 +48,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\Tamma.Platforms.Gitea\Tamma.Platforms.Gitea.csproj" />
+    <!-- Epic 31 P1 stage 2 — the GitHub suite drives the real driver
+         (env-gated live API; no container image exists for GitHub). -->
+    <ProjectReference Include="..\..\src\Tamma.Platforms.GitHub\Tamma.Platforms.GitHub.csproj" />
   </ItemGroup>
 
 </Project>

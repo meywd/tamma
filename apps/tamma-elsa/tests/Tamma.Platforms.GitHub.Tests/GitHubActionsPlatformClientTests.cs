@@ -1,257 +1,290 @@
+using System.Net;
 using FluentAssertions;
-using Moq;
 using NUnit.Framework;
-using Tamma.Activities.AgentDispatch;
 using Tamma.Platforms.Abstractions;
 using Tamma.Platforms.Abstractions.Models;
-using Tamma.Platforms.GitHub;
 
 namespace Tamma.Platforms.GitHub.Tests;
 
 /// <summary>
-/// Story 31-3 — translation tests for
-/// <see cref="GitHubActionsPlatformClient"/>: each
-/// <see cref="IGitHubActionsClient"/> result shape (NotConfigured /
-/// success / 4xx / 5xx / null) maps to the correct
-/// <see cref="PlatformResult{T}"/> +
-/// <see cref="PlatformError"/> variant.
+/// Epic 31 P1 stage 2 — unit tests for the REAL
+/// <see cref="GitHubActionsPlatformClient"/>: all 5 verbs over
+/// scripted HTTP, the dispatch→run-id correlation (the pollable-RunId
+/// requirement), and the 4 MB artifact cap.
 /// </summary>
 [TestFixture]
 public sealed class GitHubActionsPlatformClientTests
 {
-    private static GitHubActionsPlatformClient BuildClient(IGitHubActionsClient inner) =>
-        new(inner);
+    private const string Api = "https://api.github.com";
 
-    [Test]
-    public void Constructor_rejects_null_inner_client()
+    private static (GitHubActionsPlatformClient Client, FakeHttpMessageHandler Handler) Build(
+        long maxArtifactBytes = GitHubActionsPlatformClient.DefaultMaxArtifactBytes,
+        int probeAttempts = 3)
     {
-        Action act = () => new GitHubActionsPlatformClient(null!);
-        act.Should().Throw<ArgumentNullException>();
+        var handler = new FakeHttpMessageHandler();
+        var http = new GitHubHttpClient(
+            new HttpClient(handler), Api, new GitHubAuth.Pat("test-token"));
+        var client = new GitHubActionsPlatformClient(
+            http,
+            maxArtifactBytes: maxArtifactBytes,
+            dispatchProbeAttempts: probeAttempts,
+            dispatchProbeDelay: TimeSpan.Zero);
+        return (client, handler);
     }
 
-    // ── DispatchWorkflowAsync ──────────────────────────────────────
+    private static WorkflowDispatchRequest Dispatch(string? file = "ci.yml") =>
+        new("main", file, new Dictionary<string, string> { ["issue"] = "42" });
+
+    // ================================================================
+    // Dispatch — run-id correlation
+    // ================================================================
 
     [Test]
-    public async Task DispatchWorkflowAsync_returns_invalid_request_when_workflow_file_missing()
+    public async Task Dispatch_returns_pollable_run_id_correlated_from_workflow_runs()
     {
-        var inner = Mock.Of<IGitHubActionsClient>();
-        var client = BuildClient(inner);
+        var (client, handler) = Build();
+        handler.EnqueueJson(HttpMethod.Post,
+            $"{Api}/repos/o/r/actions/workflows/ci.yml/dispatches",
+            HttpStatusCode.NoContent, string.Empty);
+        handler.EnqueueJson(HttpMethod.Get,
+            $"{Api}/repos/o/r/actions/workflows/ci.yml/runs",
+            HttpStatusCode.OK,
+            """
+            { "total_count": 2, "workflow_runs": [
+                { "id": 900, "status": "queued", "conclusion": null, "html_url": "u900",
+                  "event": "workflow_dispatch", "head_branch": "main",
+                  "created_at": "2026-08-07T10:00:05Z", "updated_at": "2026-08-07T10:00:05Z" },
+                { "id": 899, "status": "completed", "conclusion": "success", "html_url": "u899",
+                  "event": "workflow_dispatch", "head_branch": "main",
+                  "created_at": "2026-08-07T09:00:00Z", "updated_at": "2026-08-07T09:10:00Z" } ] }
+            """);
 
-        var result = await client.DispatchWorkflowAsync(
-            "acme", "repo",
-            new WorkflowDispatchRequest(
-                Ref: "main",
-                WorkflowFileName: null,
-                Inputs: new Dictionary<string, string>()));
+        var result = await client.DispatchWorkflowAsync("o", "r", Dispatch());
 
-        result.Should().BeOfType<PlatformResult<WorkflowRun>.Failed>();
-        var failed = (PlatformResult<WorkflowRun>.Failed)result;
-        failed.Error.Should().BeOfType<PlatformError.InvalidRequest>();
-        ((PlatformError.InvalidRequest)failed.Error).Code.Should().Be("workflow_file_required");
-    }
-
-    [Test]
-    public async Task DispatchWorkflowAsync_returns_service_unavailable_when_inner_not_configured()
-    {
-        var inner = new Mock<IGitHubActionsClient>();
-        inner.Setup(x => x.DispatchWorkflowAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, string>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DispatchApiResult(0, "github_client_not_configured", NotConfigured: true));
-
-        var client = BuildClient(inner.Object);
-
-        var result = await client.DispatchWorkflowAsync(
-            "acme", "repo",
-            new WorkflowDispatchRequest(
-                Ref: "main",
-                WorkflowFileName: "tamma-agent.yml",
-                Inputs: new Dictionary<string, string>()));
-
-        result.Should().BeOfType<PlatformResult<WorkflowRun>.ServiceUnavailable>();
-    }
-
-    [Test]
-    public async Task DispatchWorkflowAsync_returns_ok_with_placeholder_run_on_204()
-    {
-        var inner = new Mock<IGitHubActionsClient>();
-        inner.Setup(x => x.DispatchWorkflowAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, string>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DispatchApiResult(204, null));
-
-        var client = BuildClient(inner.Object);
-
-        var result = await client.DispatchWorkflowAsync(
-            "acme", "repo",
-            new WorkflowDispatchRequest(
-                Ref: "main",
-                WorkflowFileName: "tamma-agent.yml",
-                Inputs: new Dictionary<string, string>()));
-
-        result.Should().BeOfType<PlatformResult<WorkflowRun>.Ok>();
-        ((PlatformResult<WorkflowRun>.Ok)result).Value.Status.Should().Be("queued");
-    }
-
-    [TestCase(401, typeof(PlatformError.AuthExpired))]
-    [TestCase(403, typeof(PlatformError.PermissionDenied))]
-    [TestCase(404, typeof(PlatformError.NotFound))]
-    [TestCase(429, typeof(PlatformError.RateLimited))]
-    [TestCase(500, typeof(PlatformError.ServiceUnavailable))]
-    [TestCase(503, typeof(PlatformError.ServiceUnavailable))]
-    [TestCase(422, typeof(PlatformError.InvalidRequest))]
-    public async Task DispatchWorkflowAsync_translates_status_to_error(int status, Type expectedErrorType)
-    {
-        var inner = new Mock<IGitHubActionsClient>();
-        inner.Setup(x => x.DispatchWorkflowAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, string>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DispatchApiResult(status, "boom"));
-
-        var client = BuildClient(inner.Object);
-
-        var result = await client.DispatchWorkflowAsync(
-            "acme", "repo",
-            new WorkflowDispatchRequest(
-                Ref: "main",
-                WorkflowFileName: "tamma-agent.yml",
-                Inputs: new Dictionary<string, string>()));
-
-        result.Should().BeOfType<PlatformResult<WorkflowRun>.Failed>();
-        var err = ((PlatformResult<WorkflowRun>.Failed)result).Error;
-        err.Should().BeOfType(expectedErrorType);
-    }
-
-    // ── GetRunStatusAsync ──────────────────────────────────────────
-
-    [Test]
-    public async Task GetRunStatusAsync_returns_invalid_request_for_non_numeric_run_id()
-    {
-        var inner = Mock.Of<IGitHubActionsClient>();
-        var client = BuildClient(inner);
-
-        var result = await client.GetRunStatusAsync("acme", "repo", "not-a-number");
-
-        result.Should().BeOfType<PlatformResult<WorkflowRun>.Failed>();
-        var err = ((PlatformResult<WorkflowRun>.Failed)result).Error;
-        err.Should().BeOfType<PlatformError.InvalidRequest>();
-        ((PlatformError.InvalidRequest)err).Code.Should().Be("invalid_run_id");
+        var run = result.Should().BeOfType<PlatformResult<WorkflowRun>.Ok>().Subject.Value;
+        run.RunId.Should().Be("900", "the NEWEST run of the dispatched workflow+ref is returned");
+        run.RunId.Should().NotBeNullOrEmpty("the placeholder-empty-RunId behavior is the bug this stage removed");
+        // Correlation listing is scoped to the workflow file + ref + event.
+        var listUrl = handler.Requests.Single(r => r.Url.Contains("/runs?")).Url;
+        listUrl.Should().Contain("/actions/workflows/ci.yml/runs")
+            .And.Contain("branch=main")
+            .And.Contain("event=workflow_dispatch")
+            .And.Contain("created=");
     }
 
     [Test]
-    public async Task GetRunStatusAsync_returns_not_found_when_inner_returns_null()
+    public async Task Dispatch_retries_run_listing_until_a_run_appears()
     {
-        var inner = new Mock<IGitHubActionsClient>();
-        inner.Setup(x => x.GetWorkflowRunAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<long>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((WorkflowRunSummary?)null);
+        var (client, handler) = Build(probeAttempts: 3);
+        handler.EnqueueJson(HttpMethod.Post,
+            $"{Api}/repos/o/r/actions/workflows/ci.yml/dispatches",
+            HttpStatusCode.NoContent, string.Empty);
+        // First probe: empty; second probe: run visible.
+        handler.EnqueueJson(HttpMethod.Get,
+            $"{Api}/repos/o/r/actions/workflows/ci.yml/runs",
+            HttpStatusCode.OK, """{ "total_count": 0, "workflow_runs": [] }""");
+        handler.EnqueueJson(HttpMethod.Get,
+            $"{Api}/repos/o/r/actions/workflows/ci.yml/runs",
+            HttpStatusCode.OK,
+            """
+            { "total_count": 1, "workflow_runs": [
+                { "id": 901, "status": "queued", "conclusion": null, "html_url": "u",
+                  "event": "workflow_dispatch", "head_branch": "main",
+                  "created_at": "2026-08-07T10:00:05Z", "updated_at": "2026-08-07T10:00:05Z" } ] }
+            """);
 
-        var client = BuildClient(inner.Object);
+        var result = await client.DispatchWorkflowAsync("o", "r", Dispatch());
 
-        var result = await client.GetRunStatusAsync("acme", "repo", "12345");
-
-        result.Should().BeOfType<PlatformResult<WorkflowRun>.Failed>();
-        ((PlatformResult<WorkflowRun>.Failed)result).Error.Should().BeOfType<PlatformError.NotFound>();
+        result.GetValueOrDefault()!.RunId.Should().Be("901");
     }
 
     [Test]
-    public async Task GetRunStatusAsync_returns_ok_with_translated_run()
+    public async Task Dispatch_with_no_correlatable_run_returns_typed_unknown_not_a_placeholder()
     {
-        var summary = new WorkflowRunSummary(
-            Id: 12345L,
-            Status: "completed",
-            Conclusion: "success",
-            HtmlUrl: "https://github.com/acme/repo/actions/runs/12345",
-            CreatedAt: DateTime.UtcNow,
-            UpdatedAt: DateTime.UtcNow,
-            HeadBranch: "main",
-            Event: "workflow_dispatch",
-            ArtifactsUrl: "");
-        var inner = new Mock<IGitHubActionsClient>();
-        inner.Setup(x => x.GetWorkflowRunAsync(
-                "acme", "repo", 12345L, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(summary);
+        var (client, handler) = Build(probeAttempts: 2);
+        handler.EnqueueJson(HttpMethod.Post,
+            $"{Api}/repos/o/r/actions/workflows/ci.yml/dispatches",
+            HttpStatusCode.NoContent, string.Empty);
+        handler.EnqueueRepeating(HttpMethod.Get,
+            $"{Api}/repos/o/r/actions/workflows/ci.yml/runs",
+            _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{ "total_count": 0, "workflow_runs": [] }"""),
+            });
 
-        var client = BuildClient(inner.Object);
+        var result = await client.DispatchWorkflowAsync("o", "r", Dispatch());
 
-        var result = await client.GetRunStatusAsync("acme", "repo", "12345");
+        // At-least-once semantics: the dispatch DID happen; the driver
+        // reports the correlation gap instead of minting an unpollable
+        // empty RunId.
+        result.Should().BeOfType<PlatformResult<WorkflowRun>.Failed>()
+            .Which.Error.Should().BeOfType<PlatformError.Unknown>();
+    }
 
-        result.Should().BeOfType<PlatformResult<WorkflowRun>.Ok>();
-        var run = ((PlatformResult<WorkflowRun>.Ok)result).Value;
-        run.RunId.Should().Be("12345");
+    [Test]
+    public async Task Dispatch_without_workflow_file_is_invalid_request()
+    {
+        var (client, _) = Build();
+
+        var result = await client.DispatchWorkflowAsync("o", "r", Dispatch(file: null));
+
+        result.Should().BeOfType<PlatformResult<WorkflowRun>.Failed>()
+            .Which.Error.Should().BeOfType<PlatformError.InvalidRequest>()
+            .Which.Code.Should().Be("workflow_file_required");
+    }
+
+    [Test]
+    public async Task Dispatch_maps_404_workflow_to_NotFound()
+    {
+        var (client, handler) = Build();
+        handler.EnqueueJson(HttpMethod.Post,
+            $"{Api}/repos/o/r/actions/workflows/ci.yml/dispatches",
+            HttpStatusCode.NotFound, """{ "message": "Not Found" }""");
+
+        var result = await client.DispatchWorkflowAsync("o", "r", Dispatch());
+
+        result.Should().BeOfType<PlatformResult<WorkflowRun>.Failed>()
+            .Which.Error.Should().BeOfType<PlatformError.NotFound>();
+    }
+
+    // ================================================================
+    // GetRunStatus / ListRunJobs / CancelRun
+    // ================================================================
+
+    [Test]
+    public async Task GetRunStatus_maps_run()
+    {
+        var (client, handler) = Build();
+        handler.EnqueueJson(HttpMethod.Get, $"{Api}/repos/o/r/actions/runs/900",
+            HttpStatusCode.OK,
+            """
+            { "id": 900, "status": "completed", "conclusion": "success", "html_url": "u",
+              "created_at": "2026-08-07T10:00:00Z", "updated_at": "2026-08-07T10:09:00Z",
+              "run_started_at": "2026-08-07T10:00:30Z" }
+            """);
+
+        var result = await client.GetRunStatusAsync("o", "r", "900");
+
+        var run = result.Should().BeOfType<PlatformResult<WorkflowRun>.Ok>().Subject.Value;
         run.Status.Should().Be("completed");
         run.Conclusion.Should().Be("success");
-    }
-
-    // ── ListRunJobsAsync / CancelRunAsync — explicit ServiceUnavailable ─
-
-    [Test]
-    public async Task ListRunJobsAsync_returns_service_unavailable()
-    {
-        var client = BuildClient(Mock.Of<IGitHubActionsClient>());
-        var result = await client.ListRunJobsAsync("acme", "repo", "12345");
-        result.Should().BeOfType<PlatformResult<IReadOnlyList<WorkflowJob>>.ServiceUnavailable>();
+        run.CompletedAt.Should().NotBeNull();
     }
 
     [Test]
-    public async Task CancelRunAsync_returns_service_unavailable()
+    public async Task GetRunStatus_rejects_non_numeric_run_id_without_http()
     {
-        var client = BuildClient(Mock.Of<IGitHubActionsClient>());
-        var result = await client.CancelRunAsync("acme", "repo", "12345");
-        result.Should().BeOfType<PlatformResult<bool>.ServiceUnavailable>();
-    }
+        var (client, handler) = Build();
 
-    // ── DownloadArtifactAsync ──────────────────────────────────────
+        var result = await client.GetRunStatusAsync("o", "r", "not-a-number");
 
-    [Test]
-    public async Task DownloadArtifactAsync_returns_invalid_request_for_non_numeric_id()
-    {
-        var client = BuildClient(Mock.Of<IGitHubActionsClient>());
-        var result = await client.DownloadArtifactAsync("acme", "repo", "abc");
-        result.Should().BeOfType<PlatformResult<Stream>.Failed>();
-        var err = ((PlatformResult<Stream>.Failed)result).Error;
-        err.Should().BeOfType<PlatformError.InvalidRequest>();
-        ((PlatformError.InvalidRequest)err).Code.Should().Be("invalid_artifact_id");
+        result.Should().BeOfType<PlatformResult<WorkflowRun>.Failed>()
+            .Which.Error.Should().BeOfType<PlatformError.InvalidRequest>()
+            .Which.Code.Should().Be("invalid_run_id");
+        handler.Requests.Should().BeEmpty();
     }
 
     [Test]
-    public async Task DownloadArtifactAsync_returns_not_found_when_inner_returns_null()
+    public async Task ListRunJobs_maps_jobs()
     {
-        var inner = new Mock<IGitHubActionsClient>();
-        inner.Setup(x => x.DownloadArtifactZipAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<long>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+        var (client, handler) = Build();
+        handler.EnqueueJson(HttpMethod.Get, $"{Api}/repos/o/r/actions/runs/900/jobs",
+            HttpStatusCode.OK,
+            """
+            { "total_count": 2, "jobs": [
+                { "id": 1, "name": "build", "status": "completed", "conclusion": "success" },
+                { "id": 2, "name": "test", "status": "in_progress", "conclusion": null } ] }
+            """);
 
-        var client = BuildClient(inner.Object);
+        var result = await client.ListRunJobsAsync("o", "r", "900");
 
-        var result = await client.DownloadArtifactAsync("acme", "repo", "9876");
-
-        result.Should().BeOfType<PlatformResult<Stream>.Failed>();
-        ((PlatformResult<Stream>.Failed)result).Error.Should().BeOfType<PlatformError.NotFound>();
+        var jobs = result.Should()
+            .BeOfType<PlatformResult<IReadOnlyList<WorkflowJob>>.Ok>().Subject.Value;
+        jobs.Should().HaveCount(2);
+        jobs[0].Should().Be(new WorkflowJob("1", "build", "completed", "success", null));
     }
 
     [Test]
-    public async Task DownloadArtifactAsync_returns_ok_stream_on_success()
+    public async Task CancelRun_posts_cancel()
     {
-        var bytes = new byte[] { 1, 2, 3, 4, 5 };
-        var inner = new Mock<IGitHubActionsClient>();
-        inner.Setup(x => x.DownloadArtifactZipAsync(
-                "acme", "repo", 9876L, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(bytes);
+        var (client, handler) = Build();
+        handler.EnqueueJson(HttpMethod.Post, $"{Api}/repos/o/r/actions/runs/900/cancel",
+            HttpStatusCode.Accepted, string.Empty);
 
-        var client = BuildClient(inner.Object);
+        var result = await client.CancelRunAsync("o", "r", "900");
 
-        var result = await client.DownloadArtifactAsync("acme", "repo", "9876");
+        result.Should().BeOfType<PlatformResult<bool>.Ok>().Which.Value.Should().BeTrue();
+    }
 
-        result.Should().BeOfType<PlatformResult<Stream>.Ok>();
-        using var stream = ((PlatformResult<Stream>.Ok)result).Value;
-        using var reader = new MemoryStream();
-        await stream.CopyToAsync(reader);
-        reader.ToArray().Should().Equal(bytes);
+    [Test]
+    public async Task CancelRun_on_already_completed_run_is_noop_success()
+    {
+        var (client, handler) = Build();
+        // GitHub answers 409 "Cannot cancel a workflow run that is completed."
+        handler.EnqueueJson(HttpMethod.Post, $"{Api}/repos/o/r/actions/runs/900/cancel",
+            HttpStatusCode.Conflict,
+            """{ "message": "Cannot cancel a workflow run that is completed." }""");
+
+        var result = await client.CancelRunAsync("o", "r", "900");
+
+        result.Should().BeOfType<PlatformResult<bool>.Ok>().Which.Value.Should().BeTrue();
+    }
+
+    // ================================================================
+    // DownloadArtifact — 4 MB cap
+    // ================================================================
+
+    [Test]
+    public async Task DownloadArtifact_streams_zip_bytes()
+    {
+        var (client, handler) = Build();
+        var payload = new byte[] { 0x50, 0x4B, 0x03, 0x04, 1, 2, 3 };
+        handler.Enqueue(HttpMethod.Get, $"{Api}/repos/o/r/actions/artifacts/77/zip",
+            _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(payload),
+            });
+
+        var result = await client.DownloadArtifactAsync("o", "r", "77");
+
+        using var stream = result.Should().BeOfType<PlatformResult<Stream>.Ok>().Subject.Value;
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        ms.ToArray().Should().Equal(payload);
+    }
+
+    [Test]
+    public async Task DownloadArtifact_enforces_byte_cap()
+    {
+        var (client, handler) = Build(maxArtifactBytes: 16);
+        handler.Enqueue(HttpMethod.Get, $"{Api}/repos/o/r/actions/artifacts/77/zip",
+            _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(new byte[64]),
+            });
+
+        var result = await client.DownloadArtifactAsync("o", "r", "77");
+
+        using var stream = result.Should().BeOfType<PlatformResult<Stream>.Ok>().Subject.Value;
+        var act = async () =>
+        {
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+        };
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(GitHubActionsPlatformClient.BoundedReadStream.TooLargeMessage);
+    }
+
+    [Test]
+    public async Task DownloadArtifact_rejects_non_numeric_artifact_id_without_http()
+    {
+        var (client, handler) = Build();
+
+        var result = await client.DownloadArtifactAsync("o", "r", "abc");
+
+        result.Should().BeOfType<PlatformResult<Stream>.Failed>()
+            .Which.Error.Should().BeOfType<PlatformError.InvalidRequest>()
+            .Which.Code.Should().Be("invalid_artifact_id");
+        handler.Requests.Should().BeEmpty();
     }
 }

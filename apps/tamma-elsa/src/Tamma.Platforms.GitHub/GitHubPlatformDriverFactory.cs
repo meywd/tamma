@@ -1,58 +1,68 @@
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Tamma.Activities.AgentDispatch;
 using Tamma.Platforms.Abstractions;
 using Tamma.Platforms.Abstractions.Models;
 
 namespace Tamma.Platforms.GitHub;
 
 /// <summary>
-/// Story 31-3 — keyed-DI factory consumed by 31-2's
+/// Epic 31 P1 stage 2 — keyed-DI factory consumed by 31-2's
 /// <c>PlatformResolver</c> when an installation row's
 /// <c>platform_kind = "github"</c>. Builds a fully-wired
 /// <see cref="GitHubPlatformDriver"/> bound to a single
-/// <see cref="PlatformInstallation"/> by composing the
-/// scoped <see cref="IGitHubActionsClient"/> from
-/// <c>Tamma.Activities</c>.
+/// <see cref="PlatformInstallation"/> + credential plaintext — the
+/// factory now HONORS both of its arguments (the old
+/// <c>_ = credentialPlaintext;</c> discard is gone):
 ///
-/// <para>The factory does NOT construct or own the inner Octokit
-/// clients — those live in <c>Tamma.Api</c> and are wired by
-/// <c>GitHubInstallationServiceCollectionExtensions</c>. This
-/// factory consumes them via <see cref="IServiceProvider"/> so the
-/// scoped <c>OctokitGitHubActionsClient</c> registration lives within
-/// the caller's request scope (matches the captive-dependency rules
-/// when the factory itself is a keyed singleton).</para>
+/// <list type="number">
+///   <item><paramref name="credentialPlaintext"/> parses into
+///         <see cref="GitHubAuth"/> — PAT/BYOK plaintext token, or the
+///         JSON App-installation shape (<c>kind:"app"</c> with
+///         <c>appId</c> + <c>privateKeyPem</c> and an optional
+///         <c>installationId</c> that falls back to the row's
+///         <see cref="PlatformInstallation.InstallationExternalId"/>).
+///         See <see cref="GitHubAuth.Parse"/> for the wire format.</item>
+///   <item><see cref="PlatformInstallation.BaseUrl"/> is the API root
+///         (default <see cref="DefaultBaseUrl"/> when blank) — GHES
+///         installs pass their <c>/api/v3</c> root and the driver
+///         derives the matching <c>/api/graphql</c> endpoint.</item>
+/// </list>
 ///
-/// <para>Per-tenant bookkeeping (base URL host, installation external
-/// id) is recorded on the driver's inner client at construction so
-/// future error / metric paths can surface tenant-aware context.</para>
+/// <para>Both credential modes build the SAME driver classes — App
+/// token minting (absorbed from <c>OctokitGitHubAppClient</c>) is a
+/// driver-internal concern, so the old "real Actions only when the
+/// process-level GitHub App is configured" conditional cannot recur.</para>
 /// </summary>
 public sealed class GitHubPlatformDriverFactory : IGitPlatformDriverFactory
 {
-    /// <summary>Default GitHub Cloud host used when an installation
-    /// row carries no base URL. GHES installs override via
-    /// <see cref="PlatformInstallation.BaseUrl"/>.</summary>
+    /// <summary>Default GitHub Cloud API root used when an
+    /// installation row carries no base URL.</summary>
+    public const string DefaultBaseUrl = "https://api.github.com";
+
+    /// <summary>Default GitHub Cloud host (kept for callers/tests that
+    /// key off the host name).</summary>
     public const string DefaultHost = "github.com";
 
-    private readonly IServiceProvider _services;
-    private readonly ILoggerFactory _loggerFactory;
-
     /// <summary>
-    /// Construct the factory. <paramref name="services"/> is used to
-    /// resolve the scoped <see cref="IGitHubActionsClient"/> on each
-    /// <see cref="CreateAsync"/> call (it is registered as Scoped in
-    /// production so it depends on a request-scoped repository).
-    /// <paramref name="loggerFactory"/> is optional; null passes
-    /// through to <see cref="NullLoggerFactory"/>.
+    /// Named-client identifier — tests inject a custom
+    /// <see cref="HttpMessageHandler"/> by registering this name
+    /// (the Gitea driver's <c>tamma-gitea</c> pattern).
     /// </summary>
+    public const string GitHubHttpClientName = "tamma-github";
+
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly TimeProvider _time;
+
     public GitHubPlatformDriverFactory(
-        IServiceProvider services,
-        ILoggerFactory? loggerFactory = null)
+        IHttpClientFactory httpClientFactory,
+        ILoggerFactory? loggerFactory = null,
+        TimeProvider? time = null)
     {
-        ArgumentNullException.ThrowIfNull(services);
-        _services = services;
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+        _httpClientFactory = httpClientFactory;
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        _time = time ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -71,32 +81,81 @@ public sealed class GitHubPlatformDriverFactory : IGitPlatformDriverFactory
                 $"GitHubPlatformDriverFactory cannot build driver for kind={installation.Kind}",
                 nameof(installation));
         }
-        // GitHub installation auth uses an App private key + installation
-        // id rather than a per-tenant plaintext bearer; the inner
-        // OctokitGitHubAppClient holds the App key as a process
-        // singleton. We accept the plaintext value for interface
-        // symmetry but do not consume it here — the inner client uses
-        // its cached App credentials. An empty string would still build
-        // a valid (though no-op) driver against NullGitHubActionsClient.
-        _ = credentialPlaintext;
+        ArgumentException.ThrowIfNullOrWhiteSpace(credentialPlaintext);
 
-        var actionsClient = _services.GetRequiredService<IGitHubActionsClient>();
-
+        var auth = GitHubAuth.Parse(credentialPlaintext);
+        var baseUrl = string.IsNullOrWhiteSpace(installation.BaseUrl)
+            ? DefaultBaseUrl
+            : installation.BaseUrl.TrimEnd('/');
         var host = ExtractHost(installation.BaseUrl);
-        var clientLogger = _loggerFactory.CreateLogger<GitHubPlatformClient>();
-        var actionsLogger = _loggerFactory.CreateLogger<GitHubActionsPlatformClient>();
 
-        var client = new GitHubPlatformClient(actionsClient, host, clientLogger);
-        IGitPlatformActionsClient actions = new GitHubActionsPlatformClient(actionsClient, actionsLogger);
+        var http = _httpClientFactory.CreateClient(GitHubHttpClientName);
 
-        IGitPlatformDriver driver = new GitHubPlatformDriver(client, actions);
+        GitHubAppTokenMinter? minter = null;
+        if (auth is GitHubAuth.App app)
+        {
+            var installationId = ResolveInstallationId(app, installation);
+            minter = new GitHubAppTokenMinter(
+                http,
+                baseUrl,
+                app.AppId,
+                app.PrivateKeyPem,
+                installationId,
+                _time,
+                _loggerFactory.CreateLogger<GitHubAppTokenMinter>());
+        }
+
+        var githubHttp = new GitHubHttpClient(
+            http,
+            baseUrl,
+            auth,
+            minter,
+            _loggerFactory.CreateLogger<GitHubHttpClient>());
+
+        var client = new GitHubPlatformClient(
+            githubHttp,
+            host,
+            appMode: auth is GitHubAuth.App,
+            _loggerFactory.CreateLogger<GitHubPlatformClient>());
+        IGitPlatformActionsClient actions = new GitHubActionsPlatformClient(
+            githubHttp,
+            _loggerFactory.CreateLogger<GitHubActionsPlatformClient>());
+
+        IGitPlatformDriver driver = new GitHubPlatformDriver(
+            client, actions, GitHubPlatformDriver.ComputeCapabilities(auth));
         return Task.FromResult(driver);
     }
 
     /// <summary>
+    /// App mode needs an installation id to mint tokens for. The
+    /// credential's own <c>installationId</c> wins; else the row's
+    /// <see cref="PlatformInstallation.InstallationExternalId"/> (where
+    /// the registry bridge records the GitHub installation id). Neither
+    /// present → fail loud at the factory, not at first API use.
+    /// </summary>
+    internal static long ResolveInstallationId(
+        GitHubAuth.App app, PlatformInstallation installation)
+    {
+        if (app.InstallationId is { } fromCredential && fromCredential > 0)
+        {
+            return fromCredential;
+        }
+        if (long.TryParse(installation.InstallationExternalId, out var fromRow) && fromRow > 0)
+        {
+            return fromRow;
+        }
+        throw new ArgumentException(
+            "GitHub App-mode credential requires an installation id — either " +
+            "'installationId' in the credential JSON or a numeric " +
+            "InstallationExternalId on the installation row.",
+            nameof(installation));
+    }
+
+    /// <summary>
     /// Strip scheme + path from a base URL to recover the host, with a
-    /// default for empty / un-parseable values. <c>https://api.github.com</c>
-    /// → <c>api.github.com</c>; <c>github.acme.corp</c> → unchanged.
+    /// default for empty / un-parseable values.
+    /// <c>https://api.github.com</c> → <c>api.github.com</c>;
+    /// <c>github.acme.corp</c> → unchanged.
     /// </summary>
     internal static string ExtractHost(string? baseUrl)
     {

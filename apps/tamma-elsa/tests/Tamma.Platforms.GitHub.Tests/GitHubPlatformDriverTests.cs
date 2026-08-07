@@ -1,78 +1,76 @@
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using Moq;
 using NUnit.Framework;
-using Tamma.Activities.AgentDispatch;
 using Tamma.Platforms.Abstractions;
-using Tamma.Platforms.Abstractions.Models;
-using Tamma.Platforms.GitHub;
 
 namespace Tamma.Platforms.GitHub.Tests;
 
 /// <summary>
-/// Story 31-3 — driver-level tests covering the AC1 capability set
-/// + driver registration through DI (AC4).
+/// Epic 31 P1 stage 2 — driver facade + capability-computation +
+/// registration tests.
 /// </summary>
 [TestFixture]
 public sealed class GitHubPlatformDriverTests
 {
-    [Test]
-    public void Driver_kind_is_GitHub()
+    private static GitHubPlatformClient Client()
     {
-        var inner = Mock.Of<IGitHubActionsClient>();
-        var client = new GitHubPlatformClient(inner, host: "github.com");
-        var actions = new GitHubActionsPlatformClient(inner);
+        var http = new GitHubHttpClient(
+            new HttpClient(new FakeHttpMessageHandler()),
+            "https://api.github.com",
+            new GitHubAuth.Pat("t"));
+        return new GitHubPlatformClient(http, "github.com");
+    }
 
-        var driver = new GitHubPlatformDriver(client, actions);
+    [Test]
+    public void Driver_reports_github_kind_and_collaborators()
+    {
+        var client = Client();
+        var driver = new GitHubPlatformDriver(client, actions: null);
 
         driver.Kind.Should().Be(PlatformKind.GitHub);
+        driver.Client.Should().BeSameAs(client);
+        driver.Actions.Should().BeNull();
+        driver.Capabilities.Should().BeEquivalentTo(
+            PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitHub));
     }
 
     [Test]
-    public void Driver_capabilities_match_matrix_defaults()
+    public void Matrix_defaults_advertise_the_stage2_capabilities()
     {
-        var inner = Mock.Of<IGitHubActionsClient>();
-        var client = new GitHubPlatformClient(inner, host: "github.com");
-        var actions = new GitHubActionsPlatformClient(inner);
-        var driver = new GitHubPlatformDriver(client, actions);
-
         var defaults = PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitHub);
-        driver.Capabilities.Should().BeEquivalentTo(defaults);
+
+        defaults.Should().Contain(
+        [
+            PlatformCapability.PrLifecycle,
+            PlatformCapability.IssueLifecycle,
+            PlatformCapability.Releases,
+            PlatformCapability.CommitReads,
+            PlatformCapability.PrReviewCommentRead,
+            PlatformCapability.PrFileReview,
+            PlatformCapability.ListAccessibleRepos,
+        ]);
     }
 
     [Test]
-    public void Driver_advertises_GitHub_specific_capabilities()
+    public void ComputeCapabilities_pat_mode_drops_only_app_installation_auth()
     {
-        var inner = Mock.Of<IGitHubActionsClient>();
-        var client = new GitHubPlatformClient(inner, host: "github.com");
-        var actions = new GitHubActionsPlatformClient(inner);
-        var driver = new GitHubPlatformDriver(client, actions);
+        var pat = GitHubPlatformDriver.ComputeCapabilities(new GitHubAuth.Pat("t"));
+        var expected = new HashSet<PlatformCapability>(
+            PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitHub));
+        expected.Remove(PlatformCapability.PerAppInstallationAuth);
 
-        driver.Capabilities.Should().Contain(PlatformCapability.Actions);
-        driver.Capabilities.Should().Contain(PlatformCapability.Artifacts);
-        driver.Capabilities.Should().Contain(PlatformCapability.Secrets);
-        driver.Capabilities.Should().Contain(PlatformCapability.LibsodiumSecrets);
-        driver.Capabilities.Should().Contain(PlatformCapability.WebhookHmac);
-        driver.Capabilities.Should().Contain(PlatformCapability.PerAppInstallationAuth);
-        driver.Capabilities.Should().Contain(PlatformCapability.PrFileReview);
-        driver.Capabilities.Should().Contain(PlatformCapability.ListAccessibleRepos);
-
-        // GitHub does NOT use static-token webhooks like GitLab.
-        driver.Capabilities.Should().NotContain(PlatformCapability.WebhookStaticToken);
-        // GitHub does NOT have GitLab-style protected/masked variables.
-        driver.Capabilities.Should().NotContain(PlatformCapability.ProtectedVariables);
-        driver.Capabilities.Should().NotContain(PlatformCapability.MaskedVariables);
+        pat.Should().BeEquivalentTo(expected);
     }
 
     [Test]
-    public void Driver_Actions_surface_is_non_null_when_actions_capability_set()
+    public void ComputeCapabilities_app_mode_keeps_matrix_defaults()
     {
-        var inner = Mock.Of<IGitHubActionsClient>();
-        var client = new GitHubPlatformClient(inner, host: "github.com");
-        var actions = new GitHubActionsPlatformClient(inner);
-        var driver = new GitHubPlatformDriver(client, actions);
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        var app = GitHubPlatformDriver.ComputeCapabilities(
+            new GitHubAuth.App(1, rsa.ExportRSAPrivateKeyPem(), 2));
 
-        driver.Actions.Should().NotBeNull();
+        app.Should().BeEquivalentTo(
+            PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitHub));
     }
 
     [Test]
@@ -83,42 +81,21 @@ public sealed class GitHubPlatformDriverTests
     }
 
     [Test]
-    public void Driver_constructor_with_custom_capabilities_accepts_narrower_set()
-    {
-        var inner = Mock.Of<IGitHubActionsClient>();
-        var client = new GitHubPlatformClient(inner, host: "github.com");
-        var actions = new GitHubActionsPlatformClient(inner);
-        var narrowed = new HashSet<PlatformCapability>
-        {
-            PlatformCapability.PrFileReview,
-            PlatformCapability.WebhookHmac,
-        };
-
-        var driver = new GitHubPlatformDriver(client, actions, narrowed);
-
-        driver.Capabilities.Should().BeEquivalentTo(narrowed);
-        driver.Capabilities.Should().NotContain(PlatformCapability.Actions);
-    }
-
-    [Test]
-    public void AddGitHubPlatformDriver_registers_factory_under_GitHub_key()
+    public void Registration_extension_registers_keyed_factory()
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        // The factory pulls IGitHubActionsClient from DI on each
-        // CreateAsync — register a fake so resolution succeeds.
-        services.AddSingleton(Mock.Of<IGitHubActionsClient>());
         services.AddGitHubPlatformDriver();
-
-        using var sp = services.BuildServiceProvider();
+        var sp = services.BuildServiceProvider();
 
         var factory = sp.GetKeyedService<IGitPlatformDriverFactory>(PlatformKind.GitHub);
+
         factory.Should().NotBeNull();
         factory!.Kind.Should().Be(PlatformKind.GitHub);
     }
 
     [Test]
-    public void AddGitHubPlatformDriver_throws_on_null_services()
+    public void Registration_extension_rejects_null_services()
     {
         Action act = () => GitHubDriverRegistrationExtensions.AddGitHubPlatformDriver(null!);
         act.Should().Throw<ArgumentNullException>();
