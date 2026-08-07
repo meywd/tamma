@@ -1,6 +1,6 @@
 # Epic 31: Multi Git Platform Support
 
-**Status:** Planning (briefs authored 2026-04-21; impl plans not yet written)
+**Status:** In execution (plan: `docs/stories/epic-31/EXECUTION-PLAN.md`, owner-directed 2026-08-05, amended 2026-08-07). The abstraction plane, Gitea/GitLab/Forgejo drivers, webhook receiver, and DI registration are built; the GitHub driver, mediation swap, webhook handlers, and end-to-end acceptance are being completed in phases P0–P6.
 **Stories:** 10 core (31-1..31-10) + 2 deferred (31-11 Bitbucket, 31-12 Azure DevOps)
 **Effort:** ~220h core / ~284h with optionals
 **Layer:** Layer 4 for 31-1..31-5 + 31-7..31-10; Layer 5 for 31-6 (GitLab); deferred for 31-11/31-12

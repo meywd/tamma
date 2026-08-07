@@ -31,7 +31,8 @@ namespace Tamma.Platforms.IntegrationTests;
 public class GitLabIntegrationTests
 {
     [Test]
-    [Ignore("Story 31-6 GitLab driver not yet shipped — harness stub only.")]
+    [Ignore("GitLab driver shipped (31-6); this suite stays a stub until the " +
+            "Epic 31 EXECUTION-PLAN P6 nightly harness populates and un-ignores it.")]
     public void GitLab_DriverNotYetShipped()
     {
         // Body intentionally empty — will be populated when 31-6

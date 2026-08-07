@@ -1,6 +1,6 @@
 # Multi Git Platform Support (Epic 31)
 
-**Status**: planning (briefs authored 2026-04-21; impl plans not yet written). 10 core stories + 2 deferred (~228h core / ~284h with optionals).
+**Status**: in execution — abstraction plane + Gitea/GitLab/Forgejo drivers built; GitHub driver, mediation swap, webhook handlers, and end-to-end acceptance completing per `docs/stories/epic-31/EXECUTION-PLAN.md` (owner-directed 2026-08-05, amended 2026-08-07; phases P0–P6). 10 core stories + 2 deferred.
 **Layer**: Layer 4 for 31-1..31-5, 31-7..31-10; Layer 5 for 31-6 (GitLab); deferred for 31-11 (Bitbucket) / 31-12 (Azure DevOps).
 **Depends on**: Epic 28 (tenant + install-routing), Epic 19 stories 19-1..19-5 (current GitHub-only agent dispatch), Epic 17 (`tenants` + `github_installations` tables).
 **Source**: `docs/stories/epic-31/` (12 briefs + README).

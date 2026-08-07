@@ -26,7 +26,8 @@ namespace Tamma.Platforms.IntegrationTests;
 public class ForgejoIntegrationTests
 {
     [Test]
-    [Ignore("Story 31-5 Forgejo driver not yet shipped — harness stub only.")]
+    [Ignore("Forgejo driver shipped (Gitea compat shim); this suite stays a stub until " +
+            "the Epic 31 EXECUTION-PLAN P5 full-stack harness populates it.")]
     public void Forgejo_DriverNotYetShipped()
     {
         // Body intentionally empty — will be populated when 31-5

@@ -60,6 +60,16 @@ substitute the cheaper version.
 
 ## D3 — Multi-git-platform breadth (Epic 31) stays frozen
 
+> **SUPERSEDED 2026-08-05 by owner direction.** The owner unfroze Epic 31 and decided
+> the architecture: config-activated platform, every git AND CI call through the
+> abstraction (`IGitPlatformClient` / `IGitPlatformActionsClient`), auth a separate
+> plane, and (amended 2026-08-07) every platform/third-party action as an explicit
+> workflow step with an is-supported check step before it and a defined alternative
+> step when unsupported. Execution is governed by
+> `docs/stories/epic-31/EXECUTION-PLAN.md` (phases P0–P6), started 2026-08-07 on
+> owner instruction ("don't wait"). Demand is asserted by the owner directly — the
+> phantom-citation note below stands as history but no longer gates the work.
+
 **Decision**: undecided, therefore frozen. Do not invest in GitLab / Gitea / Forgejo /
 Bitbucket / Azure DevOps driver depth until someone names a real prospect.
 
