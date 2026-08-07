@@ -31,6 +31,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Tamma.Platforms.Gitea.Tests" />
+    <!-- Epic 31 P1 stage 1 — PlatformCapabilityContractTests constructs the
+         internal-ctor client to pin capability-flag ⇔ verb agreement. -->
+    <InternalsVisibleTo Include="Tamma.Platforms.Tests" />
   </ItemGroup>
 
 </Project>

@@ -29,6 +29,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Tamma.Platforms.GitLab.Tests" />
+    <!-- Epic 31 P1 stage 1 — PlatformCapabilityContractTests constructs the
+         internal client to pin capability-flag ⇔ verb agreement. -->
+    <InternalsVisibleTo Include="Tamma.Platforms.Tests" />
   </ItemGroup>
 
 </Project>

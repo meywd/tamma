@@ -422,6 +422,47 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
         SetPullRequestDraftRequest request, CancellationToken ct = default) =>
         PrLifecycleUnsupported();
 
+    // Epic 31 P1 (stage 1) — the loop verbs (issue lifecycle, releases,
+    // review-comment listing, commit reads). GitLab's API supports all of them,
+    // but the driver does not implement them yet, records that via the absent
+    // IssueLifecycle / Releases / PrReviewCommentRead / CommitReads capability
+    // flags, and answers with typed capability_unsupported per the interface
+    // no-throw contract. Real wiring is P6 (GitLab) work.
+    private static Task<PlatformResult<T>> LoopVerbUnsupported<T>(string capability) =>
+        Task.FromResult(PlatformResult<T>.FromError(
+            new PlatformError.InvalidRequest("capability_unsupported",
+                $"the GitLab driver does not implement {capability} verbs yet (Epic 31 P6)")));
+
+    public Task<PlatformResult<Issue>> CloseIssueAsync(
+        string owner, string repoName, string issueNumber, string? comment = null,
+        CancellationToken ct = default) =>
+        LoopVerbUnsupported<Issue>("issue lifecycle");
+
+    public Task<PlatformResult<IReadOnlyList<string>>> AddIssueLabelsAsync(
+        AddIssueLabelsRequest request, CancellationToken ct = default) =>
+        LoopVerbUnsupported<IReadOnlyList<string>>("issue lifecycle");
+
+    public Task<PlatformResult<IReadOnlyList<string>>> RemoveIssueLabelAsync(
+        string owner, string repoName, string issueNumber, string label,
+        CancellationToken ct = default) =>
+        LoopVerbUnsupported<IReadOnlyList<string>>("issue lifecycle");
+
+    public Task<PlatformResult<Release>> CreateReleaseAsync(
+        CreateReleaseRequest request, CancellationToken ct = default) =>
+        LoopVerbUnsupported<Release>("release");
+
+    public Task<PlatformResult<IReadOnlyList<PullRequestReviewComment>>> ListPullRequestReviewCommentsAsync(
+        string owner, string repoName, string prNumber, CancellationToken ct = default) =>
+        LoopVerbUnsupported<IReadOnlyList<PullRequestReviewComment>>("review-comment listing");
+
+    public Task<PlatformResult<IReadOnlyList<Commit>>> ListCommitsAsync(
+        ListCommitsRequest request, CancellationToken ct = default) =>
+        LoopVerbUnsupported<IReadOnlyList<Commit>>("commit-read");
+
+    public Task<PlatformResult<IReadOnlyList<PrFile>>> ListBranchFileChangesAsync(
+        ListBranchFileChangesRequest request, CancellationToken ct = default) =>
+        LoopVerbUnsupported<IReadOnlyList<PrFile>>("commit-read");
+
     public async Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
         string owner, string repoName, string issueOrPrNumber, string body, CancellationToken ct = default)
     {

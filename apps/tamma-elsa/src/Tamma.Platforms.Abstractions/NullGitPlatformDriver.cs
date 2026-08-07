@@ -106,6 +106,47 @@ public sealed class NullGitPlatformDriver : IGitPlatformDriver
             SetPullRequestDraftRequest request, CancellationToken ct = default) =>
             PrLifecycleUnsupported();
 
+        // Epic 31 P1 (stage 1) — the loop verbs are capability-gated like the
+        // 31-13 lifecycle set; the null driver advertises none of the gating
+        // capabilities, so per the interface contract these return typed
+        // capability_unsupported (never throw, never ServiceUnavailable —
+        // "unsupported by this driver" and "driver not wired" are different
+        // answers).
+        private static Task<PlatformResult<T>> CapabilityUnsupported<T>() =>
+            Task.FromResult(PlatformResult<T>.FromError(
+                new PlatformError.InvalidRequest("capability_unsupported",
+                    "the null git platform driver does not implement this capability-gated verb")));
+
+        public Task<PlatformResult<Issue>> CloseIssueAsync(
+            string owner, string repoName, string issueNumber, string? comment = null,
+            CancellationToken ct = default) =>
+            CapabilityUnsupported<Issue>();
+
+        public Task<PlatformResult<IReadOnlyList<string>>> AddIssueLabelsAsync(
+            AddIssueLabelsRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<string>>();
+
+        public Task<PlatformResult<IReadOnlyList<string>>> RemoveIssueLabelAsync(
+            string owner, string repoName, string issueNumber, string label,
+            CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<string>>();
+
+        public Task<PlatformResult<Release>> CreateReleaseAsync(
+            CreateReleaseRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<Release>();
+
+        public Task<PlatformResult<IReadOnlyList<PullRequestReviewComment>>> ListPullRequestReviewCommentsAsync(
+            string owner, string repoName, string prNumber, CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<PullRequestReviewComment>>();
+
+        public Task<PlatformResult<IReadOnlyList<Commit>>> ListCommitsAsync(
+            ListCommitsRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<Commit>>();
+
+        public Task<PlatformResult<IReadOnlyList<PrFile>>> ListBranchFileChangesAsync(
+            ListBranchFileChangesRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<PrFile>>();
+
         public Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
             string owner, string repoName, string issueOrPrNumber, string body,
             CancellationToken ct = default) =>

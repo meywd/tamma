@@ -227,16 +227,16 @@ public class IntegrationServiceCutoverTests
 
     private static readonly Type[] CutoverActivityTypes =
     {
-        // Batch A (8)
+        // Batch A (was 8; ContextGatheringActivity + FetchFileContentsActivity
+        // DELETED by Epic 31 P1 stage 1 — orphaned, direct GitHub REST via the
+        // unregistered "github" named client)
         typeof(Tamma.Activities.Blocker.CollectGitActivityActivity),
         typeof(Tamma.Activities.Blocker.CollectInactivityActivity),
-        typeof(Tamma.Activities.AI.ContextGatheringActivity),
         typeof(Tamma.Activities.Integration.GitHubActivity),
         typeof(Tamma.Activities.Review.CreatePRActivity),
-        typeof(Tamma.Activities.Context.FetchFileContentsActivity),
         typeof(Tamma.Activities.Context.FetchRecentCommitsActivity),
         typeof(Tamma.Activities.Mentorship.CodeReviewActivity),
-        // Batch B (9) — 7 mediated + 2 dead-injection removals
+        // Batch B (was 9; FetchSimilarPatternsActivity deleted with Batch A's two)
         typeof(Tamma.Activities.Blocker.CollectCIStatusActivity),
         typeof(Tamma.Activities.Context.FetchTestResultsActivity),
         typeof(Tamma.Activities.Debug.CollectGitHistoryActivity),
@@ -244,7 +244,6 @@ public class IntegrationServiceCutoverTests
         typeof(Tamma.Activities.Debug.CollectRelevantCodeActivity),
         typeof(Tamma.Activities.Mentorship.QualityGateCheckActivity),
         typeof(Tamma.Activities.Mentorship.MonitorImplementationActivity),
-        typeof(Tamma.Activities.Context.FetchSimilarPatternsActivity),
         typeof(Tamma.Activities.Blocker.CollectCommunicationActivity),
         // Batch C (6) — JIRA / email / merge / diagnostic reads mediated
         typeof(Tamma.Activities.Integration.JiraActivity),
@@ -258,7 +257,7 @@ public class IntegrationServiceCutoverTests
     /// <summary>
     /// The subset that actively mediates a git/CI read through the thin client — these
     /// must hold a <see cref="TammaApiClient"/> field. Excludes
-    /// <c>FetchSimilarPatternsActivity</c> and <c>CollectCommunicationActivity</c>, whose
+    /// <c>CollectCommunicationActivity</c>, whose
     /// composite injection was DEAD (no call site) and was removed outright without
     /// adding a mediation client.
     /// </summary>
@@ -266,10 +265,8 @@ public class IntegrationServiceCutoverTests
     {
         typeof(Tamma.Activities.Blocker.CollectGitActivityActivity),
         typeof(Tamma.Activities.Blocker.CollectInactivityActivity),
-        typeof(Tamma.Activities.AI.ContextGatheringActivity),
         typeof(Tamma.Activities.Integration.GitHubActivity),
         typeof(Tamma.Activities.Review.CreatePRActivity),
-        typeof(Tamma.Activities.Context.FetchFileContentsActivity),
         typeof(Tamma.Activities.Context.FetchRecentCommitsActivity),
         typeof(Tamma.Activities.Mentorship.CodeReviewActivity),
         typeof(Tamma.Activities.Blocker.CollectCIStatusActivity),

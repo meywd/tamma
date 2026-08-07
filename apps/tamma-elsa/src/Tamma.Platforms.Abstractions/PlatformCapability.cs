@@ -113,4 +113,41 @@ public enum PlatformCapability
     /// this flag records that they do not (yet) perform them.
     /// </summary>
     PrLifecycle = 12,
+
+    // ── Epic 31 P1 (stage 1) — capabilities for the verbs the autonomous
+    //    loop uses through the live GitHub path today. NO driver advertises
+    //    them yet (every driver answers the verbs with capability_unsupported);
+    //    each driver flips its flag in the stage/phase that implements the
+    //    verbs for real (GitHub in P1 stage 2, Gitea in P5, GitLab in P6).
+    //    PlatformCapabilityContractTests pins flag ⇔ verb agreement. ──
+
+    /// <summary>
+    /// Driver implements the issue lifecycle verbs:
+    /// <see cref="IGitPlatformClient.CloseIssueAsync"/>,
+    /// <see cref="IGitPlatformClient.AddIssueLabelsAsync"/>,
+    /// <see cref="IGitPlatformClient.RemoveIssueLabelAsync"/>.
+    /// </summary>
+    IssueLifecycle = 13,
+
+    /// <summary>
+    /// Driver implements release creation
+    /// (<see cref="IGitPlatformClient.CreateReleaseAsync"/>).
+    /// </summary>
+    Releases = 14,
+
+    /// <summary>
+    /// Driver implements the repo-history reads:
+    /// <see cref="IGitPlatformClient.ListCommitsAsync"/> and
+    /// <see cref="IGitPlatformClient.ListBranchFileChangesAsync"/>.
+    /// </summary>
+    CommitReads = 15,
+
+    /// <summary>
+    /// Driver implements listing the file/line review comments on a
+    /// PR (<see cref="IGitPlatformClient.ListPullRequestReviewCommentsAsync"/>).
+    /// Distinct from <see cref="PrFileReview"/> (posting) so a driver
+    /// that can write review comments but not enumerate them doesn't
+    /// have to lie in either direction.
+    /// </summary>
+    PrReviewCommentRead = 16,
 }

@@ -309,12 +309,16 @@ builder.Services.AddSingleton(sp =>
 // Keep existing mentorship repos/services for backward compat
 builder.Services.AddScoped<IMentorshipSessionRepository, MentorshipSessionRepository>();
 builder.Services.AddScoped<IMentorshipService, MentorshipService>();
+// Slack stays registered — OutboxSlackSender resolves ISlackIntegrationService.
 builder.Services.AddScoped<ISlackIntegrationService, SlackIntegrationService>();
-builder.Services.AddScoped<IGitHubIntegrationService, GitHubIntegrationService>();
-builder.Services.AddScoped<IJiraIntegrationService, JiraIntegrationService>();
-builder.Services.AddScoped<ICIIntegrationService, CIIntegrationService>();
-builder.Services.AddScoped<IEmailIntegrationService, EmailIntegrationService>();
-builder.Services.AddScoped<IIntegrationService, IntegrationService>();
+// Epic 31 P1 (stage 1, seam 12) — the legacy scoped registrations of the
+// static-token integration services (IGitHubIntegrationService,
+// IJiraIntegrationService, ICIIntegrationService, IEmailIntegrationService and
+// the IIntegrationService facade over them) are REMOVED: zero injection sites
+// existed (the mediation planes mint token-bound instances through
+// IGitHubClientFactory / ICiClientFactory instead), so resolving one from DI
+// was a latent bypass of the per-tenant token resolution. The classes stay
+// until P2/P3 absorb their bodies into the platform drivers.
 builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
 builder.Services.AddScoped<IElsaWorkflowService, ElsaWorkflowService>();
 builder.Services.AddHostedService<WorkflowSyncService>();

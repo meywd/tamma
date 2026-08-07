@@ -117,6 +117,73 @@ public interface IGitPlatformClient
     Task<PlatformResult<PullRequest>> SetDraftAsync(
         SetPullRequestDraftRequest request, CancellationToken ct = default);
 
+    // ── Epic 31 P1 (stage 1) — the verbs the autonomous loop performs
+    //    through the live GitHub path (GitHubIntegrationService) that were
+    //    missing from the abstraction: issue close + labels, release
+    //    create, PR review-comment listing, commits, and branch
+    //    file-changes. Added NOW, across all drivers, so P2's mediation
+    //    swap doesn't churn this interface mid-flight. Same contract as
+    //    the 31-13 lifecycle verbs: a driver without the corresponding
+    //    capability (IssueLifecycle / Releases / PrReviewCommentRead /
+    //    CommitReads) MUST return PlatformError.InvalidRequest with code
+    //    "capability_unsupported" — never throw. Every driver answers
+    //    unsupported today; GitHub implements them in P1 stage 2. ──
+
+    /// <summary>
+    /// Close an issue, optionally posting a closing comment first
+    /// (returns the updated issue). Capability:
+    /// <see cref="PlatformCapability.IssueLifecycle"/>.
+    /// </summary>
+    Task<PlatformResult<Issue>> CloseIssueAsync(
+        string owner, string repoName, string issueNumber, string? comment = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Add labels to an issue; returns the issue's full label set after
+    /// the add. Capability: <see cref="PlatformCapability.IssueLifecycle"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<string>>> AddIssueLabelsAsync(
+        AddIssueLabelsRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove a single label from an issue; returns the remaining label
+    /// set. Removing an absent label is idempotent success. Capability:
+    /// <see cref="PlatformCapability.IssueLifecycle"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<string>>> RemoveIssueLabelAsync(
+        string owner, string repoName, string issueNumber, string label,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Create a release for a tag. Capability:
+    /// <see cref="PlatformCapability.Releases"/>.
+    /// </summary>
+    Task<PlatformResult<Release>> CreateReleaseAsync(
+        CreateReleaseRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// List the file/line-anchored review comments on a PR (the read
+    /// side of <see cref="CreatePullRequestReviewCommentAsync"/>).
+    /// Capability: <see cref="PlatformCapability.PrReviewCommentRead"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<PullRequestReviewComment>>> ListPullRequestReviewCommentsAsync(
+        string owner, string repoName, string prNumber, CancellationToken ct = default);
+
+    /// <summary>
+    /// List recent commits on a ref, newest first. Capability:
+    /// <see cref="PlatformCapability.CommitReads"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<Commit>>> ListCommitsAsync(
+        ListCommitsRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// List the files changed on a branch relative to a base ref (the
+    /// repo's default branch when the request leaves it null).
+    /// Capability: <see cref="PlatformCapability.CommitReads"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<PrFile>>> ListBranchFileChangesAsync(
+        ListBranchFileChangesRequest request, CancellationToken ct = default);
+
     /// <summary>
     /// Post a top-level comment on an issue or PR.
     /// </summary>
