@@ -316,9 +316,10 @@ public class IntegrationServiceCutoverTests
     }
 
     private static bool IsIntegrationServiceType(Type t) =>
-        typeof(IIntegrationService).IsAssignableFrom(t)
-        || typeof(IGitHubIntegrationService).IsAssignableFrom(t)
-        || typeof(ICIIntegrationService).IsAssignableFrom(t)
+        // Epic 31 P3 (4/4): IIntegrationService / IGitHubIntegrationService /
+        // ICIIntegrationService were DELETED with their implementations — the
+        // NAME checks keep this cutover pin armed against reintroduction.
+        t.Name is "IIntegrationService" or "IGitHubIntegrationService" or "ICIIntegrationService"
         || typeof(IJiraIntegrationService).IsAssignableFrom(t)
         || typeof(IEmailIntegrationService).IsAssignableFrom(t);
 }

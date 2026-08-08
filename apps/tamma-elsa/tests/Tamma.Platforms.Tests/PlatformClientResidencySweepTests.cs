@@ -120,29 +120,17 @@ public class PlatformClientResidencySweepTests
         // IGitPlatformClient), GitMediationService.cs (17 op cores swapped onto
         // IPlatformResolver → driver.Client), and IGitHubClientFactory.cs (the
         // chokepoint, deleted outright). Pin 26 → 21.
-        // P3 milestone 3 (2026-08-08) DELETED three entries — the ratchet's second
-        // turn: EngineEndpoints.cs (7 git-proxy handlers rerouted onto the
-        // platform-agnostic IEngineGitCallbackService), AgentDispatchMediationService.cs
-        // + ActionsResultAggregator.cs (swapped onto IPlatformResolver → driver.Actions /
-        // driver.Client). Pin 21 → 18.
-        new("src/Tamma.Activities/AgentDispatch/IGitHubActionsClient.cs",
-            "seam 6: the IGitHubActionsClient seam definition; P3 swaps consumers onto driver.Actions and deletes the surface"),
-        new("src/Tamma.Activities/AgentDispatch/NullGitHubActionsClient.cs",
-            "seam 6: null implementation of the IGitHubActionsClient seam; deleted with the seam in P3"),
+        // P3 milestone 3 (2026-08-08) DELETED three entries (21 → 18): the engine
+        // git-proxy handlers + agent-dispatch mediation/aggregation swapped onto the
+        // driver plane. P3 milestone 4 (2026-08-08) DELETED twelve more (18 → 6):
+        // GitHubIntegrationService / CIIntegrationService / IntegrationService /
+        // CiClientFactory / the IGitHubEngineCallbackService seam (interface + Octokit
+        // + Null impls) / the IGitHubActionsClient seam (interface + Octokit + Null
+        // impls) were DELETED outright; Core's IIntegrationService.cs lost its
+        // GitHub/CI/composite interfaces (wire DTOs remain); Program.cs dropped every
+        // dead registration. ONLY the P4 webhook/secrets seam files remain.
         new("src/Tamma.Api/Extensions/GitHubInstallationServiceCollectionExtensions.cs",
             "seam 7/10: DI wiring for the Octokit App client + installation router; P3/P4 move it into the GitHub driver"),
-        new("src/Tamma.Api/Program.cs",
-            "seams 3/5/6/7: composition root still registers IGitHubActionsClient/Octokit clients and the engine-callback service; drains across P2-P4"),
-        new("src/Tamma.Api/Services/CIIntegrationService.cs",
-            "seam 3: the static-token CI client over the named \"github\" HttpClient; P1 stage 2 absorbs the body, P3 deletes the class"),
-        new("src/Tamma.Api/Services/Ci/CiClientFactory.cs",
-            "seam 3: mints token-bound CIIntegrationService per request; P3 backs /api/v1/ci/* with driver.Actions and deletes it"),
-        new("src/Tamma.Api/Services/Engine/IGitHubEngineCallbackService.cs",
-            "seam 5: the engine-callback client seam definition; P3 deletes it"),
-        new("src/Tamma.Api/Services/Engine/NullGitHubEngineCallbackService.cs",
-            "seam 5: null implementation of the engine-callback seam; deleted with the seam in P3"),
-        new("src/Tamma.Api/Services/Engine/OctokitGitHubEngineCallbackService.cs",
-            "seam 5: Octokit implementation of the engine-callback seam; P3 moves the bodies into the GitHub driver"),
         new("src/Tamma.Api/Services/GitHub/IGitHubAppClient.cs",
             "seam 7: the App-level Octokit client seam definition; P2/P3 move it inside the GitHub driver"),
         new("src/Tamma.Api/Services/GitHub/InstallationRouterService.cs",
@@ -151,16 +139,8 @@ public class PlatformClientResidencySweepTests
             "seam 10/11: libsodium CI-secrets provisioning over Octokit; P4 mounts it on the GitHub driver factory"),
         new("src/Tamma.Api/Services/GitHub/NullGitHubAppClient.cs",
             "seam 7: null implementation of the App-client seam; deleted with the seam in P2/P3"),
-        new("src/Tamma.Api/Services/GitHub/OctokitGitHubActionsClient.cs",
-            "seam 6/7: Octokit implementation of IGitHubActionsClient (App-token conditional); P1 stage 2/P3 absorb it into the driver"),
         new("src/Tamma.Api/Services/GitHub/OctokitGitHubAppClient.cs",
             "seam 7: Octokit App client, default github.com base; P2/P3 move it into the GitHub driver"),
-        new("src/Tamma.Api/Services/GitHubIntegrationService.cs",
-            "seam 1: the 1074-line live GitHub REST/GraphQL client; P1 stage 2 absorbs the body into Tamma.Platforms.GitHub, P3 deletes the delegator"),
-        new("src/Tamma.Api/Services/IntegrationService.cs",
-            "seam 12 residue: the legacy composite facade over IGitHubIntegrationService/ICIIntegrationService — DI registration removed in P1 stage 1, class deleted when P3 removes the interfaces"),
-        new("src/Tamma.Core/Interfaces/IIntegrationService.cs",
-            "seams 1/3: defines IGitHubIntegrationService + ICIIntegrationService and their DTOs; P3 deletes them with the delegators"),
     ];
 
     /// <summary>
@@ -173,7 +153,7 @@ public class PlatformClientResidencySweepTests
     /// neither appears in the baseline at all. May only go DOWN; every
     /// decrement ships with the deleted entries in the same diff.
     /// </summary>
-    internal const int PinnedCount = 18;
+    internal const int PinnedCount = 6;
 
     /// <summary>
     /// The pin's recorded history, oldest first; every element after the seed
@@ -190,7 +170,12 @@ public class PlatformClientResidencySweepTests
     /// git-proxy handlers + the agent-dispatch mediation/aggregation swapped
     /// onto the driver plane; their three entries left the baseline in the
     /// same diff.</para>
-    internal static readonly int[] PinHistory = [26, 21, 18];
+    /// <para><b>18 → 6 (2026-08-08, Epic 31 P3 milestone 4).</b> The superseded
+    /// GitHub-only surfaces were deleted (see the baseline note); the six
+    /// remaining entries are exactly P4's webhook/secrets seams (8-11): the
+    /// GitHub App client (token minting for install-time provisioning +
+    /// libsodium CI-secrets) and the installation router.</para>
+    internal static readonly int[] PinHistory = [26, 21, 18, 6];
 
     // ====================================================================
     // The sweep against reality.

@@ -30,162 +30,11 @@ public interface ISlackIntegrationService
     Task<IntegrationResult<bool>> SendSlackDirectMessageAsync(string userId, string message);
 }
 
-/// <summary>
-/// GitHub source-control operations.
-/// </summary>
-public interface IGitHubIntegrationService
-{
-    /// <summary>Create a GitHub branch from the repo default branch (main → master).</summary>
-    Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName);
-
-    /// <summary>
-    /// Create a GitHub branch cut from an explicit <paramref name="baseBranch"/>
-    /// (Story 2.4 AC2). The base SHA is resolved from the given base ref; if the
-    /// base is explicitly supplied and missing this FAILS (<c>base_branch_not_found</c>)
-    /// rather than silently cutting from an unrelated branch (no false success).
-    /// The resolved base SHA is surfaced on <see cref="GitHubBranchResult.BaseSha"/>
-    /// for the audit event. When <paramref name="baseBranch"/> is null/empty the
-    /// default-branch behaviour (main → master) is used.
-    /// </summary>
-    Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName, string? baseBranch);
-
-    /// <summary>
-    /// Returns whether a branch (ref <c>heads/{branchName}</c>) already exists
-    /// (Story 2.4 — idempotency / conflict handling + post-create validation):
-    /// <c>Ok(true)</c> exists, <c>Ok(false)</c> absent, <c>Fail</c> on API error
-    /// (so a transient lookup failure is NOT mistaken for "absent").
-    /// </summary>
-    Task<IntegrationResult<bool>> BranchExistsAsync(string repository, string branchName);
-
-    /// <summary>Get recent commits from a branch</summary>
-    Task<IntegrationResult<List<GitHubCommit>>> GetGitHubCommitsAsync(string repository, string branch, DateTime? since = null);
-
-    /// <summary>Create a pull request</summary>
-    Task<IntegrationResult<GitHubPullRequestResult>> CreateGitHubPullRequestAsync(string repository, CreatePullRequestRequest request);
-
-    /// <summary>
-    /// Find an existing OPEN pull request for the given <paramref name="headBranch"/>
-    /// → <paramref name="baseBranch"/> pair. Returns <c>Data == null</c> (with
-    /// <c>Success == true</c>) when none exists. Backs Story 2.8 AC8 idempotency —
-    /// a re-run of <c>SingleIssueCycle</c> must reuse / update the open PR instead
-    /// of double-opening or hard-failing on a 422 "A pull request already exists".
-    /// </summary>
-    Task<IntegrationResult<GitHubPullRequestRef?>> GetGitHubOpenPullRequestForBranchAsync(string repository, string headBranch, string baseBranch);
-
-    /// <summary>
-    /// Update an existing pull request's title / body / labels (idempotent reuse path).
-    /// </summary>
-    Task<IntegrationResult<GitHubPullRequestResult>> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request);
-
-    /// <summary>Merge a pull request (squash strategy — back-compat overload).</summary>
-    Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber);
-
-    /// <summary>
-    /// Merge a pull request with an explicit <paramref name="mergeStrategy"/>
-    /// (<c>merge | squash | rebase</c>; Story 2-10 — configurable strategy). The
-    /// strategy is mapped to GitHub's <c>merge_method</c>; an unknown value falls
-    /// back to <c>squash</c>. Replaces the previously hardcoded squash-only merge.
-    /// </summary>
-    Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber, string mergeStrategy);
-
-    /// <summary>
-    /// Read a pull request's lifecycle state (Story 2-10 — idempotency +
-    /// pre-merge readiness). Surfaces <c>State</c> (open/closed), <c>Merged</c>,
-    /// the <c>MergeCommitSha</c> when already merged, and the GitHub
-    /// <c>Mergeable</c> / <c>MergeableState</c> conflict signals. <c>Mergeable</c>
-    /// is <c>null</c> when GitHub has not finished computing it (the caller must
-    /// treat unknown as "not yet confirmed mergeable", never proceed blind).
-    /// Returns <c>Fail</c> on API error (never a fabricated state).
-    /// </summary>
-    Task<IntegrationResult<GitHubPullRequestDetail>> GetGitHubPullRequestAsync(string repository, int pullRequestNumber);
-
-    /// <summary>Get file changes from a branch</summary>
-    Task<IntegrationResult<List<GitHubFileChange>>> GetGitHubFileChangesAsync(string repository, string branch);
-
-    /// <summary>List open issues matching labels</summary>
-    Task<IntegrationResult<List<GitHubIssue>>> ListGitHubIssuesAsync(string repository, string[]? labels = null, string state = "open");
-
-    /// <summary>Assign an issue to a user or bot</summary>
-    Task<IntegrationResult<bool>> AssignGitHubIssueAsync(string repository, int issueNumber, string assignee);
-
-    /// <summary>Close a GitHub issue</summary>
-    Task<IntegrationResult<bool>> CloseGitHubIssueAsync(string repository, int issueNumber, string? comment = null);
-
-    /// <summary>Delete a branch</summary>
-    Task<IntegrationResult<bool>> DeleteGitHubBranchAsync(string repository, string branchName);
-
-    /// <summary>Get pull request review comments</summary>
-    Task<IntegrationResult<List<GitHubReviewComment>>> GetPullRequestReviewCommentsAsync(string repository, int pullRequestNumber);
-
-    /// <summary>
-    /// Story 38-1 — post a comment on an issue (the git-mediation issue-update
-    /// path). Backs <c>PATCH /api/v1/git/{repo}/issues/{n}</c>.
-    /// </summary>
-    Task<IntegrationResult<bool>> PostIssueCommentAsync(string repository, int issueNumber, string body);
-
-    /// <summary>Story 38-1 — add labels to an issue (git-mediation issue-update path).</summary>
-    Task<IntegrationResult<bool>> AddIssueLabelsAsync(string repository, int issueNumber, string[] labels);
-
-    /// <summary>Story 38-1 — remove a single label from an issue (idempotent: a 404
-    /// "label not present" is treated as removed).</summary>
-    Task<IntegrationResult<bool>> RemoveIssueLabelAsync(string repository, int issueNumber, string label);
-
-    /// <summary>
-    /// Epic 38 follow-up #21 (deployment-pipeline release step) — create a GitHub
-    /// release (and its tag) for the shipped version. Backs
-    /// <c>POST /api/v1/git/{owner}/{repo}/releases</c>. The release title / notes are
-    /// composed engine-side (pure, token-free); the API performs the create with the
-    /// resolved per-tenant token. An expected platform failure surfaces via
-    /// <c>Fail</c> (never a fabricated success) so the ADL pipeline can branch on it.
-    /// </summary>
-    Task<IntegrationResult<GitHubReleaseResult>> CreateGitHubReleaseAsync(string repository, ReleaseCreationRequest request);
-
-    /// <summary>
-    /// Story 31-13 — close an open pull request (PATCH state=closed). Backs
-    /// <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n}/close</c>. Reversible
-    /// via <see cref="ReopenPullRequestAsync"/> (close↔reopen invert). Returns the
-    /// updated PR detail on success; a platform error surfaces via <c>Fail</c>
-    /// (status-prefixed body) rather than a fabricated state.
-    /// </summary>
-    Task<IntegrationResult<GitHubPullRequestDetail>> ClosePullRequestAsync(string repository, int pullRequestNumber);
-
-    /// <summary>
-    /// Story 31-13 — reopen a closed pull request (PATCH state=open). Backs
-    /// <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n}/reopen</c>. The inverse
-    /// of <see cref="ClosePullRequestAsync"/>.
-    /// </summary>
-    Task<IntegrationResult<GitHubPullRequestDetail>> ReopenPullRequestAsync(string repository, int pullRequestNumber);
-
-    /// <summary>
-    /// Story 31-13 — post a review comment anchored to a diff line
-    /// (<c>POST /repos/{o}/{r}/pulls/{n}/comments</c>; <c>body</c>, <c>commit_id</c>,
-    /// <c>path</c>, <c>line</c>, <c>side</c>). Backs
-    /// <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n}/review-comments</c>. When
-    /// <paramref name="commitId"/> is null/empty the PR head SHA is resolved from the
-    /// PR. A stale anchor (GitHub 422) surfaces via <c>Fail</c> (status-prefixed body),
-    /// never a throw, so the review flow inherits a typed failure.
-    /// </summary>
-    Task<IntegrationResult<GitHubReviewComment>> PostPullRequestReviewCommentAsync(string repository, int pullRequestNumber, string body, string? commitId, string path, int line, string side = "RIGHT");
-
-    /// <summary>
-    /// Story 31-13 — request reviewers for a pull request
-    /// (<c>POST /repos/{o}/{r}/pulls/{n}/requested_reviewers</c>). Backs
-    /// <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n}/reviewers</c>. Promoted
-    /// from the private best-effort create-PR side effect to a first-class governed
-    /// verb: the failure is SURFACED (<c>Fail("{status}: {body}")</c>), not swallowed.
-    /// </summary>
-    Task<IntegrationResult<bool>> RequestReviewersAsync(string repository, int pullRequestNumber, IReadOnlyList<string> reviewers);
-
-    /// <summary>
-    /// Story 31-13 — toggle a pull request's draft state. GitHub REST cannot do this,
-    /// so this uses the GraphQL <c>convertPullRequestToDraft</c> (draft=true) /
-    /// <c>markPullRequestReadyForReview</c> (draft=false) mutation keyed by the PR
-    /// <c>node_id</c> (fetched via REST). Backs
-    /// <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/draft</c>. A non-2xx or a
-    /// GraphQL <c>errors</c> array surfaces via <c>Fail</c>.
-    /// </summary>
-    Task<IntegrationResult<GitHubPullRequestDetail>> SetPullRequestDraftAsync(string repository, int pullRequestNumber, bool draft);
-}
+// Epic 31 P3 (4/4): IGitHubIntegrationService was DELETED with its
+// implementation (GitHubIntegrationService) — the production git path is the
+// platform driver plane (IGitPlatformClient) behind the /api/v1/git mediation
+// endpoints. The GitHub* wire DTOs below remain: they are the mediation
+// planes' response shapes, not a client surface.
 
 /// <summary>
 /// JIRA ticket management operations.
@@ -199,17 +48,10 @@ public interface IJiraIntegrationService
     Task<IntegrationResult<JiraTicket?>> GetJiraTicketAsync(string ticketId);
 }
 
-/// <summary>
-/// CI/CD pipeline operations.
-/// </summary>
-public interface ICIIntegrationService
-{
-    /// <summary>Trigger CI/CD tests</summary>
-    Task<IntegrationResult<TestRunResult>> TriggerTestsAsync(string repository, string branch);
-
-    /// <summary>Get build status</summary>
-    Task<IntegrationResult<BuildStatus>> GetBuildStatusAsync(string repository, string branch);
-}
+// Epic 31 P3 (4/4): ICIIntegrationService was DELETED with its implementation
+// (CIIntegrationService / CiClientFactory) — CI mediation rides the resolved
+// driver's IGitPlatformActionsClient. TestRunResult / BuildStatus below remain
+// as wire DTO shapes.
 
 /// <summary>
 /// Email notification operations.
@@ -220,107 +62,10 @@ public interface IEmailIntegrationService
     Task<IntegrationResult<bool>> SendEmailAsync(string to, string subject, string body);
 }
 
-// ============================================
-// Composite interface (backward compatibility)
-// Retains original method signatures so existing consumers compile unchanged.
-// ============================================
-
-/// <summary>
-/// Composite service for external integrations (GitHub, Slack, etc.)
-/// Kept for backward compatibility — existing consumers continue to depend
-/// on this interface with the original return types.
-/// New code should prefer the focused interfaces above.
-/// </summary>
-public interface IIntegrationService
-{
-    /// <summary>Send a message via Slack</summary>
-    Task SendSlackMessageAsync(string channel, string message);
-
-    /// <summary>Send a direct message to a user via Slack</summary>
-    Task SendSlackDirectMessageAsync(string userId, string message);
-
-    /// <summary>Send an email notification</summary>
-    Task SendEmailAsync(string to, string subject, string body);
-
-    /// <summary>Create a GitHub branch</summary>
-    Task<GitHubBranchResult> CreateGitHubBranchAsync(string repository, string branchName);
-
-    /// <summary>Create a GitHub branch cut from an explicit base branch</summary>
-    Task<GitHubBranchResult> CreateGitHubBranchAsync(string repository, string branchName, string? baseBranch);
-
-    /// <summary>Returns whether a branch already exists</summary>
-    Task<bool> BranchExistsAsync(string repository, string branchName);
-
-    /// <summary>Get recent commits from a branch</summary>
-    Task<List<GitHubCommit>> GetGitHubCommitsAsync(string repository, string branch, DateTime? since = null);
-
-    /// <summary>Create a pull request</summary>
-    Task<GitHubPullRequestResult> CreateGitHubPullRequestAsync(string repository, CreatePullRequestRequest request);
-
-    /// <summary>Find an existing OPEN PR for head→base (null when none)</summary>
-    Task<GitHubPullRequestRef?> GetGitHubOpenPullRequestForBranchAsync(string repository, string headBranch, string baseBranch);
-
-    /// <summary>Update an existing pull request's title / body / labels</summary>
-    Task<GitHubPullRequestResult> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request);
-
-    /// <summary>Merge a pull request (squash strategy — back-compat overload).</summary>
-    Task<GitHubMergeResult> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber);
-
-    /// <summary>Merge a pull request with an explicit strategy (merge | squash | rebase).</summary>
-    Task<GitHubMergeResult> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber, string mergeStrategy);
-
-    /// <summary>Read a pull request's lifecycle state (idempotency / pre-merge readiness).</summary>
-    Task<GitHubPullRequestDetail> GetGitHubPullRequestAsync(string repository, int pullRequestNumber);
-
-    /// <summary>Get file changes from a branch</summary>
-    Task<List<GitHubFileChange>> GetGitHubFileChangesAsync(string repository, string branch);
-
-    /// <summary>List open issues matching labels</summary>
-    Task<List<GitHubIssue>> ListGitHubIssuesAsync(string repository, string[]? labels = null, string state = "open");
-
-    /// <summary>Assign an issue to a user or bot</summary>
-    Task AssignGitHubIssueAsync(string repository, int issueNumber, string assignee);
-
-    /// <summary>Close a GitHub issue</summary>
-    Task CloseGitHubIssueAsync(string repository, int issueNumber, string? comment = null);
-
-    /// <summary>Delete a branch</summary>
-    Task DeleteGitHubBranchAsync(string repository, string branchName);
-
-    /// <summary>Get pull request review comments</summary>
-    Task<List<GitHubReviewComment>> GetPullRequestReviewCommentsAsync(string repository, int pullRequestNumber);
-
-    /// <summary>Trigger CI/CD tests</summary>
-    Task<TestRunResult> TriggerTestsAsync(string repository, string branch);
-
-    /// <summary>Get build status</summary>
-    Task<BuildStatus> GetBuildStatusAsync(string repository, string branch);
-
-    /// <summary>Create or update a JIRA ticket</summary>
-    Task<JiraTicketResult> UpdateJiraTicketAsync(string ticketId, JiraTicketUpdate update);
-
-    /// <summary>Get JIRA ticket details</summary>
-    Task<JiraTicket?> GetJiraTicketAsync(string ticketId);
-
-    /// <summary>Create a GitHub release (and its tag) for a shipped version
-    /// (Epic 38 follow-up #21 — deployment-pipeline release step).</summary>
-    Task<GitHubReleaseResult> CreateGitHubReleaseAsync(string repository, ReleaseCreationRequest request);
-
-    /// <summary>Story 31-13 — close an open pull request (PATCH state=closed).</summary>
-    Task<GitHubPullRequestDetail> ClosePullRequestAsync(string repository, int pullRequestNumber);
-
-    /// <summary>Story 31-13 — reopen a closed pull request (PATCH state=open).</summary>
-    Task<GitHubPullRequestDetail> ReopenPullRequestAsync(string repository, int pullRequestNumber);
-
-    /// <summary>Story 31-13 — post a review comment anchored to a diff line.</summary>
-    Task<GitHubReviewComment> PostPullRequestReviewCommentAsync(string repository, int pullRequestNumber, string body, string? commitId, string path, int line, string side = "RIGHT");
-
-    /// <summary>Story 31-13 — request reviewers for a pull request (failure surfaced, not swallowed).</summary>
-    Task<bool> RequestReviewersAsync(string repository, int pullRequestNumber, IReadOnlyList<string> reviewers);
-
-    /// <summary>Story 31-13 — toggle a pull request's draft state (GraphQL-backed).</summary>
-    Task<GitHubPullRequestDetail> SetPullRequestDraftAsync(string repository, int pullRequestNumber, bool draft);
-}
+// Epic 31 P3 (4/4): the composite IIntegrationService (zero consumers since
+// the Epic 38 cutover) was DELETED. The focused Slack/JIRA/email interfaces
+// above stay — they are config-credentialed API-side services, not the git
+// platform plane.
 
 // ============================================
 // GitHub Integration Models

@@ -35,7 +35,7 @@ public class AgentDispatchCutoverTests
             foreach (var ctor in type.GetConstructors())
             {
                 ctor.GetParameters()
-                    .Any(p => typeof(IGitHubActionsClient).IsAssignableFrom(p.ParameterType))
+                    .Any(p => p.ParameterType.Name == "IGitHubActionsClient")
                     .Should().BeFalse($"{type.Name} must not inject IGitHubActionsClient via its constructor");
             }
         }
@@ -47,7 +47,7 @@ public class AgentDispatchCutoverTests
         foreach (var type in AgentDispatchTypes)
         {
             type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-                .Any(f => typeof(IGitHubActionsClient).IsAssignableFrom(f.FieldType))
+                .Any(f => f.FieldType.Name == "IGitHubActionsClient")
                 .Should().BeFalse($"{type.Name} must hold no IGitHubActionsClient field");
         }
     }

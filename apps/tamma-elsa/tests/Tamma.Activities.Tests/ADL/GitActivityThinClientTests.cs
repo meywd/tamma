@@ -177,7 +177,7 @@ public class GitActivityThinClientTests
             foreach (var ctor in type.GetConstructors())
             {
                 ctor.GetParameters()
-                    .Any(p => typeof(IGitHubIntegrationService).IsAssignableFrom(p.ParameterType))
+                    .Any(p => p.ParameterType.Name == "IGitHubIntegrationService")
                     .Should().BeFalse($"{type.Name} must not inject IGitHubIntegrationService via its constructor");
             }
         }
@@ -189,7 +189,7 @@ public class GitActivityThinClientTests
         foreach (var type in GitActivityTypes)
         {
             type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-                .Any(f => typeof(IGitHubIntegrationService).IsAssignableFrom(f.FieldType))
+                .Any(f => f.FieldType.Name == "IGitHubIntegrationService")
                 .Should().BeFalse($"{type.Name} must hold no IGitHubIntegrationService field");
         }
     }

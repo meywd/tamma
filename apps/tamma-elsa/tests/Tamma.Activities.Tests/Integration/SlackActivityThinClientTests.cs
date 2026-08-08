@@ -192,7 +192,7 @@ public class SlackActivityThinClientTests
         foreach (var ctor in typeof(SlackActivity).GetConstructors())
         {
             ctor.GetParameters()
-                .Any(p => typeof(IIntegrationService).IsAssignableFrom(p.ParameterType)
+                .Any(p => p.ParameterType.Name == "IIntegrationService"
                        || typeof(ISlackIntegrationService).IsAssignableFrom(p.ParameterType))
                 .Should().BeFalse("SlackActivity must not inject a Slack-credential integration service");
         }
@@ -203,7 +203,7 @@ public class SlackActivityThinClientTests
     {
         typeof(SlackActivity)
             .GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Any(f => typeof(IIntegrationService).IsAssignableFrom(f.FieldType)
+            .Any(f => f.FieldType.Name == "IIntegrationService"
                    || typeof(ISlackIntegrationService).IsAssignableFrom(f.FieldType))
             .Should().BeFalse("SlackActivity must hold no Slack-credential integration-service field");
     }

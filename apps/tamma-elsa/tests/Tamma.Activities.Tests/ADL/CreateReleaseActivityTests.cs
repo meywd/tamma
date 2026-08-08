@@ -116,14 +116,12 @@ public class CreateReleaseActivityTests
         foreach (var ctor in type.GetConstructors())
         {
             ctor.GetParameters()
-                .Any(p => typeof(IGitHubIntegrationService).IsAssignableFrom(p.ParameterType)
-                          || typeof(IIntegrationService).IsAssignableFrom(p.ParameterType))
+                .Any(p => p.ParameterType.Name is "IGitHubIntegrationService" or "IIntegrationService")
                 .Should().BeFalse("CreateReleaseActivity must not inject a credential-holding integration service");
         }
 
         type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Any(f => typeof(IGitHubIntegrationService).IsAssignableFrom(f.FieldType)
-                      || typeof(IIntegrationService).IsAssignableFrom(f.FieldType))
+            .Any(f => f.FieldType.Name is "IGitHubIntegrationService" or "IIntegrationService")
             .Should().BeFalse("CreateReleaseActivity must hold no credential-holding integration-service field");
     }
 }

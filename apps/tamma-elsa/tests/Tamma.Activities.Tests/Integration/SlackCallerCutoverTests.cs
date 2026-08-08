@@ -166,7 +166,7 @@ public class SlackCallerCutoverTests
     }
 
     private static bool IsIntegrationServiceType(Type t) =>
-        typeof(IIntegrationService).IsAssignableFrom(t)
+        t.Name == "IIntegrationService"
         || typeof(ISlackIntegrationService).IsAssignableFrom(t);
 
     // ── Drift guard: ZERO direct Slack calls remain under Tamma.Activities ─────

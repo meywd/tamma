@@ -696,13 +696,12 @@ builder.Services.AddScoped<Tamma.Api.Services.Git.MergeTargetActionKeySelector>(
 
 // ── Story 38 (Phase 1) — CI / JIRA / email step mediation ──
 // CI (GitHub Actions) reuses the git guard + token resolver (CI runs on the same
-// per-tenant git token); the CiClientFactory mints a token-bound CIIntegrationService
+// per-tenant git token); Epic 31 P3 retired the CiClientFactory/CIIntegrationService
+// pair — CI mediation resolves the platform driver's Actions surface instead.
 // per request. JIRA + email are NOT repo-scoped (like Slack): they run the existing
 // config-credentialed IJiraIntegrationService / outbox-backed IEmailService under the
 // caller's tenant context. In every case the credential stays in Tamma.Api; the
 // engine holds nothing.
-builder.Services.AddSingleton<Tamma.Api.Services.Ci.ICiClientFactory,
-    Tamma.Api.Services.Ci.CiClientFactory>();
 builder.Services.AddScoped<Tamma.Api.Services.Ci.ICiMediationService,
     Tamma.Api.Services.Ci.CiMediationService>();
 builder.Services.AddScoped<Tamma.Api.Services.Jira.IJiraMediationService,
@@ -995,25 +994,10 @@ builder.Services.AddScoped<Tamma.Api.Services.Engine.IExecuteTaskService,
 // Scoped: reads through the request-scoped tenant EventRepository.
 builder.Services.AddScoped<Tamma.Api.Services.Engine.Replay.IReplayService,
     Tamma.Api.Services.Engine.Replay.ReplayService>();
-if (builder.Configuration.GetValue<long?>("GitHub:AppId") is long appId && appId > 0
-    && !string.IsNullOrWhiteSpace(builder.Configuration["GitHub:PrivateKey"]))
-{
-    // The resolver is scoped (takes a scoped repository); wrap the service
-    // itself as scoped so the resolver flow works.
-    builder.Services.AddScoped<Tamma.Api.Services.Engine.IRepoInstallationResolver,
-        Tamma.Api.Services.Engine.InstallationRepoResolver>();
-    builder.Services.AddScoped<Tamma.Api.Services.Engine.IGitHubEngineCallbackService,
-        Tamma.Api.Services.Engine.OctokitGitHubEngineCallbackService>();
-}
-else
-{
-    builder.Services.AddSingleton<Tamma.Api.Services.Engine.IGitHubEngineCallbackService,
-        Tamma.Api.Services.Engine.NullGitHubEngineCallbackService>();
-}
 // Epic 31 P3 (seam 5) — the PLATFORM-AGNOSTIC engine-callback service the
-// /api/engine/* git-proxy handlers now consume (IPlatformResolver →
-// driver.Client; the legacy IGitHubEngineCallbackService registrations above
-// are unconsumed after the reroute and are deleted in P3's final stage).
+// /api/engine/* git-proxy handlers consume (IPlatformResolver → driver.Client).
+// The GitHub-only IGitHubEngineCallbackService (Octokit + Null impls) and its
+// App-conditional registration were DELETED in P3's final stage.
 builder.Services.AddScoped<Tamma.Api.Services.Engine.IEngineGitCallbackService,
     Tamma.Api.Services.Engine.PlatformEngineCallbackService>();
 // Engine registry (audit finding 013). Until TammaEngine ports, the
@@ -1022,35 +1006,16 @@ builder.Services.AddScoped<Tamma.Api.Services.Engine.IEngineGitCallbackService,
 builder.Services.AddSingleton<Tamma.Api.Services.Engine.IEngineRegistry,
     Tamma.Api.Services.Engine.InMemoryEngineRegistry>();
 
-// ─── Epic 19 / Story 38-2: Agent dispatch (Class-C mediation) ──────────
+// ─── Epic 19 / Story 38-2 / Epic 31 P3: Agent dispatch (Class-C mediation) ──
 //
-// IGitHubActionsClient — Octokit-backed when the GitHub App is wired,
-// otherwise the Null impl that reports NotConfigured. After the Story 38-2
-// cutover this client is API-ONLY: it is consumed by the new
-// AgentDispatchMediationService + ActionsResultAggregator behind the
-// /api/v1/agent-dispatch endpoints (which mint the per-repo installation
-// token internally), NOT by the engine phase services (those are now thin
-// TammaApiClient clients). The engine's NullGitHubActionsClient registration
-// was removed from ElsaServer/Program.cs.
-if (builder.Configuration.GetValue<long?>("GitHub:AppId") is long actionsAppId && actionsAppId > 0
-    && !string.IsNullOrWhiteSpace(builder.Configuration["GitHub:PrivateKey"]))
-{
-    // Scoped because IRepoInstallationResolver depends on a scoped
-    // installation repository. Matches the engine-callback pattern
-    // above.
-    builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
-        Tamma.Api.Services.GitHub.OctokitGitHubActionsClient>();
-}
-else
-{
-    builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
-        Tamma.Activities.AgentDispatch.NullGitHubActionsClient>();
-}
-
+// Epic 31 P3 (4/4): the GitHub-only Actions seam (Octokit + Null impls and the
+// App-conditional registration) was DELETED — the mediation service resolves
+// the tenant's platform driver (IPlatformResolver → driver.Actions) per call.
 // Story 38-2 — the managed agent-dispatch execution layer behind
 // /api/v1/agent-dispatch/{owner}/{repo}/... . The mediation service composes the
-// Story 38-1 cross-tenant guard (IGitRepoAuthorizer) → IGitHubActionsClient →
-// one DCB event; the aggregator does the collect multi-read server-side.
+// Story 38-1 cross-tenant guard (IGitRepoAuthorizer) → the resolved driver's
+// Actions surface → one DCB event; the aggregator does the collect multi-read
+// server-side over the same driver.
 builder.Services.AddScoped<Tamma.Api.Services.AgentDispatch.IActionsResultAggregator,
     Tamma.Api.Services.AgentDispatch.ActionsResultAggregator>();
 builder.Services.AddScoped<Tamma.Api.Services.AgentDispatch.IAgentDispatchMediationService,
