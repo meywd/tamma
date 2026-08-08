@@ -727,6 +727,10 @@ public static partial class ActionCatalog
             "Tamma.Api.Services.Platforms.PlatformDriverCacheInvalidator"),
         Automation(BackgroundActor.GitHubInstallationBridgeBackfill, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "GitHub installation bridge backfill", "One-shot startup sweep bridging tenant-linked github_installations rows into tenant_platform_installations (Epic 31 P2 seam-14 registry unification); idempotent, so re-runs are no-ops.",
             "Tamma.Api.Services.Platforms.GitHubInstallationBridgeBackfillService"),
+        // Epic 31 P3 (DG-5) — the CI completion poller. Mutating: it resumes
+        // suspended workflow instances (idempotent — a burned bookmark 404s).
+        Automation(BackgroundActor.CiCompletionPoller, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "CI completion poller", "Polls suspended CI-result waits' run status through the resolved platform driver and resumes the bookmark on completion (Epic 31 P3 DG-5); before it only the 30m timeout ended a CI wait. Idempotent against the timeout race.",
+            "Tamma.Api.Services.Ci.CiCompletionPollerService"),
 
         // ── platform-task (8) — all platform-automation ──────────────────────
 

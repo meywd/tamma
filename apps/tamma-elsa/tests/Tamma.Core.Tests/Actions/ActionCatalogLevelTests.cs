@@ -295,9 +295,11 @@ public class ActionCatalogLevelTests
     {
         // The machinery rows are excluded from the dial by IsMachinery (43-13);
         // none appears in the level table, and none is a dial row here.
+        // 44 → 45 (Epic 31 P3, 2026-08-08): + the DG-5 CI completion poller
+        // (automation:*, machinery by class).
         // 42 → 44 (Epic 31 P2): + the driver-cache invalidator + the
         // installation-bridge backfill (both automation:*, machinery by class).
-        ActionCatalog.All.Count(d => d.IsMachinery).Should().Be(44);
+        ActionCatalog.All.Count(d => d.IsMachinery).Should().Be(45);
         ActionCatalog.All.Where(d => d.IsMachinery).Select(d => d.Key.ToWire())
             .Should().OnlyContain(k => !LevelTable.ContainsKey(k));
     }

@@ -156,6 +156,8 @@ public class TestingWorkflow : WorkflowBase
             Name = "Wait for CI Results",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             RunId = new(ctx => ciTriggerResultVar.Get(ctx)?.RunId ?? "unknown"),
+            // DG-5 — the poller needs the repo on the bookmark payload.
+            Repository = new(ctx => (string?)repositoryVar.Get(ctx)),
             TimeoutMinutes = new(30),
             Results = new(ciResultsFromWaitVar)
         };
@@ -395,6 +397,8 @@ public class TestingWorkflow : WorkflowBase
             Name = "Wait for CI Results (Retry)",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             RunId = new(ctx => ciTriggerResultVar.Get(ctx)?.RunId ?? "unknown"),
+            // DG-5 — the poller needs the repo on the bookmark payload.
+            Repository = new(ctx => (string?)repositoryVar.Get(ctx)),
             TimeoutMinutes = new(30),
             Results = new(ciResultsFromWaitVar)
         };

@@ -907,6 +907,15 @@ builder.Services.AddScoped<
 builder.Services.AddHostedService<
     Tamma.Api.Services.Platforms.PlatformDriverCacheInvalidator>();
 
+// Epic 31 P3 (DG-5) — the CI completion poller: enumerates suspended CI-result
+// waits from the engine, polls each run's status through the tenant's resolved
+// platform driver (driver.Actions), and resumes the bookmark on completion.
+// Before this service the CI wait could only END BY TIMEOUT (30m), GitHub
+// included. Registered unconditionally; Ci:CompletionPoll:Enabled=false turns
+// the loop off without unregistering the catalogued actor.
+builder.Services.AddHostedService<
+    Tamma.Api.Services.Ci.CiCompletionPollerService>();
+
 // Story 31-9 — onboarding platform picker connect service. Composes
 // the secret-cabinet (29-1/29-3 reveal-on-create), the 31-2 platform
 // installation registry, and the 31-1 driver factory to validate +

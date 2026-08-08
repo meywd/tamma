@@ -115,7 +115,10 @@ public class ActionWirePinTests
             // Epic 31 P2 — the platform-plane subscriber + the seam-14 backfill
             // (same rule: every IHostedService class is catalogued).
             "platform-driver-cache-invalidator",
-            "github-installation-bridge-backfill");
+            "github-installation-bridge-backfill",
+            // Epic 31 P3 (2026-08-08, DG-5) — the CI completion poller: the
+            // durable resumer for suspended CI-result waits.
+            "ci-completion-poller");
     }
 
     [Test]

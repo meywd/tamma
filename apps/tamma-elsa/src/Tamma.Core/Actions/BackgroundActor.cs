@@ -164,6 +164,18 @@ public enum BackgroundActor
     /// <c>tenant_platform_installations</c> so App-installed tenants are
     /// visible to the driver plane. Re-runs are no-ops by construction.</summary>
     [Wire("github-installation-bridge-backfill")] GitHubInstallationBridgeBackfill,
+
+    // ── Epic 31 P3 — the CI completion vehicle (DG-5) ──
+
+    /// <summary><c>Tamma.Api.Services.Ci.CiCompletionPollerService</c> —
+    /// Epic 31 P3 (DG-5): the durable CI completion poller. Enumerates the
+    /// engine's suspended CI-result waits, polls each run's status through
+    /// the tenant's resolved platform driver (<c>driver.Actions</c>), and
+    /// resumes the bookmark with the terminal result — before it, only the
+    /// 30-minute timeout ended a CI wait, on every platform. Mutating: it
+    /// advances suspended workflow instances (idempotent against the timeout
+    /// race — a burned bookmark 404s, never double-advances).</summary>
+    [Wire("ci-completion-poller")] CiCompletionPoller,
 }
 
 /// <summary><see cref="BackgroundActor"/> wire helper.</summary>

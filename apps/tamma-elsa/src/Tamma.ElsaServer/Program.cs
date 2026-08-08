@@ -567,6 +567,22 @@ app.MapPost("/elsa/api/documents/input/resume",
     Tamma.ElsaServer.Endpoints.DocumentInputResumeEndpoint.Resume)
     .RequireAuthorization();
 
+// Epic 31 P3 (DG-5) — the engine-side half of the CI completion poller.
+// Tamma.Api's CiCompletionPollerService enumerates suspended CI-result waits
+// here (the WaitForCIResultsActivity bookmark under the common
+// "ci-result-wait" stimulus name), polls each run's status through the
+// tenant's resolved platform driver API-side, and posts the terminal result
+// back to the resume endpoint, which runs the owning instance from the exact
+// bookmark id. A burned bookmark (timeout won the race) answers 404 — a late
+// resume can never double-advance. Same engine-control-surface /
+// RequireAuthorization rationale as the merge/deploy/blocker resume seams.
+app.MapGet("/elsa/api/ci/waits",
+    Tamma.ElsaServer.Endpoints.CiWaitEndpoints.ListWaits)
+    .RequireAuthorization();
+app.MapPost("/elsa/api/ci/waits/resume",
+    Tamma.ElsaServer.Endpoints.CiWaitEndpoints.Resume)
+    .RequireAuthorization();
+
 app.UseSerilogRequestLogging();
 
 Log.Information("Tamma ELSA Server starting up...");

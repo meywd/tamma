@@ -78,8 +78,12 @@ public class BackgroundActorCatalogSweepTests
     }
 
     [Test]
-    public void The_hosted_service_count_is_pinned_at_31()
+    public void The_hosted_service_count_is_pinned_at_32()
     {
+        // 31 → 32 (Epic 31 P3, 2026-08-08): + CiCompletionPollerService
+        // (Tamma.Api.Services.Ci) — the DG-5 durable CI completion poller that
+        // resumes suspended CI-result waits on run completion; catalogued as
+        // automation:ci-completion-poller.
         // 29 → 31 (Epic 31 P2, 2026-08-07): + PlatformDriverCacheInvalidator
         // (the Story 31-2 cache-invalidation subscriber) and
         // + GitHubInstallationBridgeBackfillService (the seam-14 registry
@@ -94,6 +98,6 @@ public class BackgroundActorCatalogSweepTests
         // GovernancePolicySnapshotPrimingService — both registered via
         // TryAddEnumerable in AddActionCatalogGovernance) +
         // PlatformTaskWorker = 29.
-        HostedServiceTypes().Should().HaveCount(31);
+        HostedServiceTypes().Should().HaveCount(32);
     }
 }

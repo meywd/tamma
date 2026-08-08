@@ -265,7 +265,7 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void PlatformAutomation_has_the_45_expected_members()
+    public void PlatformAutomation_has_the_46_expected_members()
     {
         var expected = new List<string>
         {
@@ -287,12 +287,14 @@ public class ActionGroupMembershipTests
         // All 8 platform tasks.
         expected.AddRange(Enum.GetValues<PlatformTaskKind>().Select(p => $"platform-task:{p.ToWire()}"));
 
-        expected.Should().HaveCount(45, "5 engine effects + 3 schedule effects + 29 automation + 8 platform tasks");
+        // 45 → 46 (Epic 31 P3, 2026-08-08): + the DG-5 CI completion poller
+        // (automation machinery, like every hosted service).
+        expected.Should().HaveCount(46, "5 engine effects + 3 schedule effects + 30 automation + 8 platform tasks");
         WiresIn(ActionGroup.PlatformAutomation).Should().BeEquivalentTo(expected);
     }
 
     [Test]
-    public void The_per_group_counts_sum_to_221()
+    public void The_per_group_counts_sum_to_222()
     {
         // 219 → 221 (Epic 31 P2): platform-automation 43 → 45 (+the driver-cache
         // invalidator + the installation-bridge backfill, both automation machinery)
@@ -335,11 +337,13 @@ public class ActionGroupMembershipTests
             [ActionGroup.ExternalComms] = 2,
             [ActionGroup.ModelInvocation] = 8,
             [ActionGroup.Secrets] = 5,
-            [ActionGroup.PlatformAutomation] = 45,
+            [ActionGroup.PlatformAutomation] = 46,
         };
 
+        // 221 → 222 (Epic 31 P3, 2026-08-08): platform-automation 45 → 46
+        // (+the DG-5 CI completion poller, automation machinery).
         // 219 → 221 (Epic 31 P2): +2 platform-automation machinery members.
-        counts.Values.Sum().Should().Be(221);
+        counts.Values.Sum().Should().Be(222);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }

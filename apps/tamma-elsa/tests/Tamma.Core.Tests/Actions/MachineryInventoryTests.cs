@@ -27,7 +27,8 @@ public class MachineryInventoryTests
     /// AMENDED 2026-08-07 (Epic 31 P2): + automation:platform-driver-cache-
     /// invalidator (Story 31-2's designed cache-invalidation subscriber, built
     /// in P2) and + automation:github-installation-bridge-backfill (the seam-14
-    /// registry-unification startup sweep) — 42 → 44. Both are background
+    /// registry-unification startup sweep) — 42 → 44; Epic 31 P3 (2026-08-08)
+    /// + automation:ci-completion-poller (DG-5) — 44 → 45. All are background
     /// services with no human in the loop, the exact class this inventory
     /// exists for; neither is a new dial-gated capability.
     /// </summary>
@@ -40,7 +41,7 @@ public class MachineryInventoryTests
         "effect:engine.document.persist",
         "effect:engine.document.set-status",
 
-        // ── Background services — all 31 automation:* ─────────────────────
+        // ── Background services — all 32 automation:* ─────────────────────
         "automation:action-catalog-startup-validator",
         "automation:governance-policy-snapshot-priming-service",
         "automation:provider-settings-store-priming-service",
@@ -72,6 +73,9 @@ public class MachineryInventoryTests
         "automation:tenant-delete-requested-trigger",
         "automation:platform-driver-cache-invalidator",
         "automation:github-installation-bridge-backfill",
+        // Epic 31 P3 (2026-08-08, DG-5): the CI completion poller — a
+        // background service with no human in the loop (44 → 45).
+        "automation:ci-completion-poller",
 
         // ── Task handlers — all 8 platform-task:* ──────────────────────────
         "platform-task:RETIRE_SECRET_VERSION",
@@ -122,7 +126,7 @@ public class MachineryInventoryTests
             .ToHashSet(StringComparer.Ordinal);
         var fixture = MachineryInventory.ToHashSet(StringComparer.Ordinal);
 
-        MachineryInventory.Should().HaveCount(44, "5 + 31 + 8 = 44 (43-11's count check, amended by Epic 31 P2: +2 automation)");
+        MachineryInventory.Should().HaveCount(45, "5 + 32 + 8 = 45 (43-11's count check, amended by Epic 31 P2: +2 automation; Epic 31 P3 2026-08-08: +1 automation, the DG-5 CI completion poller)");
         MachineryInventory.Should().OnlyHaveUniqueItems();
 
         flagged.Except(fixture).Should().BeEmpty(
