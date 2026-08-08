@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Tamma.Api.Services.Webhooks.Handlers;
 using Tamma.Data.Repositories;
 using Tamma.Platforms.Abstractions;
 using Tamma.Platforms.Webhooks;
@@ -59,8 +61,55 @@ public static class WebhookServiceCollectionExtensions
                 PlatformKind.GitLab,
                 headerName: "X-Gitlab-Token"));
 
+        // ── Production handlers (Epic 31 P4 M1) ──
+        // The 31-7 dispatcher shipped with ZERO registered handlers — verified
+        // deliveries were dropped on the floor. These are the first production
+        // registrations. Handlers are singletons that open their own DI scope
+        // per dispatch (the IWebhookHandler lifetime contract).
+        //
+        // (a) GitHub installation / install-linking — ports the legacy
+        //     /api/github/webhooks installation handling (created/deleted/
+        //     suspend/unsuspend + repo add/remove) onto the neutral receiver.
+        services.AddSingleton<IWebhookHandler>(sp => new GitHubInstallationWebhookHandler(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            "installation.*",
+            sp.GetRequiredService<ILogger<GitHubInstallationWebhookHandler>>()));
+        services.AddSingleton<IWebhookHandler>(sp => new GitHubInstallationWebhookHandler(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            "installation_repositories.*",
+            sp.GetRequiredService<ILogger<GitHubInstallationWebhookHandler>>()));
+
+        // (b) CI-run completion → wake the suspended CI wait early (DG-5
+        //     accelerator; the P3 poller stays as the fallback). One instance
+        //     per (platform, event vocabulary):
+        //     GitHub fires workflow_run with action=completed; Gitea/Forgejo
+        //     mirror the payload but action vocabularies vary across versions,
+        //     so they bind the bare event type and filter on a terminal
+        //     conclusion; GitLab's Pipeline Hook has no action field at all.
+        services.AddSingleton<IWebhookHandler>(sp => BuildCiWakeHandler(
+            sp, PlatformKind.GitHub, "workflow_run.completed"));
+        services.AddSingleton<IWebhookHandler>(sp => BuildCiWakeHandler(
+            sp, PlatformKind.Gitea, "workflow_run"));
+        services.AddSingleton<IWebhookHandler>(sp => BuildCiWakeHandler(
+            sp, PlatformKind.Forgejo, "workflow_run"));
+        services.AddSingleton<IWebhookHandler>(sp => BuildCiWakeHandler(
+            sp, PlatformKind.GitLab, "pipeline"));
+
         // ── Dispatcher + handler registry ──
-        services.AddSingleton<IWebhookEventDispatcher, WebhookEventDispatcher>();
+        // Built as a factory so every registered IWebhookHandler lands in the
+        // dispatcher's registry at first resolve — no hosted service needed
+        // (and none wanted: registration is pure in-memory wiring, not a
+        // background actor).
+        services.AddSingleton<IWebhookEventDispatcher>(sp =>
+        {
+            var dispatcher = new WebhookEventDispatcher(
+                sp.GetRequiredService<ILogger<WebhookEventDispatcher>>());
+            foreach (var handler in sp.GetServices<IWebhookHandler>())
+            {
+                dispatcher.RegisterHandler(handler);
+            }
+            return dispatcher;
+        });
 
         // ── Idempotency repo ──
         services.AddScoped<IPlatformWebhookDeliveryRepository, PlatformWebhookDeliveryRepository>();
@@ -71,4 +120,13 @@ public static class WebhookServiceCollectionExtensions
 
         return services;
     }
+
+    private static CiRunCompletionWebhookHandler BuildCiWakeHandler(
+        IServiceProvider sp, PlatformKind kind, string pattern) =>
+        new(
+            sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            kind,
+            pattern,
+            sp.GetRequiredService<ILogger<CiRunCompletionWebhookHandler>>());
 }
