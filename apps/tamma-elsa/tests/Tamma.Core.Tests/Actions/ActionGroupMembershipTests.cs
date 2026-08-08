@@ -287,9 +287,11 @@ public class ActionGroupMembershipTests
         // All 8 platform tasks.
         expected.AddRange(Enum.GetValues<PlatformTaskKind>().Select(p => $"platform-task:{p.ToWire()}"));
 
+        // 46 → 47 (Epic 31 P4 M3, 2026-08-08): + the startup webhook-registration
+        // pass (automation machinery, like every hosted service).
         // 45 → 46 (Epic 31 P3, 2026-08-08): + the DG-5 CI completion poller
         // (automation machinery, like every hosted service).
-        expected.Should().HaveCount(46, "5 engine effects + 3 schedule effects + 30 automation + 8 platform tasks");
+        expected.Should().HaveCount(47, "5 engine effects + 3 schedule effects + 31 automation + 8 platform tasks");
         WiresIn(ActionGroup.PlatformAutomation).Should().BeEquivalentTo(expected);
     }
 
@@ -337,13 +339,17 @@ public class ActionGroupMembershipTests
             [ActionGroup.ExternalComms] = 2,
             [ActionGroup.ModelInvocation] = 8,
             [ActionGroup.Secrets] = 5,
-            [ActionGroup.PlatformAutomation] = 46,
+            [ActionGroup.PlatformAutomation] = 47,
         };
 
+        // 222 → 223 (Epic 31 P4 M3, 2026-08-08): platform-automation 46 → 47
+        // (+the startup webhook-registration pass, automation machinery).
+        // git.webhook.register stays IN source-control-write (its group never
+        // moved) — it only flipped dial → machinery.
         // 221 → 222 (Epic 31 P3, 2026-08-08): platform-automation 45 → 46
         // (+the DG-5 CI completion poller, automation machinery).
         // 219 → 221 (Epic 31 P2): +2 platform-automation machinery members.
-        counts.Values.Sum().Should().Be(222);
+        counts.Values.Sum().Should().Be(223);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }

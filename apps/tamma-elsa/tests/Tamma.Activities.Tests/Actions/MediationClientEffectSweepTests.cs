@@ -277,16 +277,22 @@ public class MediationClientEffectSweepTests
             // Story 43-12 — RESERVED keys: real catalog rows at their zone levels with
             // no performer in the tree yet. deploy.dev / deploy.staging have no pipeline
             // stage (QA -> UAT -> Prod only); git.checks.bypass has nothing that bypasses
-            // checks; git.webhook.register's driver method has no production caller.
+            // checks.
             [ExternalEffect.DeployDev] = new(SiteKind.Reserved, null,
                 "RESERVED (Story 43-12): no dev stage exists in DeploymentPipelineWorkflow (QA -> UAT -> Prod only)"),
             [ExternalEffect.DeployStaging] = new(SiteKind.Reserved, null,
                 "RESERVED (Story 43-12): no staging stage exists in DeploymentPipelineWorkflow (QA -> UAT -> Prod only)"),
             [ExternalEffect.GitChecksBypass] = new(SiteKind.Reserved, null,
                 "RESERVED (Story 43-12): nothing in the tree bypasses required checks yet"),
-            [ExternalEffect.GitWebhookRegister] = new(SiteKind.Reserved, null,
-                "RESERVED (Story 43-12): IGitPlatformClient.RegisterWebhookAsync is driver-implemented but "
-                + "has no production caller; DUAL-dormant (Story 43-13)"),
+            // Epic 31 P4 M3 (2026-08-08) — RESERVED → LIVE, as machinery: the first
+            // caller of IGitPlatformClient.RegisterWebhookAsync is the server-initiated
+            // WebhookRegistrationService (platform connect + single-user startup
+            // validation) — provisioning plumbing, so per the row's own 43-12 note it
+            // moved to the machinery inventory instead of binding an LLM route. No HTTP
+            // hop of its own → InProcess.
+            [ExternalEffect.GitWebhookRegister] = new(SiteKind.InProcess, null,
+                "WebhookRegistrationService (Tamma.Api) — server-initiated at platform connect / startup "
+                + "validation; machinery (Epic 31 P4 M3), audited via GIT.WEBHOOK_REGISTER.* events"),
         };
 
     // ====================================================================

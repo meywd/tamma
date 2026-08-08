@@ -223,11 +223,13 @@ public class ActionCatalogLevelTests
         ["effect:process.spawn"] = 80,
         ["tool:shell_execute"] = 80,
         ["effect:deploy.uat"] = 80,
-        // ── Level 85 — deploy staging + register webhook (2, 43-12) — both RESERVED /
-        //    create-infrastructure zone (deploy.staging has no pipeline stage;
-        //    git.webhook.register is DUAL-dormant) ──
+        // ── Level 85 — deploy staging (1, 43-12) — RESERVED / create-infrastructure
+        //    zone (no pipeline stage exists). git.webhook.register (85) LEFT this
+        //    table on 2026-08-08 (Epic 31 P4 M3): it went live as provisioning
+        //    MACHINERY (its first caller is the server-initiated
+        //    WebhookRegistrationService, per the row's own 43-12 note), and
+        //    machinery rows are off the dial. ──
         ["effect:deploy.staging"] = 85,
-        ["effect:git.webhook.register"] = 85,
         // ── Level 90 — deploy prod (2) — 43-12 (was the coarse deploy.promote-prod) —
         //    plus manage-secrets read (1) — 42-10 ──
         ["agent-action:deploy"] = 90,
@@ -287,7 +289,7 @@ public class ActionCatalogLevelTests
         missing.Should().BeEmpty("keys in the table with no catalog dial row");
         extra.Should().BeEmpty("catalog dial rows absent from the table");
         mismatched.Should().BeEmpty("a level moved without updating BOTH the descriptor and this table");
-        actual.Should().HaveCount(177, "177 = 221 catalog rows − 44 machinery (Epic 31 P2: +2 automation machinery rows on both sides of the subtraction) (43-17 follow-up: +2 engine-callback keys, ci.workflow.dispatch 30 and llm.task.execute 20; Story 31-13: +11 PR/issue effect keys, all dial rows at 35/40; Story 42-10: +1 effect:secret.read at 90; Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
+        actual.Should().HaveCount(176, "176 = 223 catalog rows − 47 machinery (Epic 31 P4 M3 2026-08-08: git.webhook.register moved dial → machinery and +1 automation machinery row, so dial rows shrink by one while the catalog grows by one) (Epic 31 P2: +2 automation machinery rows on both sides of the subtraction; 43-17 follow-up: +2 engine-callback keys, ci.workflow.dispatch 30 and llm.task.execute 20; Story 31-13: +11 PR/issue effect keys, all dial rows at 35/40; Story 42-10: +1 effect:secret.read at 90; Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
     }
 
     [Test]
@@ -295,11 +297,15 @@ public class ActionCatalogLevelTests
     {
         // The machinery rows are excluded from the dial by IsMachinery (43-13);
         // none appears in the level table, and none is a dial row here.
+        // 45 → 47 (Epic 31 P4 M3, 2026-08-08): + effect:git.webhook.register
+        // (RESERVED → live as provisioning machinery per its 43-12 note) and
+        // + the startup webhook-registration pass (automation:*, machinery by
+        // class).
         // 44 → 45 (Epic 31 P3, 2026-08-08): + the DG-5 CI completion poller
         // (automation:*, machinery by class).
         // 42 → 44 (Epic 31 P2): + the driver-cache invalidator + the
         // installation-bridge backfill (both automation:*, machinery by class).
-        ActionCatalog.All.Count(d => d.IsMachinery).Should().Be(45);
+        ActionCatalog.All.Count(d => d.IsMachinery).Should().Be(47);
         ActionCatalog.All.Where(d => d.IsMachinery).Select(d => d.Key.ToWire())
             .Should().OnlyContain(k => !LevelTable.ContainsKey(k));
     }
@@ -375,7 +381,9 @@ public class ActionCatalogLevelTests
             ["effect:deploy.uat"] = (MoveDecision.Accept, "uat stage transition — 80"),
             ["effect:deploy.staging"] = (MoveDecision.Accept, "staging deploy — 85 (RESERVED: no staging pipeline stage exists yet)"),
             ["effect:deploy.prod"] = (MoveDecision.Accept, "production promotion — 90; the business-mode gate is untouched and joins by OR"),
-            ["effect:git.webhook.register"] = (MoveDecision.Accept, "registers a durable ingress path (create-infrastructure zone) — 85 (RESERVED / DUAL-dormant)"),
+            // effect:git.webhook.register LEFT this table 2026-08-08 (Epic 31 P4
+            // M3): live as provisioning MACHINERY (off the dial), so it no longer
+            // "moves up" — staleness would fail this row if kept.
             // 42-10 — an LLM reading a secret value into model context (manage-secrets zone).
             ["effect:secret.read"] = (MoveDecision.Accept, "a secret value in a model transcript can leak, and cannot be un-read — 90"),
             ["agent-action:rollback"] = (MoveDecision.Accept, "production rollback — 95"),

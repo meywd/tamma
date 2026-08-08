@@ -133,6 +133,23 @@ public static class WebhookServiceCollectionExtensions
         services.AddSingleton<IWebhookEventCategoryMapper, DefaultWebhookEventCategoryMapper>();
         services.AddScoped<IWebhookSecretResolver, WebhookSecretResolver>();
 
+        // ── Registration caller (Epic 31 P4 M3 — git.webhook.register LIVE) ──
+        // Factory shape (the PlatformConnectService convention) so hosts
+        // without the secret cabinet still boot: ISecretRevealService is
+        // optional and its absence degrades to the skip-with-audit path.
+        services.AddScoped<Registration.IWebhookRegistrationService>(sp =>
+            new Registration.WebhookRegistrationService(
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<ITenantPlatformInstallationRepository>(),
+                sp.GetRequiredService<IEventRepository>(),
+                sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<ILogger<Registration.WebhookRegistrationService>>(),
+                sp.GetService<Tamma.Api.Services.Secrets.Reveal.ISecretRevealService>()));
+        // Single-user startup validation (automation:webhook-registration-startup):
+        // registers the config-tier installation's webhook at boot; every
+        // cannot-proceed state degrades to GIT.WEBHOOK_REGISTER.SKIPPED.
+        services.AddHostedService<Registration.WebhookRegistrationStartupService>();
+
         return services;
     }
 

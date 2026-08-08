@@ -176,6 +176,17 @@ public enum BackgroundActor
     /// advances suspended workflow instances (idempotent against the timeout
     /// race — a burned bookmark 404s, never double-advances).</summary>
     [Wire("ci-completion-poller")] CiCompletionPoller,
+
+    /// <summary><c>Tamma.Api.Services.Webhooks.Registration.WebhookRegistrationStartupService</c>
+    /// — Epic 31 P4 M3: single-user-mode startup validation for webhook
+    /// ingress. When the <c>Platform:</c> config tier is active and
+    /// <c>Tamma:PublicBaseUrl</c> + a configured webhook secret exist, it
+    /// registers the platform webhook on the accessible repos through
+    /// <c>driver.Client.RegisterWebhookAsync</c> (effect:git.webhook.register,
+    /// machinery). No public URL / no secret / unsupported capability degrade
+    /// to a GIT.WEBHOOK_REGISTER.SKIPPED audit event (the §4 alternative
+    /// step), never a startup failure.</summary>
+    [Wire("webhook-registration-startup")] WebhookRegistrationStartup,
 }
 
 /// <summary><see cref="BackgroundActor"/> wire helper.</summary>

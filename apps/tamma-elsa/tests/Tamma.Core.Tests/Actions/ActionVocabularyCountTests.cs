@@ -128,7 +128,7 @@ public class ActionVocabularyCountTests
         // → 26. Cross-checked: 26 non-abstract IHostedService classes exist
         // across both host assemblies (BackgroundActorCatalogSweepTests binds
         // them by type name). +1 (Story 41-30): TenantScheduledTriggerService.
-        Enum.GetValues<BackgroundActor>().Should().HaveCount(32);
+        Enum.GetValues<BackgroundActor>().Should().HaveCount(33);
     }
 
     [Test]
@@ -159,8 +159,12 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_222()
+    public void TotalCatalogMembers_is_223()
     {
+        // 96 + 17 + 8 + 61 + 33 + 8 = 223 — was 222 (automation 32): Epic 31 P4
+        // M3 (2026-08-08) added the single-user startup webhook-registration
+        // pass as an automation:* machinery member (git.webhook.register's
+        // config-tier caller).
         // 96 + 17 + 8 + 61 + 32 + 8 = 222 — was 221 (automation 31): Epic 31 P3
         // (2026-08-08) added the DG-5 CI completion poller as an automation:*
         // machinery member.
@@ -190,7 +194,7 @@ public class ActionVocabularyCountTests
         // (80 + 10 + 22 + 26 + …); the agent-action plane grew by 16 (Story
         // 41-1a), the document-type plane by 6 (Story 41-1b), and
         // effect/automation by 3 + 1 (Story 41-30).
-        ActionCatalog.All.Should().HaveCount(222);
-        ActionCatalog.ByKey.Should().HaveCount(222);
+        ActionCatalog.All.Should().HaveCount(223);
+        ActionCatalog.ByKey.Should().HaveCount(223);
     }
 }

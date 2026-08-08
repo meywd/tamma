@@ -78,8 +78,12 @@ public class BackgroundActorCatalogSweepTests
     }
 
     [Test]
-    public void The_hosted_service_count_is_pinned_at_32()
+    public void The_hosted_service_count_is_pinned_at_33()
     {
+        // 32 → 33 (Epic 31 P4 M3, 2026-08-08): + WebhookRegistrationStartupService
+        // (Tamma.Api.Services.Webhooks.Registration) — the single-user startup
+        // validation pass for webhook ingress; catalogued as
+        // automation:webhook-registration-startup.
         // 31 → 32 (Epic 31 P3, 2026-08-08): + CiCompletionPollerService
         // (Tamma.Api.Services.Ci) — the DG-5 durable CI completion poller that
         // resumes suspended CI-result waits on run completion; catalogued as
@@ -98,6 +102,6 @@ public class BackgroundActorCatalogSweepTests
         // GovernancePolicySnapshotPrimingService — both registered via
         // TryAddEnumerable in AddActionCatalogGovernance) +
         // PlatformTaskWorker = 29.
-        HostedServiceTypes().Should().HaveCount(32);
+        HostedServiceTypes().Should().HaveCount(33);
     }
 }

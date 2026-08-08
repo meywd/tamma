@@ -83,8 +83,10 @@ public class ActionCatalogDefaultsTests
     {
         // Story 43-12 — the per-target merge/deploy zone-ladder keys. Merge splits by
         // PR base branch (dev 55 / qa 60 / main 65); deploy splits by target env
-        // (dev 70 / qa 75 / uat 80 / staging 85 / prod 90). Plus the two reserved
-        // source-control-write keys: git.checks.bypass (50) and git.webhook.register (85).
+        // (dev 70 / qa 75 / uat 80 / staging 85 / prod 90). Plus the reserved
+        // source-control-write key git.checks.bypass (50). git.webhook.register left
+        // this list 2026-08-08 (Epic 31 P4 M3): live as provisioning MACHINERY, and
+        // machinery rows carry no level semantics (DefaultMinAutonomy == Min).
         ActionCatalog.Get(ActionKey.Parse("effect:git.merge.dev")).DefaultMinAutonomy.Should().Be(55);
         ActionCatalog.Get(ActionKey.Parse("effect:git.merge.qa")).DefaultMinAutonomy.Should().Be(60);
         ActionCatalog.Get(ActionKey.Parse("effect:git.merge.main")).DefaultMinAutonomy.Should().Be(65);
@@ -94,7 +96,8 @@ public class ActionCatalogDefaultsTests
         ActionCatalog.Get(ActionKey.Parse("effect:deploy.staging")).DefaultMinAutonomy.Should().Be(85);
         ActionCatalog.Get(ActionKey.Parse("effect:deploy.prod")).DefaultMinAutonomy.Should().Be(90);
         ActionCatalog.Get(ActionKey.Parse("effect:git.checks.bypass")).DefaultMinAutonomy.Should().Be(50);
-        ActionCatalog.Get(ActionKey.Parse("effect:git.webhook.register")).DefaultMinAutonomy.Should().Be(85);
+        ActionCatalog.Get(ActionKey.Parse("effect:git.webhook.register")).IsMachinery.Should().BeTrue(
+            "Epic 31 P4 M3: live as provisioning machinery, off the dial");
     }
 
     [Test]

@@ -176,6 +176,7 @@ public sealed class PlatformConnectService : IPlatformConnectService
         // about to create — no caching surprise. This proves the
         // credential can authenticate before we persist a row that
         // would otherwise fail at first webhook delivery.
+        IGitPlatformDriver driver;
         try
         {
             var probeInstallation = new PlatformInstallation(
@@ -184,7 +185,7 @@ public sealed class PlatformConnectService : IPlatformConnectService
                 Kind: request.Kind,
                 BaseUrl: request.BaseUrl,
                 InstallationExternalId: request.ExternalId);
-            var driver = await factory
+            driver = await factory
                 .CreateAsync(probeInstallation, request.CredentialPlaintext, ct)
                 .ConfigureAwait(false);
 
@@ -266,6 +267,24 @@ public sealed class PlatformConnectService : IPlatformConnectService
                 actorUserId: request.ActorUserId,
                 ct)
             .ConfigureAwait(false);
+
+        // Epic 31 P4 M3 — git.webhook.register goes live: mint the
+        // per-installation webhook secret into the cabinet, stamp its ref on
+        // the row (WebhookSecret{Scope,Name} — where the 31-7 receiver reads
+        // it back), and register the hook on the installation's accessible
+        // repos via driver.Client.RegisterWebhookAsync. EVERY cannot-proceed
+        // state (no Tamma:PublicBaseUrl, capability unsupported, no cabinet,
+        // per-repo API failures) degrades to a recorded
+        // GIT.WEBHOOK_REGISTER.SKIPPED/PARTIAL/FAILED audit event — it NEVER
+        // blocks connect (the service catches everything internally).
+        var registration = _services
+            .GetService<Tamma.Api.Services.Webhooks.Registration.IWebhookRegistrationService>();
+        if (registration is not null)
+        {
+            await registration
+                .RegisterForInstallationAsync(driver, persisted, request.ActorUserId, ct)
+                .ConfigureAwait(false);
+        }
 
         return PlatformConnectResult.Success(
             installationId: persisted.Id,
