@@ -121,8 +121,37 @@ public sealed class GitHubPlatformDriverFactory : IGitPlatformDriverFactory
             githubHttp,
             _loggerFactory.CreateLogger<GitHubActionsPlatformClient>());
 
+        var capabilities = GitHubPlatformDriver.ComputeCapabilities(auth);
+
+        // Epic 31 P4 M4 — mount Story 31-8's CI-secrets provisioner (seam 11's
+        // first severed point: driver.CiSecrets was null on every driver). The
+        // authorize delegate applies the SAME credential mode as the rest of
+        // the driver — PAT bearer, or an App installation token minted (and
+        // cached) by the minter — so per-tenant BYOK and GHES both work.
+        ICiSecretsProvisioner? ciSecrets = null;
+        if (capabilities.Contains(PlatformCapability.Secrets))
+        {
+            var patToken = auth is GitHubAuth.Pat pat ? pat.Token : null;
+            var minterRef = minter;
+            ciSecrets = new GitHubCiSecretsProvisioner(
+                http,
+                baseUrl,
+                async (req, innerCt) =>
+                {
+                    var token = patToken ?? (minterRef is null
+                        ? null
+                        : await minterRef.GetInstallationTokenAsync(false, innerCt).ConfigureAwait(false));
+                    if (string.IsNullOrEmpty(token)) return false;
+                    req.Headers.Authorization =
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                    req.Headers.Accept.ParseAdd("application/vnd.github+json");
+                    return true;
+                },
+                _loggerFactory.CreateLogger<GitHubCiSecretsProvisioner>());
+        }
+
         IGitPlatformDriver driver = new GitHubPlatformDriver(
-            client, actions, GitHubPlatformDriver.ComputeCapabilities(auth));
+            client, actions, capabilities, ciSecrets);
         return Task.FromResult(driver);
     }
 

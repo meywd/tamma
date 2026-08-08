@@ -94,7 +94,44 @@ public sealed class GiteaPlatformDriverFactory : IGitPlatformDriverFactory
                 _configuration);
         }
 
-        return new GiteaPlatformDriver(client, actions, capabilities, detected);
+        // Epic 31 P4 M4 — mount Story 31-8's CI-secrets provisioner when the
+        // detected version advertises the secrets API (1.21+). The authorize
+        // delegate applies the bot token directly; OAuth2 mode reads the
+        // cached access token (minted by the driver's own request path) and
+        // degrades to a typed auth_unavailable per-target failure when no
+        // token is cached yet.
+        ICiSecretsProvisioner? ciSecrets = null;
+        if (capabilities.Contains(PlatformCapability.Secrets))
+        {
+            var installationId = installation.Id;
+            var authRef = auth;
+            var cacheRef = _tokenCache;
+            var secretsBaseUrl = installation.BaseUrl;
+            ciSecrets = new GiteaCiSecretsProvisioner(
+                http,
+                secretsBaseUrl,
+                (req, _) =>
+                {
+                    switch (authRef)
+                    {
+                        case GiteaAuth.BotToken bot:
+                            req.Headers.Authorization =
+                                new System.Net.Http.Headers.AuthenticationHeaderValue("token", bot.Token);
+                            return Task.FromResult(true);
+                        case GiteaAuth.OAuth2:
+                            var cached = cacheRef.TryGet(installationId);
+                            if (string.IsNullOrEmpty(cached)) return Task.FromResult(false);
+                            req.Headers.Authorization =
+                                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", cached);
+                            return Task.FromResult(true);
+                        default:
+                            return Task.FromResult(false);
+                    }
+                },
+                _loggerFactory.CreateLogger<GiteaCiSecretsProvisioner>());
+        }
+
+        return new GiteaPlatformDriver(client, actions, capabilities, detected, ciSecrets);
     }
 
     /// <summary>

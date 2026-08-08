@@ -7,7 +7,7 @@ using Sodium;
 using Tamma.Platforms.Abstractions;
 using Tamma.Platforms.Abstractions.Logging;
 
-namespace Tamma.Api.Services.Platforms;
+namespace Tamma.Platforms.GitHub;
 
 /// <summary>
 /// Story 31-8 — GitHub implementation of
@@ -47,19 +47,49 @@ public sealed class GitHubCiSecretsProvisioner : ICiSecretsProvisioner
     public PlatformKind Kind => PlatformKind.GitHub;
 
     private readonly HttpClient _http;
+    private readonly string _baseUrl;
+    private readonly Func<HttpRequestMessage, CancellationToken, Task<bool>> _authorizeAsync;
     private readonly ILogger<GitHubCiSecretsProvisioner> _logger;
     private readonly int _maxConcurrency;
 
+    /// <summary>
+    /// Epic 31 P4 M4 — constructed by <see cref="GitHubPlatformDriverFactory"/>
+    /// per installation (the P1 absorb pattern): <paramref name="baseUrl"/> is
+    /// the installation's API root (GHES-aware) and
+    /// <paramref name="authorizeAsync"/> applies the driver's credential mode
+    /// (PAT bearer, or App installation token via the minter) to each request,
+    /// returning false when no credential could be resolved.
+    /// </summary>
     public GitHubCiSecretsProvisioner(
         HttpClient http,
+        string baseUrl,
+        Func<HttpRequestMessage, CancellationToken, Task<bool>> authorizeAsync,
         ILogger<GitHubCiSecretsProvisioner>? logger = null,
         int maxConcurrency = DefaultMaxConcurrency)
     {
         ArgumentNullException.ThrowIfNull(http);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        ArgumentNullException.ThrowIfNull(authorizeAsync);
         _http = http;
+        _baseUrl = baseUrl.TrimEnd('/');
+        _authorizeAsync = authorizeAsync;
         _logger = logger ?? NullLogger<GitHubCiSecretsProvisioner>.Instance;
         _maxConcurrency = maxConcurrency > 0 ? maxConcurrency : DefaultMaxConcurrency;
     }
+
+    /// <summary>Authorize + send. A credential that cannot be resolved maps to
+    /// the typed <c>auth_unavailable</c> per-target failure upstream.</summary>
+    private async Task<HttpResponseMessage> SendAuthorizedAsync(
+        HttpRequestMessage req, CancellationToken ct)
+    {
+        if (!await _authorizeAsync(req, ct).ConfigureAwait(false))
+        {
+            throw new CredentialUnavailableException();
+        }
+        return await _http.SendAsync(req, ct).ConfigureAwait(false);
+    }
+
+    internal sealed class CredentialUnavailableException : Exception { }
 
     public Task<IReadOnlyList<CiSecretProvisionResult>> ProvisionSecretAsync(
         CiSecretScope scope,
@@ -117,9 +147,8 @@ public sealed class GitHubCiSecretsProvisioner : ICiSecretsProvisioner
                     }
 
                     using var req = new HttpRequestMessage(
-                        HttpMethod.Delete, endpoint);
-                    using var resp = await _http
-                        .SendAsync(req, ct).ConfigureAwait(false);
+                        HttpMethod.Delete, _baseUrl + endpoint);
+                    using var resp = await SendAuthorizedAsync(req, ct).ConfigureAwait(false);
 
                     // 204 + 404 both treated as success (idempotent delete).
                     if (resp.StatusCode == HttpStatusCode.NoContent
@@ -130,6 +159,11 @@ public sealed class GitHubCiSecretsProvisioner : ICiSecretsProvisioner
                     }
 
                     results[index] = MapHttpFailure(target, resp);
+                }
+                catch (CredentialUnavailableException)
+                {
+                    results[index] = CiSecretProvisionResult.Failed(
+                        Kind, target, "auth_unavailable");
                 }
                 catch (Exception ex)
                 {
@@ -167,8 +201,8 @@ public sealed class GitHubCiSecretsProvisioner : ICiSecretsProvisioner
 
         try
         {
-            using var resp = await _http
-                .GetAsync(endpoint, ct).ConfigureAwait(false);
+            using var listReq = new HttpRequestMessage(HttpMethod.Get, _baseUrl + endpoint);
+            using var resp = await SendAuthorizedAsync(listReq, ct).ConfigureAwait(false);
 
             if (!resp.IsSuccessStatusCode)
             {
@@ -280,9 +314,8 @@ public sealed class GitHubCiSecretsProvisioner : ICiSecretsProvisioner
 
             // 2. Fetch the public key.
             using var keyReq = new HttpRequestMessage(
-                HttpMethod.Get, publicKeyEndpoint);
-            using var keyResp = await _http
-                .SendAsync(keyReq, ct).ConfigureAwait(false);
+                HttpMethod.Get, _baseUrl + publicKeyEndpoint);
+            using var keyResp = await SendAuthorizedAsync(keyReq, ct).ConfigureAwait(false);
 
             if (!keyResp.IsSuccessStatusCode)
             {
@@ -320,12 +353,11 @@ public sealed class GitHubCiSecretsProvisioner : ICiSecretsProvisioner
             };
             using var content = new StringContent(
                 JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-            using var putReq = new HttpRequestMessage(HttpMethod.Put, putEndpoint)
+            using var putReq = new HttpRequestMessage(HttpMethod.Put, _baseUrl + putEndpoint)
             {
                 Content = content,
             };
-            using var putResp = await _http
-                .SendAsync(putReq, ct).ConfigureAwait(false);
+            using var putResp = await SendAuthorizedAsync(putReq, ct).ConfigureAwait(false);
 
             if (!putResp.IsSuccessStatusCode)
             {
@@ -339,6 +371,10 @@ public sealed class GitHubCiSecretsProvisioner : ICiSecretsProvisioner
             return CiSecretProvisionResult.Ok(Kind, target);
         }
         catch (OperationCanceledException) { throw; }
+        catch (CredentialUnavailableException)
+        {
+            return CiSecretProvisionResult.Failed(Kind, target, "auth_unavailable");
+        }
         catch (Exception ex)
         {
             // Defence: scrub the secret value from the exception
@@ -363,7 +399,7 @@ public sealed class GitHubCiSecretsProvisioner : ICiSecretsProvisioner
     /// a standard base64 ciphertext, which GitHub expects in the
     /// <c>encrypted_value</c> field.
     /// </summary>
-    internal static string EncryptSealedBox(string publicKeyBase64, string plaintext)
+    public static string EncryptSealedBox(string publicKeyBase64, string plaintext)
     {
         var publicKey = Convert.FromBase64String(publicKeyBase64);
         var messageBytes = Encoding.UTF8.GetBytes(plaintext);

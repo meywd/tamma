@@ -8,7 +8,6 @@ using Tamma.Api.Services.SaaS;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
-#pragma warning disable CS0618 // Story 31-8: transitional consumer of obsolete IGitHubSecretsProvisioner.
 
 namespace Tamma.Api.Tests.SaaS;
 
@@ -24,7 +23,7 @@ public class ApiKeyRotationServiceTests
     private Mock<IApiKeyRepository> _apiKeyRepo = null!;
     private Mock<ITenantMembershipRepository> _membershipRepo = null!;
     private Mock<IEventRepository> _eventRepo = null!;
-    private Mock<IGitHubSecretsProvisioner> _provisioner = null!;
+    private Mock<IInstallationSecretsPusher> _provisioner = null!;
     private Mock<ILogger<ApiKeyRotationService>> _logger = null!;
     private ApiKeyRotationService _service = null!;
 
@@ -35,15 +34,15 @@ public class ApiKeyRotationServiceTests
         _apiKeyRepo = new Mock<IApiKeyRepository>();
         _membershipRepo = new Mock<ITenantMembershipRepository>();
         _eventRepo = new Mock<IEventRepository>();
-        _provisioner = new Mock<IGitHubSecretsProvisioner>();
+        _provisioner = new Mock<IInstallationSecretsPusher>();
         _logger = new Mock<ILogger<ApiKeyRotationService>>();
 
         // Default: provisioner returns no per-repo results (mirrors the repo
         // list being empty); each test that exercises the provisioner sets up
         // its own behaviour.
         _provisioner
-            .Setup(p => p.ProvisionSecretAsync(
-                It.IsAny<long>(),
+            .Setup(p => p.PushAsync(
+                It.IsAny<Guid>(),
                 It.IsAny<IReadOnlyList<(string, string)>>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),

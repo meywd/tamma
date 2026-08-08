@@ -3372,14 +3372,16 @@ documents.MapPost("/escalations/{escalationId}/resolve", DocumentDecisionEndpoin
 var github = app.MapGroup("/api/github");
 github.MapGet("/callback", GitHubEndpoints.Callback)
     .RequireRateLimiting("OAuthStart");
-// Legacy GitHub-specific webhook path. Story 31-7 generalises the
-// receiver to /api/webhooks/{platform}; the old path stays active
-// (with the GitHub-specific install-linking logic) for the deprecation
-// window so in-flight GitHub deliveries during a deploy don't change
-// shape. New deployments wire downstream platforms (Gitea, Forgejo,
-// GitLab) through the new path; the next epic story will port the
-// install-linking handler into a neutral IWebhookHandler and retire
-// the legacy path.
+// Legacy GitHub-specific webhook path — DEPRECATED (Epic 31 P4 M4, the
+// promised window). The 31-7 receiver (/api/webhooks/github) now carries
+// real handlers for everything this route processes: install linking
+// (GitHubInstallationWebhookHandler ports the SAME router logic), CI-run
+// wake, and merged-PR resume. This route stays mapped for the dual-route
+// window only, advertising `Deprecation: true` + a successor Link header,
+// and gates processing on the SAME platform_webhook_deliveries idempotency
+// row as the new path so one GitHub delivery id hitting both routes
+// processes exactly once. Point the GitHub App webhook URL at
+// /api/webhooks/github; delete this mapping when the window closes.
 github.MapPost("/webhooks", GitHubEndpoints.Webhooks)
     .RequireRateLimiting("GitHubWebhook");
 

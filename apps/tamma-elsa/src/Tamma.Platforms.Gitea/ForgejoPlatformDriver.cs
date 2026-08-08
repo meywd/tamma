@@ -55,6 +55,10 @@ public sealed class ForgejoPlatformDriver : IGitPlatformDriver
     /// <inheritdoc />
     public IGitPlatformActionsClient? Actions => _inner.Actions;
 
+    /// <summary>Epic 31 P4 M4 — delegates the CI-secrets surface to the
+    /// wrapped Gitea driver (Forgejo keeps the Gitea secrets API).</summary>
+    public ICiSecretsProvisioner? CiSecrets => _inner.CiSecrets;
+
     /// <inheritdoc />
     /// <remarks>
     /// Today: identical to <see cref="GiteaPlatformDriver.Capabilities"/>

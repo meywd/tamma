@@ -4,7 +4,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Sodium;
-using Tamma.Api.Services.Platforms;
+using Tamma.Platforms.GitHub;
 using Tamma.Platforms.Abstractions;
 
 namespace Tamma.Api.Tests.Platforms;
@@ -17,6 +17,16 @@ namespace Tamma.Api.Tests.Platforms;
 [TestFixture]
 public sealed class GitHubCiSecretsProvisionerTests
 {
+    // Epic 31 P4 M4 — the provisioner moved into the driver project and now
+    // takes (baseUrl, authorize) from the factory; tests authorize with a
+    // static bearer.
+    private static Task<bool> TestAuth(HttpRequestMessage req, CancellationToken ct)
+    {
+        req.Headers.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "test-token");
+        return Task.FromResult(true);
+    }
+
     private const string KeyId = "test-key-id-12345";
 
     private static (HttpClient http, CiSecretsProvisionerTestHandler handler,
@@ -71,7 +81,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task ProvisionSecret_RepoScope_HappyPath()
     {
         var (http, handler, keypair, publicKeyB64) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http, NullLogger<GitHubCiSecretsProvisioner>.Instance);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth, NullLogger<GitHubCiSecretsProvisioner>.Instance);
 
         handler.EnqueueJson("GET", "/repos/acme/app/actions/secrets/public-key",
             HttpStatusCode.OK, PublicKeyJson(publicKeyB64));
@@ -110,7 +120,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task ProvisionSecret_OrgScope_HappyPath()
     {
         var (http, handler, _, publicKeyB64) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth);
 
         handler.EnqueueJson("GET", "/orgs/acme/actions/secrets/public-key",
             HttpStatusCode.OK, PublicKeyJson(publicKeyB64));
@@ -133,7 +143,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task ProvisionSecret_EnvironmentScope_HappyPath()
     {
         var (http, handler, _, publicKeyB64) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth);
 
         handler.EnqueueJson("GET",
             "/repos/acme/app/environments/production/secrets/public-key",
@@ -158,7 +168,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task ProvisionSecret_UserScope_ReturnsNotSupported()
     {
         var (http, _, _, _) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth);
 
         var results = await prov.ProvisionSecretAsync(
             CiSecretScope.User,
@@ -174,7 +184,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task ProvisionSecret_GlobalScope_ReturnsNotSupported()
     {
         var (http, _, _, _) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth);
 
         var results = await prov.ProvisionSecretAsync(
             CiSecretScope.Global,
@@ -191,7 +201,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task ProvisionSecret_OneTargetFails_OtherTargetsSucceed()
     {
         var (http, handler, _, publicKeyB64) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth);
 
         // First target: 200 + 204
         handler.EnqueueJson("GET", "/repos/acme/app1/actions/secrets/public-key",
@@ -233,7 +243,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task ProvisionSecret_401_MapsToAuthExpired()
     {
         var (http, handler, _, _) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth);
 
         handler.EnqueueStatus("GET", "/repos/o/r/actions/secrets/public-key",
             HttpStatusCode.Unauthorized);
@@ -252,7 +262,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task ProvisionSecret_403_MapsToPermissionDenied()
     {
         var (http, handler, _, _) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth);
 
         handler.EnqueueStatus("GET", "/repos/o/r/actions/secrets/public-key",
             HttpStatusCode.Forbidden);
@@ -272,7 +282,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task DeleteSecret_404_TreatedAsSuccess()
     {
         var (http, handler, _, _) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth);
 
         handler.EnqueueStatus("DELETE", "/repos/o/r/actions/secrets/T",
             HttpStatusCode.NotFound);
@@ -289,7 +299,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task DeleteSecret_204_Success()
     {
         var (http, handler, _, _) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth);
 
         handler.EnqueueStatus("DELETE", "/repos/o/r/actions/secrets/T",
             HttpStatusCode.NoContent);
@@ -307,7 +317,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task RotateSecret_UsesSameWireShapeAsProvision()
     {
         var (http, handler, _, publicKeyB64) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth);
 
         handler.EnqueueJson("GET", "/repos/o/r/actions/secrets/public-key",
             HttpStatusCode.OK, PublicKeyJson(publicKeyB64));
@@ -333,7 +343,7 @@ public sealed class GitHubCiSecretsProvisionerTests
     public async Task ProvisionSecret_PlaintextNeverAppearsInRequestBody()
     {
         var (http, handler, _, publicKeyB64) = BuildClient();
-        var prov = new GitHubCiSecretsProvisioner(http);
+        var prov = new GitHubCiSecretsProvisioner(http, "https://api.github.com", TestAuth);
 
         handler.EnqueueJson("GET", "/repos/o/r/actions/secrets/public-key",
             HttpStatusCode.OK, PublicKeyJson(publicKeyB64));
@@ -367,8 +377,8 @@ public sealed class GitHubCiSecretsProvisionerTests
         var (httpA, handlerA, _, publicKeyB64A) = BuildClient();
         var (httpB, handlerB, _, _) = BuildClient();
 
-        var provA = new GitHubCiSecretsProvisioner(httpA);
-        var provB = new GitHubCiSecretsProvisioner(httpB);
+        var provA = new GitHubCiSecretsProvisioner(httpA, "https://api.github.com", TestAuth);
+        var provB = new GitHubCiSecretsProvisioner(httpB, "https://api.github.com", TestAuth);
 
         handlerA.EnqueueJson("GET", "/repos/tenantA/app/actions/secrets/public-key",
             HttpStatusCode.OK, PublicKeyJson(publicKeyB64A));

@@ -261,6 +261,57 @@ public sealed class GitHubPlatformDriverFactoryTests
         GitHubPlatformDriverFactory.ExtractHost(baseUrl).Should().Be(expected);
     }
 
+    // ================================================================
+    // Epic 31 P4 M4 — CI secrets un-severed: the factory MOUNTS the
+    // Story 31-8 provisioner, so Secrets-capable drivers expose a
+    // non-null driver.CiSecrets (before this milestone every driver
+    // returned the interface default null).
+    // ================================================================
+
+    [Test]
+    public async Task PatMode_mounts_CiSecrets_provisioner()
+    {
+        var (factory, _) = BuildFactory();
+
+        var driver = await factory.CreateAsync(Installation(), "ghp_tenant_token");
+
+        driver.Capabilities.Should().Contain(PlatformCapability.Secrets);
+        driver.CiSecrets.Should().NotBeNull(
+            "Epic 31 P4 M4 mounts the 31-8 provisioner on every Secrets-capable GitHub driver");
+        driver.CiSecrets!.Kind.Should().Be(PlatformKind.GitHub);
+    }
+
+    [Test]
+    public async Task CiSecrets_provision_authenticates_with_the_row_credential()
+    {
+        var (factory, handler) = BuildFactory();
+        // public-key fetch + PUT for one repo target.
+        var keypair = Sodium.PublicKeyBox.GenerateKeyPair();
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://api.github.com/repos/acme/app/actions/secrets/public-key",
+            HttpStatusCode.OK,
+            System.Text.Json.JsonSerializer.Serialize(new
+            {
+                key = Convert.ToBase64String(keypair.PublicKey),
+                key_id = "kid-1",
+            }));
+        handler.EnqueueJson(HttpMethod.Put,
+            "https://api.github.com/repos/acme/app/actions/secrets/MY_TOKEN",
+            HttpStatusCode.NoContent, "");
+
+        var driver = await factory.CreateAsync(Installation(), "ghp_tenant_token");
+        var results = await driver.CiSecrets!.ProvisionSecretAsync(
+            CiSecretScope.Repo,
+            new[] { (CiSecretTarget)new CiSecretTarget.Repo("acme", "app") },
+            "MY_TOKEN",
+            new RedactedSecret("s3cret"));
+
+        results.Should().ContainSingle().Which.Success.Should().BeTrue();
+        handler.Requests.Should().OnlyContain(
+            r => r.Headers["Authorization"] == "Bearer ghp_tenant_token",
+            "the provisioner rides the SAME per-installation credential as the driver");
+    }
+
     [Test]
     public void Factory_constructor_rejects_null_http_factory()
     {

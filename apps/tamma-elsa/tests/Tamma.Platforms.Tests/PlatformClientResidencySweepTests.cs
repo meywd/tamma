@@ -128,19 +128,21 @@ public class PlatformClientResidencySweepTests
         // + Null impls) / the IGitHubActionsClient seam (interface + Octokit + Null
         // impls) were DELETED outright; Core's IIntegrationService.cs lost its
         // GitHub/CI/composite interfaces (wire DTOs remain); Program.cs dropped every
-        // dead registration. ONLY the P4 webhook/secrets seam files remain.
-        new("src/Tamma.Api/Extensions/GitHubInstallationServiceCollectionExtensions.cs",
-            "seam 7/10: DI wiring for the Octokit App client + installation router; P3/P4 move it into the GitHub driver"),
-        new("src/Tamma.Api/Services/GitHub/IGitHubAppClient.cs",
-            "seam 7: the App-level Octokit client seam definition; P2/P3 move it inside the GitHub driver"),
-        new("src/Tamma.Api/Services/GitHub/InstallationRouterService.cs",
-            "seam 10: install-time provisioning via Octokit + the [Obsolete] provisioner; P4 migrates it"),
-        new("src/Tamma.Api/Services/GitHub/LibsodiumGitHubSecretsProvisioner.cs",
-            "seam 10/11: libsodium CI-secrets provisioning over Octokit; P4 mounts it on the GitHub driver factory"),
-        new("src/Tamma.Api/Services/GitHub/NullGitHubAppClient.cs",
-            "seam 7: null implementation of the App-client seam; deleted with the seam in P2/P3"),
-        new("src/Tamma.Api/Services/GitHub/OctokitGitHubAppClient.cs",
-            "seam 7: Octokit App client, default github.com base; P2/P3 move it into the GitHub driver"),
+        // dead registration.
+        //
+        // P4 milestone 4 (2026-08-08) DELETED the LAST SIX (6 → 0) — the plan's
+        // invariant holds tree-wide: the [Obsolete] IGitHubSecretsProvisioner seam
+        // (interface + Libsodium + Null impls) was deleted, install-time
+        // TAMMA_API_KEY provisioning migrated onto the driver plane
+        // (DriverInstallationSecretsPusher → resolved driver.CiSecrets); the
+        // IGitHubAppClient seam (interface + Octokit + Null impls) was deleted,
+        // its two App-metadata reads absorbed into Tamma.Platforms.GitHub as
+        // plain REST (RestGitHubAppInstallationReader — no Octokit, no JWT
+        // packages); InstallationRouterService + the DI extension retyped onto
+        // the driver-project surfaces; the Octokit + Sodium.Core package refs
+        // left Tamma.Api. The baseline is EMPTY: any platform-client token in a
+        // production project outside its driver is now a red build with no
+        // allowlist to hide in.
     ];
 
     /// <summary>
@@ -153,7 +155,7 @@ public class PlatformClientResidencySweepTests
     /// neither appears in the baseline at all. May only go DOWN; every
     /// decrement ships with the deleted entries in the same diff.
     /// </summary>
-    internal const int PinnedCount = 6;
+    internal const int PinnedCount = 0;
 
     /// <summary>
     /// The pin's recorded history, oldest first; every element after the seed
@@ -175,7 +177,12 @@ public class PlatformClientResidencySweepTests
     /// remaining entries are exactly P4's webhook/secrets seams (8-11): the
     /// GitHub App client (token minting for install-time provisioning +
     /// libsodium CI-secrets) and the installation router.</para>
-    internal static readonly int[] PinHistory = [26, 21, 18, 6];
+    /// <para><b>6 → 0 (2026-08-08, Epic 31 P4 milestone 4).</b> CI secrets
+    /// un-severed + the App plane absorbed: the last six files left the
+    /// baseline (see the baseline note). The invariant is now total — no
+    /// production project references any platform-client token outside its
+    /// driver project.</para>
+    internal static readonly int[] PinHistory = [26, 21, 18, 6, 0];
 
     // ====================================================================
     // The sweep against reality.

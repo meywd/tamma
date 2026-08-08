@@ -15,13 +15,22 @@ internal sealed class GitLabPlatformDriver : IGitPlatformDriver
     public PlatformKind Kind => PlatformKind.GitLab;
     public IGitPlatformClient Client { get; }
     public IGitPlatformActionsClient? Actions { get; }
+
+    /// <summary>Epic 31 P4 M4 — CI-secrets (variables) surface, mounted by
+    /// the factory. Non-null on every factory-built GitLab driver.</summary>
+    public ICiSecretsProvisioner? CiSecrets { get; }
+
     public IReadOnlySet<PlatformCapability> Capabilities { get; }
 
-    public GitLabPlatformDriver(IGitPlatformClient client, IGitPlatformActionsClient? actions)
+    public GitLabPlatformDriver(
+        IGitPlatformClient client,
+        IGitPlatformActionsClient? actions,
+        ICiSecretsProvisioner? ciSecrets = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         Client = client;
         Actions = actions;
+        CiSecrets = ciSecrets;
         Capabilities = PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitLab);
     }
 

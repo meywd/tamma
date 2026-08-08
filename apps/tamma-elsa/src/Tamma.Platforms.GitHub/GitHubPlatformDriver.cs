@@ -30,6 +30,11 @@ public sealed class GitHubPlatformDriver : IGitPlatformDriver
     /// <inheritdoc />
     public IGitPlatformActionsClient? Actions { get; }
 
+    /// <summary>Epic 31 P4 M4 — Story 31-8's CI-secrets surface, mounted by
+    /// the factory when the capability set advertises Secrets. Non-null on
+    /// every factory-built GitHub driver.</summary>
+    public ICiSecretsProvisioner? CiSecrets { get; }
+
     /// <inheritdoc />
     public IReadOnlySet<PlatformCapability> Capabilities { get; }
 
@@ -53,13 +58,15 @@ public sealed class GitHubPlatformDriver : IGitPlatformDriver
     public GitHubPlatformDriver(
         IGitPlatformClient client,
         IGitPlatformActionsClient? actions,
-        IReadOnlySet<PlatformCapability> capabilities)
+        IReadOnlySet<PlatformCapability> capabilities,
+        ICiSecretsProvisioner? ciSecrets = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(capabilities);
         Client = client;
         Actions = actions;
         Capabilities = capabilities;
+        CiSecrets = ciSecrets;
     }
 
     /// <summary>

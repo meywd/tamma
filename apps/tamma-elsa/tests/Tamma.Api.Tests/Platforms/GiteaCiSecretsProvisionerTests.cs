@@ -3,7 +3,7 @@ using System.Text.Json;
 using FluentAssertions;
 using NUnit.Framework;
 using Sodium;
-using Tamma.Api.Services.Platforms;
+using Tamma.Platforms.Gitea;
 using Tamma.Platforms.Abstractions;
 
 namespace Tamma.Api.Tests.Platforms;
@@ -16,6 +16,13 @@ namespace Tamma.Api.Tests.Platforms;
 [TestFixture]
 public sealed class GiteaCiSecretsProvisionerTests
 {
+    private static Task<bool> TestAuth(HttpRequestMessage req, CancellationToken ct)
+    {
+        req.Headers.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("token", "test-token");
+        return Task.FromResult(true);
+    }
+
     private const string KeyId = "test-key-id-12345";
 
     private static (HttpClient http, CiSecretsProvisionerTestHandler handler,
@@ -41,7 +48,7 @@ public sealed class GiteaCiSecretsProvisionerTests
     public async Task ProvisionSecret_RepoScope_HappyPath_Encrypted()
     {
         var (http, handler, keypair, publicKeyB64) = BuildClient();
-        var prov = new GiteaCiSecretsProvisioner(http);
+        var prov = new GiteaCiSecretsProvisioner(http, "https://gitea.example.com", TestAuth);
 
         handler.EnqueueJson("GET", "/api/v1/repos/owner/repo/actions/secrets/public-key",
             HttpStatusCode.OK, PublicKeyJson(publicKeyB64));
@@ -73,7 +80,7 @@ public sealed class GiteaCiSecretsProvisionerTests
     public async Task ProvisionSecret_OrgScope_HitsOrgEndpoint()
     {
         var (http, handler, _, publicKeyB64) = BuildClient();
-        var prov = new GiteaCiSecretsProvisioner(http);
+        var prov = new GiteaCiSecretsProvisioner(http, "https://gitea.example.com", TestAuth);
 
         handler.EnqueueJson("GET", "/api/v1/orgs/myorg/actions/secrets/public-key",
             HttpStatusCode.OK, PublicKeyJson(publicKeyB64));
@@ -94,7 +101,7 @@ public sealed class GiteaCiSecretsProvisionerTests
     public async Task ProvisionSecret_UserScope_HitsUserEndpoint()
     {
         var (http, handler, _, publicKeyB64) = BuildClient();
-        var prov = new GiteaCiSecretsProvisioner(http);
+        var prov = new GiteaCiSecretsProvisioner(http, "https://gitea.example.com", TestAuth);
 
         handler.EnqueueJson("GET", "/api/v1/user/actions/secrets/public-key",
             HttpStatusCode.OK, PublicKeyJson(publicKeyB64));
@@ -115,7 +122,7 @@ public sealed class GiteaCiSecretsProvisionerTests
     public async Task ProvisionSecret_EnvironmentScope_ReturnsNotSupported()
     {
         var (http, handler, _, _) = BuildClient();
-        var prov = new GiteaCiSecretsProvisioner(http);
+        var prov = new GiteaCiSecretsProvisioner(http, "https://gitea.example.com", TestAuth);
 
         var results = await prov.ProvisionSecretAsync(
             CiSecretScope.Environment,
@@ -134,7 +141,7 @@ public sealed class GiteaCiSecretsProvisionerTests
     public async Task ProvisionSecret_OneFails_OtherSucceeds()
     {
         var (http, handler, _, publicKeyB64) = BuildClient();
-        var prov = new GiteaCiSecretsProvisioner(http);
+        var prov = new GiteaCiSecretsProvisioner(http, "https://gitea.example.com", TestAuth);
 
         handler.EnqueueJson("GET", "/api/v1/repos/o/a/actions/secrets/public-key",
             HttpStatusCode.OK, PublicKeyJson(publicKeyB64));
@@ -165,7 +172,7 @@ public sealed class GiteaCiSecretsProvisionerTests
     public async Task ForgejoProvisioner_DelegatesToGitea_StampsForgejoKind()
     {
         var (http, handler, _, publicKeyB64) = BuildClient();
-        var prov = new ForgejoCiSecretsProvisioner(http);
+        var prov = new ForgejoCiSecretsProvisioner(http, "https://gitea.example.com", TestAuth);
 
         handler.EnqueueJson("GET", "/api/v1/repos/o/r/actions/secrets/public-key",
             HttpStatusCode.OK, PublicKeyJson(publicKeyB64));
@@ -189,7 +196,7 @@ public sealed class GiteaCiSecretsProvisionerTests
     public async Task ProvisionSecret_PlaintextNeverInRequestBody()
     {
         var (http, handler, _, publicKeyB64) = BuildClient();
-        var prov = new GiteaCiSecretsProvisioner(http);
+        var prov = new GiteaCiSecretsProvisioner(http, "https://gitea.example.com", TestAuth);
 
         handler.EnqueueJson("GET", "/api/v1/repos/o/r/actions/secrets/public-key",
             HttpStatusCode.OK, PublicKeyJson(publicKeyB64));
@@ -213,7 +220,7 @@ public sealed class GiteaCiSecretsProvisionerTests
     {
         var (http, _, _, _) = BuildClient();
         Action act = () => new GiteaCiSecretsProvisioner(http,
-            kind: PlatformKind.GitHub);
+            "https://gitea.example.com", TestAuth, kind: PlatformKind.GitHub);
         act.Should().Throw<ArgumentException>()
             .WithMessage("*Gitea*Forgejo*");
     }
@@ -224,7 +231,7 @@ public sealed class GiteaCiSecretsProvisionerTests
     public async Task ListSecrets_ReturnsServiceUnavailable()
     {
         var (http, _, _, _) = BuildClient();
-        var prov = new GiteaCiSecretsProvisioner(http);
+        var prov = new GiteaCiSecretsProvisioner(http, "https://gitea.example.com", TestAuth);
 
         var result = await prov.ListSecretsAsync(
             CiSecretScope.Repo, new CiSecretTarget.Repo("o", "r"));

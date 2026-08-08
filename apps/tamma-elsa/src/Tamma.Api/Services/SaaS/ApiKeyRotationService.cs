@@ -7,8 +7,6 @@ using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.SaaS;
 
-#pragma warning disable CS0618 // Story 31-8: transitional consumer of obsolete IGitHubSecretsProvisioner.
-
 /// <summary>
 /// Concrete <see cref="IApiKeyRotationService"/>.
 ///
@@ -35,7 +33,7 @@ public sealed class ApiKeyRotationService : IApiKeyRotationService
     private readonly IApiKeyRepository _apiKeys;
     private readonly ITenantMembershipRepository _memberships;
     private readonly IEventRepository _events;
-    private readonly IGitHubSecretsProvisioner _provisioner;
+    private readonly IInstallationSecretsPusher _secretsPusher;
     private readonly ILogger<ApiKeyRotationService> _logger;
 
     public ApiKeyRotationService(
@@ -43,14 +41,14 @@ public sealed class ApiKeyRotationService : IApiKeyRotationService
         IApiKeyRepository apiKeys,
         ITenantMembershipRepository memberships,
         IEventRepository events,
-        IGitHubSecretsProvisioner provisioner,
+        IInstallationSecretsPusher secretsPusher,
         ILogger<ApiKeyRotationService> logger)
     {
         _installations = installations;
         _apiKeys = apiKeys;
         _memberships = memberships;
         _events = events;
-        _provisioner = provisioner;
+        _secretsPusher = secretsPusher;
         _logger = logger;
     }
 
@@ -171,8 +169,12 @@ public sealed class ApiKeyRotationService : IApiKeyRotationService
                 && !string.IsNullOrEmpty(r.Name))
             .Select(r => (r.Owner, r.Name))
             .ToList();
-        var provisionResults = await _provisioner.ProvisionSecretAsync(
-            installation.InstallationId, repoTuples, "TAMMA_API_KEY", plaintext);
+        // Epic 31 P4 M4 — re-provisioning rides the driver plane (see
+        // DriverInstallationSecretsPusher): the tenant's resolved GitHub
+        // driver pushes through ICiSecretsProvisioner; no driver degrades to
+        // per-repo github_client_not_configured, the previous behavior.
+        var provisionResults = await _secretsPusher.PushAsync(
+            tenantId, repoTuples, "TAMMA_API_KEY", plaintext);
         var perRepoResults = provisionResults
             .Select(r => new RepoProvisioningResult(
                 Owner: r.Owner,

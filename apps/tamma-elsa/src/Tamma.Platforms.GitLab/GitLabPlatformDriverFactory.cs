@@ -57,7 +57,39 @@ internal sealed class GitLabPlatformDriverFactory : IGitPlatformDriverFactory
 
         var client = new GitLabPlatformClient(typed, clientLogger);
         var actions = new GitLabActionsClient(typed, actionsLogger);
-        IGitPlatformDriver driver = new GitLabPlatformDriver(client, actions);
+
+        // Epic 31 P4 M4 — mount Story 31-8's CI-secrets (variables)
+        // provisioner. The authorize delegate applies the driver's credential
+        // shape: PAT / project / group tokens ride PRIVATE-TOKEN; OAuth2
+        // rides the standard Bearer header.
+        var authRef = auth;
+        ICiSecretsProvisioner ciSecrets = new GitLabCiSecretsProvisioner(
+            http,
+            installation.BaseUrl,
+            (req, _) =>
+            {
+                switch (authRef)
+                {
+                    case GitLabAuth.PersonalAccessToken t:
+                        req.Headers.TryAddWithoutValidation("PRIVATE-TOKEN", t.Token);
+                        return Task.FromResult(true);
+                    case GitLabAuth.ProjectAccessToken t:
+                        req.Headers.TryAddWithoutValidation("PRIVATE-TOKEN", t.Token);
+                        return Task.FromResult(true);
+                    case GitLabAuth.GroupAccessToken t:
+                        req.Headers.TryAddWithoutValidation("PRIVATE-TOKEN", t.Token);
+                        return Task.FromResult(true);
+                    case GitLabAuth.OAuth2 o:
+                        req.Headers.Authorization =
+                            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", o.AccessToken);
+                        return Task.FromResult(true);
+                    default:
+                        return Task.FromResult(false);
+                }
+            },
+            _loggerFactory.CreateLogger<GitLabCiSecretsProvisioner>());
+
+        IGitPlatformDriver driver = new GitLabPlatformDriver(client, actions, ciSecrets);
         return Task.FromResult(driver);
     }
 }

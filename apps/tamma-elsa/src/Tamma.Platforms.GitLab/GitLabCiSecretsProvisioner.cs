@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Tamma.Platforms.Abstractions;
 using Tamma.Platforms.Abstractions.Logging;
 
-namespace Tamma.Api.Services.Platforms;
+namespace Tamma.Platforms.GitLab;
 
 /// <summary>
 /// Story 31-8 — GitLab implementation of
@@ -48,19 +48,46 @@ public sealed class GitLabCiSecretsProvisioner : ICiSecretsProvisioner
     public PlatformKind Kind => PlatformKind.GitLab;
 
     private readonly HttpClient _http;
+    private readonly string _baseUrl;
+    private readonly Func<HttpRequestMessage, CancellationToken, Task<bool>> _authorizeAsync;
     private readonly ILogger<GitLabCiSecretsProvisioner> _logger;
     private readonly int _maxConcurrency;
 
+    /// <summary>
+    /// Epic 31 P4 M4 — constructed by <see cref="GitLabPlatformDriverFactory"/>
+    /// per installation (the P1 absorb pattern): <paramref name="baseUrl"/> is
+    /// the instance root and <paramref name="authorizeAsync"/> applies the
+    /// driver's credential (PRIVATE-TOKEN / Bearer) per request.
+    /// </summary>
     public GitLabCiSecretsProvisioner(
         HttpClient http,
+        string baseUrl,
+        Func<HttpRequestMessage, CancellationToken, Task<bool>> authorizeAsync,
         ILogger<GitLabCiSecretsProvisioner>? logger = null,
         int maxConcurrency = DefaultMaxConcurrency)
     {
         ArgumentNullException.ThrowIfNull(http);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        ArgumentNullException.ThrowIfNull(authorizeAsync);
         _http = http;
+        _baseUrl = baseUrl.TrimEnd('/');
+        _authorizeAsync = authorizeAsync;
         _logger = logger ?? NullLogger<GitLabCiSecretsProvisioner>.Instance;
         _maxConcurrency = maxConcurrency > 0 ? maxConcurrency : DefaultMaxConcurrency;
     }
+
+    /// <summary>Authorize + send (Epic 31 P4 M4).</summary>
+    private async Task<HttpResponseMessage> SendAuthorizedAsync(
+        HttpRequestMessage req, CancellationToken ct)
+    {
+        if (!await _authorizeAsync(req, ct).ConfigureAwait(false))
+        {
+            throw new CredentialUnavailableException();
+        }
+        return await _http.SendAsync(req, ct).ConfigureAwait(false);
+    }
+
+    internal sealed class CredentialUnavailableException : Exception { }
 
     public Task<IReadOnlyList<CiSecretProvisionResult>> ProvisionSecretAsync(
         CiSecretScope scope,
@@ -115,9 +142,8 @@ public sealed class GitLabCiSecretsProvisioner : ICiSecretsProvisioner
                     }
 
                     using var req = new HttpRequestMessage(
-                        HttpMethod.Delete, endpoint);
-                    using var resp = await _http
-                        .SendAsync(req, ct).ConfigureAwait(false);
+                        HttpMethod.Delete, _baseUrl + endpoint);
+                    using var resp = await SendAuthorizedAsync(req, ct).ConfigureAwait(false);
 
                     if (resp.StatusCode == HttpStatusCode.NoContent
                         || resp.StatusCode == HttpStatusCode.NotFound)
@@ -160,8 +186,8 @@ public sealed class GitLabCiSecretsProvisioner : ICiSecretsProvisioner
 
         try
         {
-            using var resp = await _http
-                .GetAsync(endpoint, ct).ConfigureAwait(false);
+            using var listReq = new HttpRequestMessage(HttpMethod.Get, _baseUrl + endpoint);
+            using var resp = await SendAuthorizedAsync(listReq, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
                 return new PlatformResult<IReadOnlyList<CiSecretMetadataItem>>.Failed(
@@ -302,12 +328,11 @@ public sealed class GitLabCiSecretsProvisioner : ICiSecretsProvisioner
             using var content = new StringContent(
                 JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
             using var req = new HttpRequestMessage(
-                isCreate ? HttpMethod.Post : HttpMethod.Put, endpoint)
+                isCreate ? HttpMethod.Post : HttpMethod.Put, _baseUrl + endpoint)
             {
                 Content = content,
             };
-            using var resp = await _http
-                .SendAsync(req, ct).ConfigureAwait(false);
+            using var resp = await SendAuthorizedAsync(req, ct).ConfigureAwait(false);
 
             if (!resp.IsSuccessStatusCode)
             {
@@ -322,6 +347,10 @@ public sealed class GitLabCiSecretsProvisioner : ICiSecretsProvisioner
             return CiSecretProvisionResult.Ok(Kind, target);
         }
         catch (OperationCanceledException) { throw; }
+        catch (CredentialUnavailableException)
+        {
+            return CiSecretProvisionResult.Failed(Kind, target, "auth_unavailable");
+        }
         catch (Exception ex)
         {
             var safeMessage = SecretLoggingScope.RedactSubstring(

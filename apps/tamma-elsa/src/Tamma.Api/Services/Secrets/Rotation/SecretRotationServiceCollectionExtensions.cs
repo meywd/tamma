@@ -53,6 +53,19 @@ public static class SecretRotationServiceCollectionExtensions
             "cranl",
             (sp, _) => sp.GetRequiredService<CranlEnvVarRotationHandler>());
 
+        // Epic 31 P4 M4 — Story 31-8's CI-secrets bridge, REGISTERED AT LAST:
+        // the handler existed since 31-8 but was never keyed into the
+        // registry (the execution plan's corrected fact — CI-secrets was
+        // severed at BOTH points: unregistered handler AND null
+        // driver.CiSecrets; the driver factories mount the provisioners in
+        // the same milestone). A rotated secret whose consumer is
+        // "ci-secrets" now lands in the tenant's platform CI store through
+        // the resolved driver.
+        services.AddScoped<Tamma.Api.Services.Platforms.CiSecretsRotationHandler>();
+        services.AddKeyedScoped<IRotationHandler>(
+            Tamma.Api.Services.Platforms.CiSecretsRotationHandler.SystemKey,
+            (sp, _) => sp.GetRequiredService<Tamma.Api.Services.Platforms.CiSecretsRotationHandler>());
+
         return services;
     }
 }

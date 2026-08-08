@@ -33,6 +33,10 @@ public sealed class GiteaPlatformDriver : IGitPlatformDriver
 
     public IGitPlatformActionsClient? Actions { get; }
 
+    /// <summary>Epic 31 P4 M4 — CI-secrets surface (Story 31-8), mounted by
+    /// the factory when the detected version advertises Secrets (1.21+).</summary>
+    public ICiSecretsProvisioner? CiSecrets { get; }
+
     public IReadOnlySet<PlatformCapability> Capabilities { get; }
 
     /// <summary>Detected Gitea version — exposed for diagnostics + tests.</summary>
@@ -42,7 +46,8 @@ public sealed class GiteaPlatformDriver : IGitPlatformDriver
         IGitPlatformClient client,
         IGitPlatformActionsClient? actions,
         IReadOnlySet<PlatformCapability> capabilities,
-        Version? detectedVersion)
+        Version? detectedVersion,
+        ICiSecretsProvisioner? ciSecrets = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(capabilities);
@@ -50,6 +55,7 @@ public sealed class GiteaPlatformDriver : IGitPlatformDriver
         Actions = actions;
         Capabilities = capabilities;
         DetectedVersion = detectedVersion;
+        CiSecrets = ciSecrets;
     }
 
     /// <summary>

@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -10,16 +9,21 @@ using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Tamma.Api.Extensions;
 using Tamma.Data;
-using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Tests.TaskQueue;
 
 /// <summary>
-/// End-to-end test: posts a signed GitHub webhook to the real API
-/// (Testcontainers Postgres via <see cref="ApiTestFixture"/>) and asserts a
-/// <c>queued_tasks</c> row appears with the expected type + payload. This
-/// replaces the TypeScript dispatch path that previously enqueued
-/// <c>push</c>/<c>issues</c>/<c>pull_request</c> events.
+/// Epic 31 P4 M2/M4 — the DELETED deferred-task write, pinned as absent.
+///
+/// <para>This fixture used to assert the opposite: a signed
+/// push / issues / pull_request webhook enqueued a <c>github.*</c> row on the
+/// task queue. That write was a DEAD END — no <c>ITaskHandler</c> or
+/// platform-task handler ever consumed a <c>github.*</c> task type — and the
+/// execution plan (§6) chose the 31-7 webhook-handler route for the
+/// merged-PR resume, DELETING the enqueue rather than implementing it so the
+/// two paths can never double-resume. These tests keep the deletion honest:
+/// the deferred events now return <c>skipped=true</c>, enqueue NOTHING on
+/// either queue, and never advertise a <c>taskId</c>.</para>
 /// </summary>
 [TestFixture]
 public class GitHubWebhookTaskQueueIntegrationTests
@@ -44,9 +48,8 @@ public class GitHubWebhookTaskQueueIntegrationTests
             });
             b.ConfigureServices(services =>
             {
-                // The router needs both the installation services and the new
-                // task-queue services so the three deferred events land in
-                // queued_tasks instead of being skipped.
+                // Same registrations the old enqueue-era test wired — proving
+                // the events stay skipped even WITH the task queue available.
                 services.AddGitHubInstallationServices();
                 services.AddTaskQueue();
             });
@@ -66,100 +69,70 @@ public class GitHubWebhookTaskQueueIntegrationTests
             Content = new StringContent(body, Encoding.UTF8, "application/json")
         };
         req.Headers.Add("X-GitHub-Event", @event);
+        req.Headers.Add("X-GitHub-Delivery", Guid.NewGuid().ToString());
         req.Headers.Add("X-Hub-Signature-256", Sign(body));
         return req;
     }
 
-    // ─── push event → queued row ──────────────────────────────────────────────
+    private static async Task AssertNothingQueuedAnywhereAsync()
+    {
+        using var scope = ApiTestFixture.Factory.Services.CreateScope();
+        var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
-    [Test]
-    public async Task Webhook_PushEvent_EnqueuesQueuedTaskRow()
+        (await cp.PlatformQueuedTasks.AsNoTracking().AnyAsync())
+            .Should().BeFalse("the github.* platform-queue write was deleted (Epic 31 P4)");
+
+        var factory = scope.ServiceProvider
+            .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
+        foreach (var tid in await cp.Tenants.AsNoTracking()
+            .Where(t => t.DeletedAt == null).Select(t => t.Id).ToListAsync())
+        {
+            await using var tdb = await factory.CreateAsync(tid);
+            (await tdb.QueuedTasks.AnyAsync()).Should().BeFalse(
+                "the github.* tenant-queue write was deleted (Epic 31 P4)");
+        }
+    }
+
+    [TestCase("push", """
+        {
+          "ref": "refs/heads/main",
+          "installation": { "id": 9001 },
+          "repository": { "full_name": "acme/app" }
+        }
+        """)]
+    [TestCase("issues", """
+        {
+          "action": "opened",
+          "installation": { "id": 9002 },
+          "issue": { "number": 7, "title": "It broke" }
+        }
+        """)]
+    [TestCase("pull_request", """
+        {
+          "action": "opened",
+          "installation": { "id": 9003 },
+          "pull_request": { "number": 11 }
+        }
+        """)]
+    public async Task DeferredEvents_AreSkipped_AndEnqueueNothing(string @event, string body)
     {
         using var client = CreateClient();
-        const string body = """
-            {
-              "ref": "refs/heads/main",
-              "installation": { "id": 9001 },
-              "repository": { "full_name": "acme/app" }
-            }
-            """;
 
-        var response = await client.SendAsync(BuildWebhookRequest("push", body));
+        var response = await client.SendAsync(BuildWebhookRequest(@event, body));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var json = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(json);
-        doc.RootElement.GetProperty("queued").GetBoolean().Should().BeTrue();
-        doc.RootElement.GetProperty("taskId").GetString().Should().NotBeNullOrEmpty();
+        doc.RootElement.GetProperty("skipped").GetBoolean().Should().BeTrue(
+            "push/issues/pull_request no longer defer to the task queue — the "
+            + "31-7 webhook handlers own inbound processing");
+        doc.RootElement.TryGetProperty("taskId", out _).Should().BeFalse(
+            "no task id may be advertised for a write that no longer happens");
 
-        using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
-
-        // Story 28-1 PR B — orphan webhooks (no installation→tenant
-        // mapping) route to platform_queued_tasks, not the per-tenant
-        // queue. There's no tenant DB to land them in until the
-        // installation is claimed.
-        var task = await db.PlatformQueuedTasks.FirstOrDefaultAsync();
-        task.Should().NotBeNull();
-        task!.Type.Should().StartWith("github.push");
-        task.InstallationId.Should().Be(9001L);
-        task.Status.Should().Be("pending");
-        task.Payload.Should().Contain("refs/heads/main");
+        await AssertNothingQueuedAnywhereAsync();
     }
 
-    // ─── issues.opened → queued ──────────────────────────────────────────────
-
-    [Test]
-    public async Task Webhook_IssuesOpened_EnqueuesQueuedTaskRow()
-    {
-        using var client = CreateClient();
-        const string body = """
-            {
-              "action": "opened",
-              "installation": { "id": 9002 },
-              "issue": { "number": 7, "title": "It broke" }
-            }
-            """;
-
-        var response = await client.SendAsync(BuildWebhookRequest("issues", body));
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
-
-        // Story 28-1 PR B — orphan webhook → platform_queued_tasks.
-        var task = await db.PlatformQueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9002L);
-        task.Should().NotBeNull();
-        task!.Type.Should().Be("github.issues.opened");
-    }
-
-    // ─── pull_request.opened → queued ────────────────────────────────────────
-
-    [Test]
-    public async Task Webhook_PullRequestOpened_EnqueuesQueuedTaskRow()
-    {
-        using var client = CreateClient();
-        const string body = """
-            {
-              "action": "opened",
-              "installation": { "id": 9003 },
-              "pull_request": { "number": 42 }
-            }
-            """;
-
-        var response = await client.SendAsync(BuildWebhookRequest("pull_request", body));
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
-
-        // Story 28-1 PR B — orphan webhook → platform_queued_tasks.
-        var task = await db.PlatformQueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9003L);
-        task.Should().NotBeNull();
-        task!.Type.Should().Be("github.pull_request.opened");
-    }
-
-    // ─── installation event still handled inline (not queued) ────────────────
+    // ─── installation event still handled inline (unchanged behavior) ────────
 
     [Test]
     public async Task Webhook_InstallationEvent_StillHandledInline_NotQueued()
@@ -179,25 +152,11 @@ public class GitHubWebhookTaskQueueIntegrationTests
         var response = await client.SendAsync(BuildWebhookRequest("installation", body));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        // Story 28-1 PR D — queued_tasks live on the tenant DB, but
-        // installation events are handled inline so no tenant context is
-        // bound. Verify the per-tenant store has nothing — fan out is
-        // the only way to "any tenant has any queued task" cross-tenant.
-        using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
-        var factory = scope.ServiceProvider
-            .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
-        var anyQueued = false;
-        foreach (var tid in await cp.Tenants.AsNoTracking()
-            .Where(t => t.DeletedAt == null).Select(t => t.Id).ToListAsync())
-        {
-            await using var tdb = await factory.CreateAsync(tid);
-            if (await tdb.QueuedTasks.AnyAsync()) { anyQueued = true; break; }
-        }
-        anyQueued.Should().BeFalse();
-    }
+        var json = await response.Content.ReadAsStringAsync();
+        json.Should().Contain("\"skipped\":false", "installation events process inline");
 
-    // ─── unknown event still skipped ──────────────────────────────────────────
+        await AssertNothingQueuedAnywhereAsync();
+    }
 
     [Test]
     public async Task Webhook_UnknownEvent_StillReturnsSkipped_NotQueued()
@@ -211,78 +170,6 @@ public class GitHubWebhookTaskQueueIntegrationTests
         var json = await response.Content.ReadAsStringAsync();
         json.Should().Contain("\"skipped\":true");
 
-        // Story 28-1 PR D — fan out across tenants to verify nothing queued.
-        using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
-        var factory = scope.ServiceProvider
-            .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
-        var anyQueued = false;
-        foreach (var tid in await cp.Tenants.AsNoTracking()
-            .Where(t => t.DeletedAt == null).Select(t => t.Id).ToListAsync())
-        {
-            await using var tdb = await factory.CreateAsync(tid);
-            if (await tdb.QueuedTasks.AnyAsync()) { anyQueued = true; break; }
-        }
-        anyQueued.Should().BeFalse();
-    }
-
-    // ─── tenant binding via installation ──────────────────────────────────────
-
-    [Test]
-    public async Task Webhook_PushEvent_BindsTenant_WhenInstallationHasTenant()
-    {
-        // Program.cs runs the Tamma-tables wipe-and-migrate whenever the web
-        // host boots; WithWebHostBuilder may trigger a fresh boot even when the
-        // parent factory already started. Seeding AFTER CreateClient() has
-        // forced that boot guarantees the seeded rows survive to the webhook
-        // call, regardless of factory caching semantics.
-        using var client = CreateClient();
-
-        var tenantId = Guid.NewGuid();
-        using (var scope = ApiTestFixture.Factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
-            db.Tenants.Add(new Data.Entities.Tenant
-            {
-                Id = tenantId,
-                Name = "Acme",
-                Slug = "acme-" + Guid.NewGuid().ToString("N")[..8]
-            });
-            db.GitHubInstallations.Add(new Data.Entities.GitHubInstallation
-            {
-                Id = Guid.NewGuid(),
-                InstallationId = 7777,
-                AccountLogin = "acme",
-                AccountType = "Organization",
-                AppId = 1,
-                TenantId = tenantId
-            });
-            await db.SaveChangesAsync();
-        }
-
-        // Phase 3 -- queued_tasks live in the tenant store, which is only
-        // reachable for provisioned tenants.
-        await ApiTestFixture.ProvisionTenantAsync(tenantId);
-
-        const string body = """
-            {
-              "ref": "refs/heads/main",
-              "installation": { "id": 7777 }
-            }
-            """;
-
-        var response = await client.SendAsync(BuildWebhookRequest("push", body));
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        // Story 28-1 PR D — queued_tasks live on the tenant DB. The
-        // webhook resolves installation → tenant id, then enqueues to
-        // that tenant's DB.
-        using var assertScope = ApiTestFixture.Factory.Services.CreateScope();
-        var factory = assertScope.ServiceProvider
-            .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
-        await using var adb = await factory.CreateAsync(tenantId);
-        var queued = await adb.QueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 7777L);
-        queued.Should().NotBeNull();
-        queued!.TenantId.Should().Be(tenantId);
+        await AssertNothingQueuedAnywhereAsync();
     }
 }

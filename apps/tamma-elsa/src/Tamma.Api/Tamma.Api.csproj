@@ -28,12 +28,10 @@
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.0" />
     <PackageReference Include="MailKit" Version="4.16.0" />
-    <!-- GitHub App client (audit: github 007/015, engine 005-011, 021). Octokit
-         gives us typed JWT/installation-token auth + rate-limit headers via
-         GetLastApiInfo(); Sodium.Core is libsodium-backed sealed-box encryption
-         required by GitHub Actions secrets (audit: github 013). -->
-    <PackageReference Include="Octokit" Version="14.0.0" />
-    <PackageReference Include="Sodium.Core" Version="1.4.0" />
+    <!-- Epic 31 P4 M4: Octokit + Sodium.Core are GONE from Tamma.Api — the
+         GitHub App metadata reads live in Tamma.Platforms.GitHub (plain REST,
+         hand-rolled App JWT) and sealed-box CI-secret encryption moved down
+         with the Story 31-8 provisioners into the driver projects. -->
     <!-- Distributed rate limiting (audit finding auth/014 follow-up). The
          RateLimitService is in-process by default; when
          ConnectionStrings:Redis is configured, the Redis-backed backend

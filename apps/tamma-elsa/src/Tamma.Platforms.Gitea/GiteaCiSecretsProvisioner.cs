@@ -7,7 +7,7 @@ using Sodium;
 using Tamma.Platforms.Abstractions;
 using Tamma.Platforms.Abstractions.Logging;
 
-namespace Tamma.Api.Services.Platforms;
+namespace Tamma.Platforms.Gitea;
 
 /// <summary>
 /// Story 31-8 — Gitea implementation of <see cref="ICiSecretsProvisioner"/>.
@@ -42,16 +42,31 @@ public sealed class GiteaCiSecretsProvisioner : ICiSecretsProvisioner
     public PlatformKind Kind { get; }
 
     private readonly HttpClient _http;
+    private readonly string _baseUrl;
+    private readonly Func<HttpRequestMessage, CancellationToken, Task<bool>> _authorizeAsync;
     private readonly ILogger<GiteaCiSecretsProvisioner> _logger;
     private readonly int _maxConcurrency;
 
+    /// <summary>
+    /// Epic 31 P4 M4 — constructed by the Gitea/Forgejo driver factories per
+    /// installation (the P1 absorb pattern): <paramref name="baseUrl"/> is the
+    /// instance root and <paramref name="authorizeAsync"/> applies the
+    /// driver's credential (bot token / OAuth2 access token) per request,
+    /// returning false when no credential could be resolved.
+    /// </summary>
     public GiteaCiSecretsProvisioner(
         HttpClient http,
+        string baseUrl,
+        Func<HttpRequestMessage, CancellationToken, Task<bool>> authorizeAsync,
         ILogger<GiteaCiSecretsProvisioner>? logger = null,
         int maxConcurrency = DefaultMaxConcurrency,
         PlatformKind kind = PlatformKind.Gitea)
     {
         ArgumentNullException.ThrowIfNull(http);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        ArgumentNullException.ThrowIfNull(authorizeAsync);
+        _baseUrl = baseUrl.TrimEnd('/');
+        _authorizeAsync = authorizeAsync;
         if (kind != PlatformKind.Gitea && kind != PlatformKind.Forgejo)
         {
             throw new ArgumentException(
@@ -63,6 +78,19 @@ public sealed class GiteaCiSecretsProvisioner : ICiSecretsProvisioner
         _maxConcurrency = maxConcurrency > 0 ? maxConcurrency : DefaultMaxConcurrency;
         Kind = kind;
     }
+
+    /// <summary>Authorize + send (Epic 31 P4 M4).</summary>
+    private async Task<HttpResponseMessage> SendAuthorizedAsync(
+        HttpRequestMessage req, CancellationToken ct)
+    {
+        if (!await _authorizeAsync(req, ct).ConfigureAwait(false))
+        {
+            throw new CredentialUnavailableException();
+        }
+        return await _http.SendAsync(req, ct).ConfigureAwait(false);
+    }
+
+    internal sealed class CredentialUnavailableException : Exception { }
 
     public Task<IReadOnlyList<CiSecretProvisionResult>> ProvisionSecretAsync(
         CiSecretScope scope,
@@ -115,9 +143,8 @@ public sealed class GiteaCiSecretsProvisioner : ICiSecretsProvisioner
                     }
 
                     using var req = new HttpRequestMessage(
-                        HttpMethod.Delete, endpoint);
-                    using var resp = await _http
-                        .SendAsync(req, ct).ConfigureAwait(false);
+                        HttpMethod.Delete, _baseUrl + endpoint);
+                    using var resp = await SendAuthorizedAsync(req, ct).ConfigureAwait(false);
 
                     if (resp.StatusCode == HttpStatusCode.NoContent
                         || resp.StatusCode == HttpStatusCode.NotFound)
@@ -228,9 +255,8 @@ public sealed class GiteaCiSecretsProvisioner : ICiSecretsProvisioner
             }
 
             using var keyReq = new HttpRequestMessage(
-                HttpMethod.Get, publicKeyEndpoint);
-            using var keyResp = await _http
-                .SendAsync(keyReq, ct).ConfigureAwait(false);
+                HttpMethod.Get, _baseUrl + publicKeyEndpoint);
+            using var keyResp = await SendAuthorizedAsync(keyReq, ct).ConfigureAwait(false);
 
             if (!keyResp.IsSuccessStatusCode)
             {
@@ -264,12 +290,11 @@ public sealed class GiteaCiSecretsProvisioner : ICiSecretsProvisioner
             var payload = new { encrypted_value = encrypted, key_id = keyId };
             using var content = new StringContent(
                 JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-            using var putReq = new HttpRequestMessage(HttpMethod.Put, putEndpoint)
+            using var putReq = new HttpRequestMessage(HttpMethod.Put, _baseUrl + putEndpoint)
             {
                 Content = content,
             };
-            using var putResp = await _http
-                .SendAsync(putReq, ct).ConfigureAwait(false);
+            using var putResp = await SendAuthorizedAsync(putReq, ct).ConfigureAwait(false);
 
             if (!putResp.IsSuccessStatusCode)
             {
@@ -283,6 +308,10 @@ public sealed class GiteaCiSecretsProvisioner : ICiSecretsProvisioner
             return CiSecretProvisionResult.Ok(Kind, target);
         }
         catch (OperationCanceledException) { throw; }
+        catch (CredentialUnavailableException)
+        {
+            return CiSecretProvisionResult.Failed(Kind, target, "auth_unavailable");
+        }
         catch (Exception ex)
         {
             var safeMessage = SecretLoggingScope.RedactSubstring(
@@ -299,7 +328,7 @@ public sealed class GiteaCiSecretsProvisioner : ICiSecretsProvisioner
     /// Sealed-box encrypt — mirrors the GitHub provisioner's helper.
     /// Gitea uses identical wire format (1.21+).
     /// </summary>
-    internal static string EncryptSealedBox(string publicKeyBase64, string plaintext)
+    public static string EncryptSealedBox(string publicKeyBase64, string plaintext)
     {
         var publicKey = Convert.FromBase64String(publicKeyBase64);
         var messageBytes = Encoding.UTF8.GetBytes(plaintext);
@@ -386,11 +415,13 @@ public sealed class ForgejoCiSecretsProvisioner : ICiSecretsProvisioner
 
     public ForgejoCiSecretsProvisioner(
         HttpClient http,
+        string baseUrl,
+        Func<HttpRequestMessage, CancellationToken, Task<bool>> authorizeAsync,
         ILogger<GiteaCiSecretsProvisioner>? logger = null,
         int maxConcurrency = 5)
     {
         _inner = new GiteaCiSecretsProvisioner(
-            http, logger, maxConcurrency, PlatformKind.Forgejo);
+            http, baseUrl, authorizeAsync, logger, maxConcurrency, PlatformKind.Forgejo);
     }
 
     public Task<IReadOnlyList<CiSecretProvisionResult>> ProvisionSecretAsync(
