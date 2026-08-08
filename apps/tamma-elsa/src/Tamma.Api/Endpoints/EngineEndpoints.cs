@@ -793,9 +793,23 @@ public static class EngineEndpoints
             new { number = r.Number, htmlUrl = r.HtmlUrl, title = r.Title }));
     }
 
+    /// <summary>
+    /// Epic 31 P3 (seam 4) — the engine trigger-ci callback now DELEGATES into
+    /// the governed CI-mediation core (<see cref="Services.Ci.ICiMediationService"/>:
+    /// guard → resolved driver's Actions surface → one DCB event) instead of the
+    /// GitHub-only <c>IGitHubEngineCallbackService</c>. The route, its
+    /// <c>Governs</c> key (<c>effect:ci.workflow.dispatch</c>) and the response
+    /// SHAPES the deployed activities consume are unchanged and pinned by
+    /// <c>EngineTriggerCiContractTests</c>: success ⇒
+    /// <c>{dispatched, workflowFile, branch}</c>; no resolvable platform
+    /// credential ⇒ the legacy 503 <c>github_client_not_configured</c> envelope;
+    /// other failures ⇒ 502 <c>{error}</c> (guard denial ⇒ 403).
+    /// </summary>
     public static async Task<IResult> TriggerCi(
         TriggerCiRequest req,
-        IGitHubEngineCallbackService github)
+        Services.Ci.ICiMediationService ci,
+        ITenantContext tc,
+        CancellationToken ct)
     {
         if (string.IsNullOrEmpty(req.Repository))
             return Results.BadRequest(new { error = "repository is required" });
@@ -808,14 +822,45 @@ public static class EngineEndpoints
         if (owner is null || name is null)
             return Results.BadRequest(new { error = "Invalid repo format" });
 
-        var result = await github.TriggerCiAsync(
-            owner, name, req.BranchName, req.WorkflowFile, req.Inputs);
-        return ToHttpResult(result, r => Results.Ok(new
+        var result = await ci.TriggerTestsAsync(
+            tc.TenantId,
+            req.Repository,
+            new Services.Ci.TriggerTestsRequest
+            {
+                Branch = req.BranchName,
+                WorkflowFile = req.WorkflowFile,
+                Inputs = req.Inputs,
+                CorrelationId = $"engine-trigger-ci-{Guid.NewGuid():N}",
+            },
+            ct);
+
+        if (result.Success)
         {
-            dispatched = r.Dispatched,
-            workflowFile = r.WorkflowFile,
-            branch = r.Branch
-        }));
+            return Results.Ok(new
+            {
+                dispatched = true,
+                workflowFile = req.WorkflowFile,
+                branch = req.BranchName
+            });
+        }
+
+        return result.FailureCode switch
+        {
+            // Legacy contract: "no usable CI credential" surfaced as the 503
+            // github_client_not_configured envelope — same shape, now meaning
+            // "no platform driver resolved" rather than "no App client wired".
+            Services.Ci.CiFailureCodes.TokenUnavailable => Results.Json(new
+            {
+                error = "github_client_not_configured",
+                detail = "no git platform credential is configured for this deployment/tenant"
+            }, statusCode: StatusCodes.Status503ServiceUnavailable),
+            Services.Ci.CiFailureCodes.RepoNotAuthorized => Results.Json(
+                new { error = result.FailureReason ?? "repository not authorized for the acting tenant" },
+                statusCode: StatusCodes.Status403Forbidden),
+            _ => Results.Json(
+                new { error = result.FailureReason ?? "github_error" },
+                statusCode: StatusCodes.Status502BadGateway),
+        };
     }
 
     // ─── Execute task — finding 001 ───────────────────────────────────────────

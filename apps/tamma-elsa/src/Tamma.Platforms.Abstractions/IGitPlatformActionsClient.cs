@@ -37,6 +37,18 @@ public interface IGitPlatformActionsClient
         CancellationToken ct = default);
 
     /// <summary>
+    /// Epic 31 P3 — list recent runs / pipelines, newest first,
+    /// optionally filtered to a branch. Backs the CI mediation
+    /// plane's build-status read ("latest run on this branch") so it
+    /// needs no platform-specific client. An empty list is a
+    /// successful result (the caller decides what "no runs" means).
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<WorkflowRun>>> ListRunsAsync(
+        string owner, string repoName,
+        ListWorkflowRunsRequest request,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// List the jobs / stages of a run.
     /// </summary>
     Task<PlatformResult<IReadOnlyList<WorkflowJob>>> ListRunJobsAsync(

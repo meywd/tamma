@@ -1,5 +1,3 @@
-using System.Net.Http.Json;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Elsa.Extensions;
 using Elsa.Workflows;
@@ -7,13 +5,26 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.Testing.Models;
 
 namespace Tamma.Activities.Testing;
 
 /// <summary>
 /// ELSA activity that triggers a CI pipeline run for a given repository and branch.
-/// Supports real CI integration (via callback URL) and mock mode for testing.
+/// Supports real CI integration and mock mode for testing.
+///
+/// <para><b>Epic 31 P3 (seam 4).</b> The real path is REPOINTED off the raw
+/// <c>POST {Engine:CallbackUrl}/api/engine/trigger-ci</c> HTTP call (which
+/// required a <c>workflowFile</c> this activity never sent, so it could only
+/// 400) and onto the governed CI-mediation plane via
+/// <see cref="TammaApiClient.TriggerTestsAsync"/>
+/// (<c>POST /api/v1/ci/{owner}/{repo}/test-runs</c> — guard → per-tenant driver
+/// → one DCB event, server-side). The activity's result contract is unchanged:
+/// <see cref="CITriggerResult"/> with a POLLABLE <c>RunId</c> on success and
+/// <c>Success=false</c> + <c>Error</c> on any failure (never a throw out of the
+/// activity). <c>/api/engine/trigger-ci</c> itself stays mapped, delegating to
+/// the same mediation core.</para>
 /// </summary>
 [Activity(
     "Tamma.Testing",
@@ -24,8 +35,8 @@ namespace Tamma.Activities.Testing;
 public class TriggerCIActivity : CodeActivity<CITriggerResult>
 {
     private readonly ILogger<TriggerCIActivity> _logger;
-    private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
+    private readonly TammaApiClient? _apiClient;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -47,18 +58,18 @@ public class TriggerCIActivity : CodeActivity<CITriggerResult>
     public TriggerCIActivity()
     {
         _logger = null!;
-        _httpClientFactory = null!;
         _configuration = null!;
+        _apiClient = null;
     }
 
     public TriggerCIActivity(
         ILogger<TriggerCIActivity> logger,
-        IHttpClientFactory httpClientFactory,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        TammaApiClient apiClient)
     {
         _logger = logger;
-        _httpClientFactory = httpClientFactory;
         _configuration = configuration;
+        _apiClient = apiClient;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -66,15 +77,16 @@ public class TriggerCIActivity : CodeActivity<CITriggerResult>
         var sessionId = SessionId.Get(context);
         var repository = Repository.Get(context);
         var branch = Branch.Get(context);
-        var commitSha = CommitSha.Get(context);
+        var logger = _logger ?? context.GetRequiredService<ILogger<TriggerCIActivity>>();
 
-        _logger.LogInformation(
+        logger.LogInformation(
             "Triggering CI pipeline for session {SessionId}, repo {Repository}, branch {Branch}",
             sessionId, repository, branch);
 
         try
         {
-            var useMock = _configuration.GetValue<bool>("Testing:UseMock");
+            var configuration = _configuration ?? context.GetRequiredService<IConfiguration>();
+            var useMock = configuration.GetValue<bool>("Testing:UseMock");
 
             CITriggerResult result;
             if (useMock)
@@ -83,10 +95,10 @@ public class TriggerCIActivity : CodeActivity<CITriggerResult>
             }
             else
             {
-                result = await TriggerRealCI(sessionId, repository, branch, commitSha);
+                result = await TriggerRealCI(context, sessionId, repository, branch, logger);
             }
 
-            _logger.LogInformation(
+            logger.LogInformation(
                 "CI pipeline triggered: RunId={RunId}, Success={Success}",
                 result.RunId, result.Success);
 
@@ -94,7 +106,7 @@ public class TriggerCIActivity : CodeActivity<CITriggerResult>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to trigger CI pipeline for session {SessionId}", sessionId);
+            logger.LogError(ex, "Failed to trigger CI pipeline for session {SessionId}", sessionId);
 
             context.SetResult(new CITriggerResult
             {
@@ -105,42 +117,112 @@ public class TriggerCIActivity : CodeActivity<CITriggerResult>
         }
     }
 
+    /// <summary>
+    /// The mediated real path: POST the governed CI plane's test-runs endpoint.
+    /// The per-tenant git/CI credential is resolved and used SERVER-side; this
+    /// activity carries none. A null response (transport failure, guard 403,
+    /// token 503, governance 409) maps to a failed result — fail-closed, no throw.
+    /// </summary>
     private async Task<CITriggerResult> TriggerRealCI(
-        Guid sessionId, string repository, string branch, string? commitSha)
+        ActivityExecutionContext context, Guid sessionId, string repository, string branch,
+        ILogger logger)
     {
-        var callbackUrl = _configuration["Engine:CallbackUrl"];
-        if (string.IsNullOrEmpty(callbackUrl))
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var repo = NormalizeRepository(repository);
+        var tenantId = ResolveTenantId(context);
+
+        var response = await apiClient.TriggerTestsAsync(
+            repo,
+            new LlmCall.Models.CiTriggerTestsRequest
+            {
+                Branch = branch,
+                CorrelationId = $"ci-trigger-{sessionId:N}",
+            },
+            tenantId,
+            context.CancellationToken);
+
+        if (response is null)
         {
-            throw new InvalidOperationException(
-                "Engine:CallbackUrl is required for real CI integration");
+            logger.LogWarning(
+                "CI mediation call returned no response for {Repository}/{Branch} — failing closed",
+                repo, branch);
+            return new CITriggerResult
+            {
+                Success = false,
+                Error = "CI mediation call failed (transport, auth, or governance denial)",
+                TriggeredAt = DateTime.UtcNow
+            };
         }
 
-        var httpClient = _httpClientFactory.CreateClient();
-        var requestBody = new
+        if (!response.Success)
         {
-            sessionId = sessionId.ToString(),
-            repository,
-            branch,
-            commitSha,
-            action = "trigger-ci"
-        };
-
-        var response = await httpClient.PostAsJsonAsync(
-            $"{callbackUrl.TrimEnd('/')}/api/engine/trigger-ci", requestBody);
-        response.EnsureSuccessStatusCode();
-
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+            return new CITriggerResult
+            {
+                Success = false,
+                Error = response.FailureReason ?? response.FailureCode ?? "CI trigger failed",
+                TriggeredAt = DateTime.UtcNow
+            };
+        }
 
         return new CITriggerResult
         {
             Success = true,
-            RunId = result.TryGetProperty("runId", out var runId)
-                ? runId.GetString() ?? Guid.NewGuid().ToString()
-                : Guid.NewGuid().ToString(),
-            PipelineUrl = result.TryGetProperty("pipelineUrl", out var url)
-                ? url.GetString() ?? string.Empty
-                : string.Empty,
+            // The mediation plane returns a POLLABLE platform run id (P1 made
+            // dispatch re-fetch the run). Falls back to a synthetic id only if
+            // the platform could not surface one.
+            RunId = string.IsNullOrWhiteSpace(response.TestRun?.RunId)
+                ? Guid.NewGuid().ToString()
+                : response.TestRun!.RunId,
+            PipelineUrl = string.Empty,
             TriggeredAt = DateTime.UtcNow
+        };
+    }
+
+    /// <summary>
+    /// Normalize a repository reference (an <c>owner/repo</c> full name or a
+    /// browser URL like <c>https://github.com/owner/repo.git</c>) to the
+    /// <c>owner/repo</c> shape the mediation endpoints take as two path segments.
+    /// </summary>
+    internal static string NormalizeRepository(string repository)
+    {
+        if (string.IsNullOrWhiteSpace(repository)) return string.Empty;
+        var value = repository.Trim().TrimEnd('/');
+
+        var schemeIdx = value.IndexOf("://", StringComparison.Ordinal);
+        if (schemeIdx >= 0)
+        {
+            value = value[(schemeIdx + 3)..];
+            var firstSlash = value.IndexOf('/');
+            value = firstSlash >= 0 ? value[(firstSlash + 1)..] : value;
+        }
+        else if (value.Contains(':') && value.Contains('@'))
+        {
+            // scp-like git remote: git@host:owner/repo.git
+            value = value[(value.IndexOf(':') + 1)..];
+        }
+
+        if (value.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+        {
+            value = value[..^4];
+        }
+
+        var segments = value.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length >= 2
+            ? $"{segments[^2]}/{segments[^1]}"
+            : value;
+    }
+
+    /// <summary>Ambient tenant scope — the MediatedLlmText convention (a Guid or
+    /// string workflow variable; anything else ⇒ platform scope).</summary>
+    private static string? ResolveTenantId(ActivityExecutionContext context)
+    {
+        var raw = context.GetVariable<object?>("TenantId")
+                  ?? context.GetVariable<object?>("AccountId");
+        return raw switch
+        {
+            Guid g when g != Guid.Empty => g.ToString(),
+            string s when Guid.TryParse(s, out var p) && p != Guid.Empty => p.ToString(),
+            _ => null,
         };
     }
 

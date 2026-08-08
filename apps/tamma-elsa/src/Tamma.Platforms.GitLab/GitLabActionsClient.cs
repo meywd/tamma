@@ -135,6 +135,48 @@ internal sealed class GitLabActionsClient : IGitPlatformActionsClient
         }
     }
 
+    public async Task<PlatformResult<IReadOnlyList<WorkflowRun>>> ListRunsAsync(
+        string owner, string repoName,
+        ListWorkflowRunsRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var pid = GitLabPlatformClient.EncodeProjectRef(owner, repoName);
+        var perPage = Math.Clamp(request.PerPage, 1, 100);
+
+        // GitLab's list-pipelines endpoint is already newest-first
+        // (order_by=id desc default). The listed pipeline records are a
+        // slim shape (no source / finished_at on some versions) —
+        // MapPipeline tolerates the nulls.
+        var path = $"projects/{pid}/pipelines?per_page={perPage}";
+        if (!string.IsNullOrWhiteSpace(request.Branch))
+        {
+            path += $"&ref={Uri.EscapeDataString(request.Branch)}";
+        }
+
+        try
+        {
+            var (resp, pipelines) = await _http.GetJsonAsync<List<GitLabPipeline>>(
+                path, ct).ConfigureAwait(false);
+            using (resp)
+            {
+                if (!resp.Response.IsSuccessStatusCode)
+                {
+                    return PlatformResult<IReadOnlyList<WorkflowRun>>.FromError(
+                        GitLabErrorMapper.Map(resp.Response.StatusCode, resp.Body, resp.RetryAfter));
+                }
+                IReadOnlyList<WorkflowRun> runs = (pipelines ?? [])
+                    .Select(MapPipeline)
+                    .ToList();
+                return PlatformResult<IReadOnlyList<WorkflowRun>>.FromOk(runs);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            return PlatformResult<IReadOnlyList<WorkflowRun>>.FromError(new PlatformError.ServiceUnavailable());
+        }
+    }
+
     public async Task<PlatformResult<IReadOnlyList<WorkflowJob>>> ListRunJobsAsync(
         string owner, string repoName, string runId, CancellationToken ct = default)
     {

@@ -178,6 +178,37 @@ public sealed class GitHubActionsPlatformClient : IGitPlatformActionsClient
     }
 
     /// <inheritdoc />
+    public async Task<PlatformResult<IReadOnlyList<WorkflowRun>>> ListRunsAsync(
+        string owner, string repoName,
+        ListWorkflowRunsRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var perPage = Math.Clamp(request.PerPage, 1, 100);
+        var path = $"/repos/{Encode(owner)}/{Encode(repoName)}/actions/runs?per_page={perPage}";
+        if (!string.IsNullOrWhiteSpace(request.Branch))
+        {
+            path += $"&branch={Encode(request.Branch)}";
+        }
+
+        var result = await _http
+            .GetJsonAsync<GitHubWorkflowRunsListDto>(path, ct)
+            .ConfigureAwait(false);
+        return result.Map(list =>
+        {
+            IReadOnlyList<WorkflowRun> runs = (list.WorkflowRuns ?? [])
+                .Where(r => r.Id > 0)
+                .OrderByDescending(r => r.CreatedAt)
+                .Select(MapRun)
+                .ToList();
+            return runs;
+        });
+    }
+
+    /// <inheritdoc />
     public async Task<PlatformResult<IReadOnlyList<WorkflowJob>>> ListRunJobsAsync(
         string owner, string repoName, string runId,
         CancellationToken ct = default)
