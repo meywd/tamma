@@ -594,6 +594,23 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
         ListBranchFileChangesRequest request, CancellationToken ct = default) =>
         LoopVerbUnsupported<IReadOnlyList<PrFile>>("commit-read");
 
+    // ── Epic 31 P3 (seam 5) — the engine-callback verbs stay typed-unsupported
+    //    on GitLab until P6 wires the driver end-to-end (issues use iids + a
+    //    different label model); the security-alert surface has no GitLab CE
+    //    equivalent of the abstraction's dependabot/code-scanning split. ──
+
+    public Task<PlatformResult<IReadOnlyList<Issue>>> ListIssuesAsync(
+        ListIssuesRequest request, CancellationToken ct = default) =>
+        LoopVerbUnsupported<IReadOnlyList<Issue>>("issue listing (P6)");
+
+    public Task<PlatformResult<Issue>> CreateIssueAsync(
+        Tamma.Platforms.Abstractions.Models.CreateIssueRequest request, CancellationToken ct = default) =>
+        LoopVerbUnsupported<Issue>("issue creation (P6)");
+
+    public Task<PlatformResult<SecurityAlerts>> ListSecurityAlertsAsync(
+        string owner, string repoName, string alertType, CancellationToken ct = default) =>
+        LoopVerbUnsupported<SecurityAlerts>("security alerts");
+
     public async Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
         string owner, string repoName, string issueOrPrNumber, string body, CancellationToken ct = default)
     {

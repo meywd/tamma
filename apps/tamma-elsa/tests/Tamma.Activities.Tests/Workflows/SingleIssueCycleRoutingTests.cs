@@ -402,14 +402,22 @@ public class SingleIssueCycleRoutingTests
         ReadDefinitionId(gate!).Should().Be("merge-approval",
             "the merge gate must dispatch the merge-approval workflow (previously orphaned)");
 
-        // Completeness audit Phase A §Missing #4 — a CI gate (ci-with-debug-retry) now
-        // sits between the TDD loop and the merge gate. The TDD loop completion enters
-        // the CI gate; ONLY a CI pass proceeds to the merge-approval gate.
+        // Completeness audit Phase A §Missing #4 / Epic 31 P3 — a CI gate
+        // (ci-with-debug-retry) sits between the TDD loop and the merge gate,
+        // now BEHIND the §4 check step (CheckCiSupported): the TDD loop
+        // completion enters the check step; Supported runs the CI gate; ONLY a
+        // CI pass proceeds to the merge-approval gate (an Unsupported platform
+        // takes the DG-7 alternative step onto the HUMAN merge gate).
         _flowchart.Connections.Any(c =>
             c.Source.Activity.Id == "HasMoreTasks" &&
             c.Source.Port == "False" &&
+            c.Target.Activity.Id == "CheckCiSupported")
+            .Should().BeTrue("the CI check step must be entered when the TDD loop is done");
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "CheckCiSupported" &&
+            c.Source.Port == "Supported" &&
             c.Target.Activity.Id == "CiGate")
-            .Should().BeTrue("the CI gate must be entered when the TDD loop is done");
+            .Should().BeTrue("a supported platform runs the CI gate");
 
         // Reachability, not adjacency: the CI-passed edge now runs through the
         // Epic 31 P2 §4 check step (CheckUndraftSupported) and then

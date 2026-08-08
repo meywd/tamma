@@ -439,6 +439,105 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
         ListBranchFileChangesRequest request, CancellationToken ct = default) =>
         LoopVerbUnsupported<IReadOnlyList<PrFile>>("commit-read");
 
+    // ── Epic 31 P3 (seam 5) — issue listing + creation are REAL on Gitea
+    //    (the loop's work selection must run off-GitHub — P3 acceptance
+    //    names a Gitea instance); the security-alert surface has no Gitea
+    //    equivalent and answers the typed capability refusal. ──
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<IReadOnlyList<Issue>>> ListIssuesAsync(
+        ListIssuesRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var limit = Math.Clamp(request.PerPage, 1, 50);
+        var page = Math.Max(1, request.Page);
+        var state = request.State?.ToLowerInvariant() switch
+        {
+            "closed" => "closed",
+            "all" => "all",
+            _ => "open",
+        };
+        // type=issues excludes pull requests server-side; the row-level
+        // pull_request filter below is belt-and-braces for older Gitea.
+        var path = $"/api/v1/repos/{Encode(request.Owner)}/{Encode(request.RepoName)}" +
+                   $"/issues?state={state}&type=issues&page={page}&limit={limit}";
+        if (request.Labels is { Count: > 0 } labels)
+        {
+            path += $"&labels={Encode(string.Join(",", labels))}";
+        }
+
+        var result = await _http.GetJsonAsync<List<GiteaIssueDto>>(path, ct).ConfigureAwait(false);
+        return result.Map(list =>
+        {
+            IReadOnlyList<Issue> issues = list
+                .Where(i => i.PullRequest is null)
+                .Select(MapIssue)
+                .ToList();
+            return issues;
+        });
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<Issue>> CreateIssueAsync(
+        Tamma.Platforms.Abstractions.Models.CreateIssueRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Title);
+
+        // Gitea's create-issue takes label IDs, not names — resolve them
+        // best-effort (a miss skips that label; the create never fails
+        // because a label doesn't exist).
+        var labelIds = new List<long>();
+        if (request.Labels is { Count: > 0 } wanted)
+        {
+            var labelsRes = await _http
+                .GetJsonAsync<List<GiteaLabelDto>>(
+                    $"/api/v1/repos/{Encode(request.Owner)}/{Encode(request.RepoName)}/labels?limit=50", ct)
+                .ConfigureAwait(false);
+            if (labelsRes is PlatformResult<List<GiteaLabelDto>>.Ok labelsOk)
+            {
+                labelIds.AddRange(labelsOk.Value
+                    .Where(l => l.Name is not null && wanted.Contains(l.Name, StringComparer.OrdinalIgnoreCase))
+                    .Select(l => l.Id));
+            }
+        }
+
+        var body = new
+        {
+            title = request.Title,
+            body = request.Body,
+            labels = labelIds,
+            assignees = request.Assignees ?? (IReadOnlyList<string>)Array.Empty<string>(),
+        };
+        var result = await _http
+            .PostJsonAsync<GiteaIssueDto>(
+                $"/api/v1/repos/{Encode(request.Owner)}/{Encode(request.RepoName)}/issues", body, ct)
+            .ConfigureAwait(false);
+        return result.Map(MapIssue);
+    }
+
+    /// <inheritdoc />
+    public Task<PlatformResult<SecurityAlerts>> ListSecurityAlertsAsync(
+        string owner, string repoName, string alertType, CancellationToken ct = default) =>
+        Task.FromResult(PlatformResult<SecurityAlerts>.FromError(
+            new PlatformError.InvalidRequest("capability_unsupported",
+                "Gitea has no security-alert (dependabot/code-scanning) API surface")));
+
+    private static Issue MapIssue(GiteaIssueDto dto) => new(
+        Number: dto.Number.ToString(),
+        Title: dto.Title ?? string.Empty,
+        Body: dto.Body,
+        State: string.Equals(dto.State, "closed", StringComparison.OrdinalIgnoreCase)
+            ? IssueState.Closed
+            : IssueState.Open,
+        HtmlUrl: dto.HtmlUrl ?? string.Empty,
+        Labels: (dto.Labels ?? [])
+            .Select(l => l.Name)
+            .Where(n => !string.IsNullOrEmpty(n))
+            .Cast<string>()
+            .ToList());
+
     /// <inheritdoc />
     public async Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
         string owner, string repoName, string issueOrPrNumber, string body,

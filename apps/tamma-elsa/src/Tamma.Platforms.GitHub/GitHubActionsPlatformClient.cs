@@ -235,6 +235,34 @@ public sealed class GitHubActionsPlatformClient : IGitPlatformActionsClient
     }
 
     /// <inheritdoc />
+    public async Task<PlatformResult<IReadOnlyList<Artifact>>> ListRunArtifactsAsync(
+        string owner, string repoName, string runId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runId);
+
+        var path = $"/repos/{Encode(owner)}/{Encode(repoName)}" +
+                   $"/actions/runs/{Encode(runId)}/artifacts?per_page=100";
+        var result = await _http.GetJsonAsync<GitHubArtifactsListDto>(path, ct).ConfigureAwait(false);
+        return result.Map(list =>
+        {
+            IReadOnlyList<Artifact> artifacts = (list.Artifacts ?? [])
+                .Select(a => new Artifact(
+                    Id: a.Id.ToString(CultureInfo.InvariantCulture),
+                    Name: a.Name ?? string.Empty,
+                    // The abstraction encodes "expired" as SizeBytes 0 (the
+                    // record's documented "may be 0 if expired"); callers
+                    // that need the flag read SizeBytes==0 || empty URL.
+                    SizeBytes: a.Expired ? 0 : a.SizeInBytes,
+                    DownloadUrl: a.Expired ? string.Empty : a.ArchiveDownloadUrl ?? string.Empty))
+                .ToList();
+            return artifacts;
+        });
+    }
+
+    /// <inheritdoc />
     public async Task<PlatformResult<Stream>> DownloadArtifactAsync(
         string owner, string repoName, string artifactId,
         CancellationToken ct = default)

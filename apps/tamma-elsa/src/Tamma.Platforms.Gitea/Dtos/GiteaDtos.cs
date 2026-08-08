@@ -351,6 +351,44 @@ internal sealed class GiteaJobsListDto
     public List<GiteaJobDto>? Jobs { get; set; }
 }
 
+// Epic 31 P3 (seam 5) — issue listing/creation + run artifacts.
+
+internal sealed class GiteaLabelDto
+{
+    [JsonPropertyName("id")] public long Id { get; set; }
+    [JsonPropertyName("name")] public string? Name { get; set; }
+}
+
+internal sealed class GiteaIssueDto
+{
+    [JsonPropertyName("number")] public long Number { get; set; }
+    [JsonPropertyName("title")] public string? Title { get; set; }
+    [JsonPropertyName("body")] public string? Body { get; set; }
+    [JsonPropertyName("state")] public string? State { get; set; }
+    [JsonPropertyName("html_url")] public string? HtmlUrl { get; set; }
+    [JsonPropertyName("labels")] public List<GiteaLabelDto>? Labels { get; set; }
+
+    /// <summary>Non-null when the row is actually a pull request (Gitea's
+    /// issues endpoint can include PRs; <c>type=issues</c> plus this filter
+    /// keep them out).</summary>
+    [JsonPropertyName("pull_request")] public object? PullRequest { get; set; }
+}
+
+internal sealed class GiteaArtifactDto
+{
+    [JsonPropertyName("id")] public long Id { get; set; }
+    [JsonPropertyName("name")] public string? Name { get; set; }
+    [JsonPropertyName("size_in_bytes")] public long SizeInBytes { get; set; }
+    [JsonPropertyName("archive_download_url")] public string? ArchiveDownloadUrl { get; set; }
+    [JsonPropertyName("expired")] public bool Expired { get; set; }
+}
+
+internal sealed class GiteaArtifactsListDto
+{
+    [JsonPropertyName("total_count")] public int TotalCount { get; set; }
+    [JsonPropertyName("artifacts")] public List<GiteaArtifactDto>? Artifacts { get; set; }
+}
+
 internal sealed class GiteaErrorDto
 {
     [JsonPropertyName("message")]

@@ -202,6 +202,30 @@ internal sealed class GitLabActionsClient : IGitPlatformActionsClient
         }
     }
 
+    public async Task<PlatformResult<IReadOnlyList<Artifact>>> ListRunArtifactsAsync(
+        string owner, string repoName, string runId, CancellationToken ct = default)
+    {
+        // GitLab artifacts hang off JOBS, not pipelines. Surface one entry
+        // per job using the driver's job-scoped artifact id encoding
+        // ("job:NNN" — the same shape DownloadArtifactAsync consumes), named
+        // after the job so callers can match by artifact/job name.
+        var jobsResult = await ListRunJobsAsync(owner, repoName, runId, ct).ConfigureAwait(false);
+        return jobsResult switch
+        {
+            PlatformResult<IReadOnlyList<WorkflowJob>>.Ok ok =>
+                PlatformResult<IReadOnlyList<Artifact>>.FromOk(ok.Value
+                    .Select(j => new Artifact(
+                        Id: $"job:{j.JobId}",
+                        Name: j.Name,
+                        SizeBytes: 0,
+                        DownloadUrl: string.Empty))
+                    .ToList()),
+            PlatformResult<IReadOnlyList<WorkflowJob>>.Failed failed =>
+                PlatformResult<IReadOnlyList<Artifact>>.FromError(failed.Error),
+            _ => PlatformResult<IReadOnlyList<Artifact>>.FromServiceUnavailable(),
+        };
+    }
+
     public async Task<PlatformResult<Stream>> DownloadArtifactAsync(
         string owner, string repoName, string artifactId, CancellationToken ct = default)
     {

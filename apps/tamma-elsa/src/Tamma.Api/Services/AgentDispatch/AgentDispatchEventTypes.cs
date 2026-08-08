@@ -54,6 +54,15 @@ public static class AgentDispatchFailureCodes
 
     /// <summary>Any other expected platform failure (permission, rate-limit, transient).</summary>
     public const string PlatformError = "PLATFORM_ERROR";
+
+    /// <summary>
+    /// Epic 31 P3 (plan §4) — the resolved platform driver answered the typed
+    /// <c>capability_unsupported</c> refusal for the requested Actions verb.
+    /// FIRST-CLASS (exact code, never coarsened into
+    /// <see cref="PlatformError"/>) so a workflow safety-net outcome can
+    /// branch on it. Mirrors the CI/git mediation planes.
+    /// </summary>
+    public const string CapabilityUnsupported = "capability_unsupported";
 }
 
 /// <summary>

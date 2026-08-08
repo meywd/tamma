@@ -56,6 +56,18 @@ public interface IGitPlatformActionsClient
         CancellationToken ct = default);
 
     /// <summary>
+    /// Epic 31 P3 (seam 6) — list the artifacts a run produced (the
+    /// agent-dispatch collect step reads the <c>tamma-result</c>
+    /// artifact by NAME before downloading it). Platforms whose
+    /// artifacts hang off jobs rather than runs (GitLab) surface one
+    /// entry per artifact-bearing job with the driver's job-scoped
+    /// artifact id encoding.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<Artifact>>> ListRunArtifactsAsync(
+        string owner, string repoName, string runId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Download an artifact's bytes as a stream. Caller owns the
     /// stream and MUST dispose it.
     ///

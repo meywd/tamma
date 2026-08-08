@@ -659,10 +659,15 @@ public static class EngineEndpoints
         });
     }
 
-    // ─── GitHub-proxy endpoints (findings 005-011) ────────────────────────────
+    // ─── Platform-proxy endpoints (findings 005-011; Epic 31 P3 seam 5) ──────
+    // Rerouted off the GitHub-only IGitHubEngineCallbackService onto the
+    // platform-agnostic IEngineGitCallbackService (IPlatformResolver →
+    // driver.Client) with the installation-based tenant lookup they lacked.
+    // Route paths + response shapes unchanged (EngineCallbackContractTests).
 
     public static async Task<IResult> GetRepoConfig(
-        IGitHubEngineCallbackService github,
+        IEngineGitCallbackService platform,
+        ITenantContext tc,
         [FromQuery] string? repo,
         [FromQuery] string? branch)
     {
@@ -673,20 +678,20 @@ public static class EngineEndpoints
         if (owner is null || name is null)
             return Results.BadRequest(new { error = $"Invalid repo format: \"{repo}\". Expected \"owner/repo\"." });
 
-        var result = await github.ReadRepoConfigAsync(owner, name, branch ?? "main");
+        var result = await platform.ReadRepoConfigAsync(tc.TenantId, owner, name, branch ?? "main");
         if (result.ServiceUnavailable)
         {
             // TS contract: graceful degradation — return {} instead of 5xx so
             // the deployed Elsa activity falls through to its empty-conventions
-            // path. Keeps workflows running on installations without a wired
-            // GitHub App client.
+            // path. Keeps workflows running when no platform driver resolves.
             return Results.Ok(JsonDocument.Parse("{}").RootElement);
         }
         return Results.Ok(result.Result);
     }
 
     public static async Task<IResult> GetIssues(
-        IGitHubEngineCallbackService github,
+        IEngineGitCallbackService platform,
+        ITenantContext tc,
         [FromQuery] string? repo,
         [FromQuery] string? state,
         [FromQuery] string? labels,
@@ -700,13 +705,14 @@ public static class EngineEndpoints
         if (owner is null || name is null)
             return Results.BadRequest(new { error = $"Invalid repo format: \"{repo}\"." });
 
-        var result = await github.ListIssuesAsync(
-            owner, name, state ?? "open", labels, per_page ?? 30, page ?? 1);
+        var result = await platform.ListIssuesAsync(
+            tc.TenantId, owner, name, state ?? "open", labels, per_page ?? 30, page ?? 1);
         return ToHttpResult(result, r => Results.Ok(new { issues = r.Issues, total = r.Total }));
     }
 
     public static async Task<IResult> GetSecurityAlerts(
-        IGitHubEngineCallbackService github,
+        IEngineGitCallbackService platform,
+        ITenantContext tc,
         [FromQuery] string? repo,
         [FromQuery] string? type)
     {
@@ -717,7 +723,7 @@ public static class EngineEndpoints
         if (owner is null || name is null)
             return Results.BadRequest(new { error = $"Invalid repo format: \"{repo}\"." });
 
-        var result = await github.ListSecurityAlertsAsync(owner, name, type ?? "all");
+        var result = await platform.ListSecurityAlertsAsync(tc.TenantId, owner, name, type ?? "all");
         return ToHttpResult(result, r => Results.Ok(new
         {
             dependabot = r.Dependabot,
@@ -727,7 +733,8 @@ public static class EngineEndpoints
 
     public static async Task<IResult> PostIssueComment(
         IssueCommentRequest req,
-        IGitHubEngineCallbackService github)
+        IEngineGitCallbackService platform,
+        ITenantContext tc)
     {
         if (string.IsNullOrEmpty(req.Repository))
             return Results.BadRequest(new { error = "repository is required" });
@@ -738,13 +745,14 @@ public static class EngineEndpoints
         if (owner is null || name is null)
             return Results.BadRequest(new { error = "Invalid repo format" });
 
-        var result = await github.PostIssueCommentAsync(owner, name, req.IssueNumber, req.Body);
+        var result = await platform.PostIssueCommentAsync(tc.TenantId, owner, name, req.IssueNumber, req.Body);
         return ToHttpResult(result, r => Results.Ok(new { id = r.Id, htmlUrl = r.HtmlUrl }));
     }
 
     public static async Task<IResult> PostIssueLabels(
         IssueLabelRequest req,
-        IGitHubEngineCallbackService github)
+        IEngineGitCallbackService platform,
+        ITenantContext tc)
     {
         if (string.IsNullOrEmpty(req.Repository))
             return Results.BadRequest(new { error = "repository is required" });
@@ -755,7 +763,7 @@ public static class EngineEndpoints
         if (owner is null || name is null)
             return Results.BadRequest(new { error = "Invalid repo format" });
 
-        var result = await github.AddIssueLabelsAsync(owner, name, req.IssueNumber, req.Labels);
+        var result = await platform.AddIssueLabelsAsync(tc.TenantId, owner, name, req.IssueNumber, req.Labels);
         return ToHttpResult(result, r => Results.Ok(new { labels = r }));
     }
 
@@ -763,19 +771,21 @@ public static class EngineEndpoints
         string repo,
         int issueNumber,
         string label,
-        IGitHubEngineCallbackService github)
+        IEngineGitCallbackService platform,
+        ITenantContext tc)
     {
         var (owner, name) = ParseOwnerRepo(repo);
         if (owner is null || name is null)
             return Results.BadRequest(new { error = "Invalid repo format" });
 
-        var result = await github.RemoveIssueLabelAsync(owner, name, issueNumber, label);
+        var result = await platform.RemoveIssueLabelAsync(tc.TenantId, owner, name, issueNumber, label);
         return ToHttpResult(result, _ => Results.Ok(new { removed = true, label }));
     }
 
     public static async Task<IResult> CreateIssue(
         CreateIssueRequest req,
-        IGitHubEngineCallbackService github)
+        IEngineGitCallbackService platform,
+        ITenantContext tc)
     {
         if (string.IsNullOrEmpty(req.Repository))
             return Results.BadRequest(new { error = "repository is required" });
@@ -786,10 +796,14 @@ public static class EngineEndpoints
         if (owner is null || name is null)
             return Results.BadRequest(new { error = "Invalid repo format" });
 
-        var result = await github.CreateIssueAsync(
-            owner, name, req.Title, req.Body, req.Labels, req.Assignees);
+        var result = await platform.CreateIssueAsync(
+            tc.TenantId, owner, name, req.Title, req.Body, req.Labels, req.Assignees);
+        // Epic 31 P3: the Location header carries the platform's REAL issue
+        // URL (drivers populate Issue.HtmlUrl) — the fabricated
+        // https://github.com/... URL is gone. Falls back to the API path when
+        // a platform returns no browse URL.
         return ToHttpResult(result, r => Results.Created(
-            $"https://github.com/{owner}/{name}/issues/{r.Number}",
+            string.IsNullOrWhiteSpace(r.HtmlUrl) ? $"/api/engine/issues/{r.Number}" : r.HtmlUrl,
             new { number = r.Number, htmlUrl = r.HtmlUrl, title = r.Title }));
     }
 

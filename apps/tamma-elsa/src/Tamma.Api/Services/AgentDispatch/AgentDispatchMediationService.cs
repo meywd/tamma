@@ -1,57 +1,82 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Tamma.Activities.AgentDispatch;
 using Tamma.Api.Services.Git;
-using Tamma.Core.Interfaces;
 using Tamma.Core.Logging;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
+using Tamma.Platforms.Abstractions;
+using PModels = Tamma.Platforms.Abstractions.Models;
 
 namespace Tamma.Api.Services.AgentDispatch;
 
 /// <summary>
-/// Story 38-2 — composes the agent-dispatch mediation sequence entirely inside
-/// <c>Tamma.Api</c>: cross-tenant guard (reused from Story 38-1) → platform call
-/// via <see cref="IGitHubActionsClient"/> (<c>OctokitGitHubActionsClient</c>,
-/// which mints the per-repo GitHub App INSTALLATION token internally) → the
-/// collect aggregation (<see cref="IActionsResultAggregator"/>) → exactly-one
-/// terminal DCB event.
+/// Story 38-2 / Epic 31 P3 (seam 6) — composes the agent-dispatch mediation
+/// sequence entirely inside <c>Tamma.Api</c>: cross-tenant guard (reused from
+/// Story 38-1, UNCHANGED) → per-tenant DRIVER resolution
+/// (<see cref="IPlatformResolver.ResolveForMediationAsync"/>: tenant
+/// installation → <c>Platform:</c> config tier) → the platform call through the
+/// resolved driver's <see cref="IGitPlatformActionsClient"/> → the collect
+/// aggregation (<see cref="IActionsResultAggregator"/>, handed the SAME
+/// resolved driver) → exactly-one terminal DCB event.
 ///
-/// <para>Unlike the git story there is no BYOK→platform token resolver: the
-/// Actions token is inherently the tenant's App installation, resolved by repo
-/// inside the Octokit client — the guard already asserts that installation
-/// belongs to the acting tenant, so <c>credentialSource</c> is always the
-/// constant <c>installation</c>. The token lives only inside the Octokit client
-/// for the one call; it is NEVER logged, returned, or written to the audit event
-/// (only the <c>credentialSource</c> LABEL is surfaced).</para>
+/// <para><b>P3 swap.</b> The ops used to ride the GitHub-only
+/// <c>IGitHubActionsClient</c> (Octokit App tokens, real only when the
+/// process-level App was configured). They now speak only the platform
+/// abstraction; the driver owns credentials, base URL and dialect. The
+/// mediation CONTRACT is unchanged: one terminal event, no-throw, the same
+/// typed key-free failure taxonomy (<c>ACTIONS_NOT_CONFIGURED</c> now means
+/// "no platform driver / no Actions surface resolved"), the same
+/// only-429-retries dispatch posture, and the same found=false "keep waiting"
+/// poll semantics. The credential lives only inside the driver; only the
+/// <c>credentialSource</c> LABEL (<c>installation</c>) is surfaced.</para>
 /// </summary>
 public sealed class AgentDispatchMediationService : IAgentDispatchMediationService
 {
     private readonly IGitRepoAuthorizer _authorizer;
-    private readonly IGitHubActionsClient _actions;
+    private readonly IPlatformResolver _platformResolver;
+    private readonly IInstallationRepository _installations;
     private readonly IActionsResultAggregator _aggregator;
     private readonly IEventRepository _events;
     private readonly ILogger<AgentDispatchMediationService> _logger;
 
-    // Retry budget for 429/5xx dispatch — aggregate wait ≤ 7s (1s, 2s, 4s),
+    // Retry budget for rate-limited dispatch — aggregate wait ≤ 7s (1s, 2s, 4s),
     // ported verbatim from the former engine-side AgentDispatchService so the
-    // dispatch semantics are unchanged after the cutover.
+    // dispatch semantics are unchanged after the cutover. ONLY a rate-limit
+    // retries (a 5xx may mask an already-queued dispatch — review finding 4).
     private const int MaxRetries = 3;
     private static readonly int[] RetryDelaysMs = { 1000, 2000, 4000 };
     private const string DefaultWorkflowFile = "tamma-agent.yml";
 
+    /// <summary>The GitHub driver's typed "dispatch accepted but the run could
+    /// not be correlated" message prefix — the dispatch itself SUCCEEDED, so it
+    /// maps to a successful trigger with no run URL (the monitor discovers it),
+    /// exactly like the pre-swap 204 path.</summary>
+    internal const string DispatchAcceptedPrefix = "dispatch accepted";
+
     public AgentDispatchMediationService(
         IGitRepoAuthorizer authorizer,
-        IGitHubActionsClient actions,
+        IPlatformResolver platformResolver,
+        IInstallationRepository installations,
         IActionsResultAggregator aggregator,
         IEventRepository events,
         ILogger<AgentDispatchMediationService> logger)
     {
         _authorizer = authorizer ?? throw new ArgumentNullException(nameof(authorizer));
-        _actions = actions ?? throw new ArgumentNullException(nameof(actions));
+        _platformResolver = platformResolver ?? throw new ArgumentNullException(nameof(platformResolver));
+        _installations = installations ?? throw new ArgumentNullException(nameof(installations));
         _aggregator = aggregator ?? throw new ArgumentNullException(nameof(aggregator));
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    // ===================================================================
+    // Driver resolution
+    // ===================================================================
+
+    private async Task<IGitPlatformDriver?> ResolveDriverAsync(Guid? tenantId, CancellationToken ct)
+    {
+        var resolution = await _platformResolver.ResolveForMediationAsync(tenantId, ct).ConfigureAwait(false);
+        return resolution?.Driver;
     }
 
     // ===================================================================
@@ -95,80 +120,130 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
                 AgentDispatchFailureCodes.PlatformError, $"Invalid repository format '{repo}' (expected 'owner/repo')", null, ct)
                 .ConfigureAwait(false);
 
-        var workflowFile = string.IsNullOrWhiteSpace(body.WorkflowFileName) ? DefaultWorkflowFile : body.WorkflowFileName;
-
-        // AC-8: validate workflow file presence before dispatching.
-        var check = await _actions.CheckWorkflowFileAsync(owner, name, workflowFile, ct).ConfigureAwait(false);
-        if (check.NotConfigured)
+        var driver = await ResolveDriverAsync(tenantId, ct).ConfigureAwait(false);
+        if (driver?.Actions is null)
             return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
                 AgentDispatchFailureCodes.ActionsNotConfigured,
-                "GitHub App not configured on the Tamma server — cannot dispatch agent workflow.", null, ct)
+                "No platform driver with a CI/Actions surface resolved for this deployment/tenant — cannot dispatch agent workflow.", null, ct)
                 .ConfigureAwait(false);
-        if (!check.Exists)
-            return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
-                AgentDispatchFailureCodes.WorkflowNotFound,
-                $"Workflow file '{workflowFile}' not found in {owner}/{name}. Add the Tamma agent workflow template to .github/workflows/.",
-                404, ct)
-                .ConfigureAwait(false);
+
+        var workflowFile = string.IsNullOrWhiteSpace(body.WorkflowFileName) ? DefaultWorkflowFile : body.WorkflowFileName;
+
+        // AC-8 — workflow-file pre-check, expressed through the abstraction:
+        // for platforms that dispatch BY FILE (everything but GitLab's
+        // pipeline-per-ref model) probe the file on the dispatched ref. Only a
+        // POSITIVE not-found blocks with the operator-actionable message; any
+        // other probe failure defers to the dispatch itself.
+        if (driver.Kind != PlatformKind.GitLab)
+        {
+            var probe = await driver.Client.GetFileContentAsync(
+                new PModels.GetFileContentRequest(owner, name, $".github/workflows/{workflowFile}", body.Ref),
+                ct).ConfigureAwait(false);
+            if (probe is PlatformResult<byte[]>.Failed { Error: PlatformError.NotFound })
+                return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
+                    AgentDispatchFailureCodes.WorkflowNotFound,
+                    $"Workflow file '{workflowFile}' not found in {owner}/{name}. Add the Tamma agent workflow template to .github/workflows/.",
+                    404, ct)
+                    .ConfigureAwait(false);
+        }
 
         for (var attempt = 0; attempt <= MaxRetries; attempt++)
         {
             ct.ThrowIfCancellationRequested();
 
-            var api = await _actions.DispatchWorkflowAsync(owner, name, workflowFile, body.Ref, body.Inputs, ct)
-                .ConfigureAwait(false);
+            var api = await driver.Actions.DispatchWorkflowAsync(
+                owner, name,
+                new PModels.WorkflowDispatchRequest(body.Ref, workflowFile, body.Inputs),
+                ct).ConfigureAwait(false);
 
-            if (api.NotConfigured)
-                return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
-                    AgentDispatchFailureCodes.ActionsNotConfigured, "GitHub App not configured — dispatch rejected.", null, ct)
-                    .ConfigureAwait(false);
-
-            if (api.HttpStatusCode == 204)
+            switch (api)
             {
-                var ok = new AgentDispatchRunResult
+                case PlatformResult<PModels.WorkflowRun>.Ok ok:
                 {
-                    Success = true,
-                    CredentialSource = AgentDispatchCredentialSources.Installation,
-                    WorkflowRunUrl = null, // dispatch API returns 204 with no run URL — the monitor discovers it.
-                    DispatchedAt = dispatchedAt,
-                    CorrelationId = body.CorrelationId,
-                };
-                await EmitAsync(AgentDispatchEventTypes.RunTriggeredSuccess, op, tenantId, repo, body.CorrelationId,
-                    AgentDispatchCredentialSources.Installation, runId: null, failureCode: null,
-                    new { workflowFile, @ref = body.Ref }, ct).ConfigureAwait(false);
-                return ok;
+                    var success = new AgentDispatchRunResult
+                    {
+                        Success = true,
+                        CredentialSource = AgentDispatchCredentialSources.Installation,
+                        // P1 made dispatch return a POLLABLE run — surface its URL
+                        // (the pre-swap path always answered null and left the
+                        // monitor to discover the run).
+                        WorkflowRunUrl = string.IsNullOrWhiteSpace(ok.Value.HtmlUrl) ? null : ok.Value.HtmlUrl,
+                        DispatchedAt = dispatchedAt,
+                        CorrelationId = body.CorrelationId,
+                    };
+                    await EmitAsync(AgentDispatchEventTypes.RunTriggeredSuccess, op, tenantId, repo, body.CorrelationId,
+                        AgentDispatchCredentialSources.Installation, runId: null, failureCode: null,
+                        new { workflowFile, @ref = body.Ref }, ct).ConfigureAwait(false);
+                    return success;
+                }
+
+                case PlatformResult<PModels.WorkflowRun>.Failed { Error: PlatformError.Unknown u }
+                    when u.Reason.StartsWith(DispatchAcceptedPrefix, StringComparison.OrdinalIgnoreCase):
+                {
+                    // Dispatch WAS accepted; only the run correlation failed —
+                    // success with no run URL, monitor discovers (pre-swap 204 parity).
+                    var accepted = new AgentDispatchRunResult
+                    {
+                        Success = true,
+                        CredentialSource = AgentDispatchCredentialSources.Installation,
+                        WorkflowRunUrl = null,
+                        DispatchedAt = dispatchedAt,
+                        CorrelationId = body.CorrelationId,
+                    };
+                    await EmitAsync(AgentDispatchEventTypes.RunTriggeredSuccess, op, tenantId, repo, body.CorrelationId,
+                        AgentDispatchCredentialSources.Installation, runId: null, failureCode: null,
+                        new { workflowFile, @ref = body.Ref }, ct).ConfigureAwait(false);
+                    return accepted;
+                }
+
+                case PlatformResult<PModels.WorkflowRun>.Failed { Error: PlatformError.NotFound }:
+                    return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
+                        AgentDispatchFailureCodes.DispatchRejected,
+                        $"The platform returned 404 for dispatch — branch '{body.Ref}' or workflow '{workflowFile}' may not exist.", 404, ct)
+                        .ConfigureAwait(false);
+
+                case PlatformResult<PModels.WorkflowRun>.Failed { Error: PlatformError.PermissionDenied }:
+                    return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
+                        AgentDispatchFailureCodes.DispatchRejected,
+                        "The platform returned 403 for dispatch — the installation/credential may be missing the workflow-dispatch (actions: write) permission.", 403, ct)
+                        .ConfigureAwait(false);
+
+                case PlatformResult<PModels.WorkflowRun>.Failed f
+                    when PlatformErrorText.IsCapabilityUnsupported(f.Error):
+                    // Typed capability refusal — surfaced EXACT (plan §4), so the
+                    // workflow's safety-net outcome can branch on it.
+                    return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
+                        AgentDispatchFailureCodes.CapabilityUnsupported,
+                        PlatformErrorText.ToLegacyString(f.Error), null, ct)
+                        .ConfigureAwait(false);
+
+                case PlatformResult<PModels.WorkflowRun>.Failed { Error: PlatformError.RateLimited }
+                    when attempt < MaxRetries:
+                    _logger.LogWarning(
+                        "Dispatch attempt {Attempt} was rate-limited; retrying in {DelayMs}ms",
+                        attempt + 1, RetryDelaysMs[attempt]);
+                    await Task.Delay(RetryDelaysMs[attempt], ct).ConfigureAwait(false);
+                    continue;
+
+                case PlatformResult<PModels.WorkflowRun>.Failed f:
+                {
+                    var reason = PlatformErrorText.ToLegacyString(f.Error);
+                    return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
+                        AgentDispatchFailureCodes.PlatformError,
+                        $"Workflow dispatch failed: {reason}", ParsePlatformStatus(reason), ct)
+                        .ConfigureAwait(false);
+                }
+
+                default: // ServiceUnavailable
+                    return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
+                        AgentDispatchFailureCodes.PlatformError,
+                        "Workflow dispatch failed: 503: platform unavailable", 503, ct)
+                        .ConfigureAwait(false);
             }
-
-            if (api.HttpStatusCode == 404)
-                return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
-                    AgentDispatchFailureCodes.DispatchRejected,
-                    $"GitHub returned 404 for dispatch — branch '{body.Ref}' or workflow '{workflowFile}' may not exist.", 404, ct)
-                    .ConfigureAwait(false);
-
-            if (api.HttpStatusCode == 403)
-                return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
-                    AgentDispatchFailureCodes.DispatchRejected,
-                    "GitHub returned 403 for dispatch — Tamma App installation may be missing the 'actions: write' permission.", 403, ct)
-                    .ConfigureAwait(false);
-
-            if (IsDispatchRetryable(api.HttpStatusCode) && attempt < MaxRetries)
-            {
-                _logger.LogWarning(
-                    "Dispatch attempt {Attempt} returned {Status} ({Reason}); retrying in {DelayMs}ms",
-                    attempt + 1, api.HttpStatusCode, api.ErrorReason, RetryDelaysMs[attempt]);
-                await Task.Delay(RetryDelaysMs[attempt], ct).ConfigureAwait(false);
-                continue;
-            }
-
-            return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
-                AgentDispatchFailureCodes.PlatformError,
-                $"GitHub dispatch failed with HTTP {api.HttpStatusCode}: {api.ErrorReason ?? "(no body)"}",
-                api.HttpStatusCode == 0 ? null : api.HttpStatusCode, ct)
-                .ConfigureAwait(false);
         }
 
         return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
-            AgentDispatchFailureCodes.PlatformError, "Dispatch failed after retries", null, ct).ConfigureAwait(false);
+            AgentDispatchFailureCodes.PlatformError, "Dispatch failed after retries (rate-limited)", 429, ct).ConfigureAwait(false);
     }
 
     private async Task<AgentDispatchRunResult> DispatchFailAsync(
@@ -225,9 +300,27 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
         if (!parsed)
             return await PollNotFoundAsync(tenantId, repo, op, correlationId, null, ct).ConfigureAwait(false);
 
-        var runs = await _actions.ListWorkflowRunsAsync(owner, name, branch, createdAfter, perPage: 5, ct).ConfigureAwait(false);
-        var run = runs.Count > 0 ? runs[0] : null;
-        return await PollResultAsync(tenantId, repo, op, correlationId, run, ct).ConfigureAwait(false);
+        var driver = await ResolveDriverAsync(tenantId, ct).ConfigureAwait(false);
+        if (driver?.Actions is null)
+            return await PollNotFoundAsync(tenantId, repo, op, correlationId, null, ct).ConfigureAwait(false);
+
+        var runsRes = await driver.Actions.ListRunsAsync(
+            owner, name, new PModels.ListWorkflowRunsRequest(branch, PerPage: 5), ct).ConfigureAwait(false);
+        if (runsRes is not PlatformResult<IReadOnlyList<PModels.WorkflowRun>>.Ok runsOk)
+        {
+            // Poll posture parity: a transient platform failure during discovery
+            // is "not visible yet" — the monitor keeps waiting inside its own
+            // bounded SLA (never an abort on a blip).
+            _logger.LogDebug("Run discovery listing failed for {Repo}@{Branch}; treating as not-found", repo, branch);
+            return await PollNotFoundAsync(tenantId, repo, op, correlationId, null, ct).ConfigureAwait(false);
+        }
+
+        // Runs are newest-first; take the newest at-or-after the dispatch
+        // window (60s clock-skew allowance, mirroring the driver's own
+        // dispatch correlation).
+        var floor = createdAfter.ToUniversalTime().AddSeconds(-60);
+        var run = runsOk.Value.FirstOrDefault(r => r.StartedAt.UtcDateTime >= floor);
+        return await PollResultAsync(tenantId, repo, op, correlationId, run, branch, ct).ConfigureAwait(false);
     }
 
     public Task<AgentRunStatusResult> GetRunAsync(
@@ -260,50 +353,54 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
         if (!parsed)
             return await PollNotFoundAsync(tenantId, repo, op, correlationId, runId, ct).ConfigureAwait(false);
 
-        var run = await _actions.GetWorkflowRunAsync(owner, name, runId, ct).ConfigureAwait(false);
-        return await PollResultAsync(tenantId, repo, op, correlationId, run, ct).ConfigureAwait(false);
+        var driver = await ResolveDriverAsync(tenantId, ct).ConfigureAwait(false);
+        if (driver?.Actions is null)
+            return await PollNotFoundAsync(tenantId, repo, op, correlationId, runId, ct).ConfigureAwait(false);
+
+        var runRes = await driver.Actions.GetRunStatusAsync(
+            owner, name, runId.ToString(System.Globalization.CultureInfo.InvariantCulture), ct).ConfigureAwait(false);
+        if (runRes is not PlatformResult<PModels.WorkflowRun>.Ok runOk)
+        {
+            return await PollNotFoundAsync(tenantId, repo, op, correlationId, runId, ct).ConfigureAwait(false);
+        }
+        return await PollResultAsync(tenantId, repo, op, correlationId, runOk.Value, headBranch: null, ct).ConfigureAwait(false);
     }
 
-    /// <summary>Map a discovered/polled run summary (or null) into a SUCCESSFUL
-    /// status result — a null run means "not visible yet" (Found=false), still a
+    /// <summary>Map a discovered/polled run (or null) into a SUCCESSFUL status
+    /// result — a null run means "not visible yet" (Found=false), still a
     /// successful poll (200) the monitor treats as keep-waiting.
     ///
-    /// <para>AC7 (review finding 3) — the monitor polls <c>GET runs/{id}</c> every tick
-    /// for the ~35-minute run, so emitting a <c>RUN_POLLED</c> DCB event per poll bloats
-    /// the event store (~400/run) and the wiki time-travel view. We emit ONLY when the
-    /// observed run status is TERMINAL (<c>completed</c>); routine in-progress/queued
-    /// polls emit nothing. Combined with <c>RUN_TRIGGERED</c> (dispatch) +
-    /// <c>RESULTS_COLLECTED</c> (collect), that's ~3 audit events per run capturing the
-    /// meaningful bookends. The poll's functional response is unchanged — only the DCB
-    /// emit is suppressed for non-terminal polls.</para></summary>
+    /// <para>AC7 — only a TERMINAL poll emits an audit event (the monitor polls
+    /// every tick for ~35 minutes; per-poll events bloat the store).</para></summary>
     private async Task<AgentRunStatusResult> PollResultAsync(
-        Guid? tenantId, string repo, string op, string correlationId, WorkflowRunSummary? run, CancellationToken ct)
+        Guid? tenantId, string repo, string op, string correlationId, PModels.WorkflowRun? run,
+        string? headBranch, CancellationToken ct)
     {
         if (run is null)
             return await PollNotFoundAsync(tenantId, repo, op, correlationId, null, ct).ConfigureAwait(false);
 
+        var runId = long.TryParse(run.RunId, out var id) ? id : (long?)null;
         var result = new AgentRunStatusResult
         {
             Success = true,
             CredentialSource = AgentDispatchCredentialSources.Installation,
             Found = true,
-            RunId = run.Id,
+            RunId = runId,
             Status = run.Status,
             Conclusion = run.Conclusion,
             WorkflowRunUrl = run.HtmlUrl,
-            HeadBranch = run.HeadBranch,
-            CreatedAt = run.CreatedAt,
-            UpdatedAt = run.UpdatedAt,
-            ArtifactsUrl = run.ArtifactsUrl,
+            HeadBranch = headBranch,
+            CreatedAt = run.StartedAt.UtcDateTime,
+            UpdatedAt = (run.CompletedAt ?? run.StartedAt).UtcDateTime,
+            ArtifactsUrl = null, // platform-neutral runs carry no artifacts URL; collect lists artifacts directly.
             CorrelationId = correlationId,
         };
 
-        // AC7 — only a TERMINAL poll emits an audit event (see method remarks).
-        if (IsTerminalStatus(run.Status))
+        if (IsTerminalStatus(run.Status) || run.Conclusion is not null)
         {
             await EmitAsync(AgentDispatchEventTypes.RunPolledSuccess, op, tenantId, repo, correlationId,
-                AgentDispatchCredentialSources.Installation, run.Id, failureCode: null,
-                new { runId = run.Id, status = run.Status, found = true }, ct).ConfigureAwait(false);
+                AgentDispatchCredentialSources.Installation, runId, failureCode: null,
+                new { runId, status = run.Status, found = true }, ct).ConfigureAwait(false);
         }
         return result;
     }
@@ -368,7 +465,22 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
             return badRepo;
         }
 
-        var result = await _aggregator.AggregateAsync(owner, name, runId, body, ct).ConfigureAwait(false);
+        var driver = await ResolveDriverAsync(tenantId, ct).ConfigureAwait(false);
+        if (driver is null)
+        {
+            var noDriver = new AgentRunResultsResult
+            {
+                Success = false,
+                FailureCode = AgentDispatchFailureCodes.ActionsNotConfigured,
+                FailureReason = "No platform driver resolved for this deployment/tenant.",
+                CorrelationId = body.CorrelationId,
+            };
+            await EmitAsync(AgentDispatchEventTypes.ResultsCollectedFailed, op, tenantId, repo, body.CorrelationId,
+                credentialSource: null, runId, AgentDispatchFailureCodes.ActionsNotConfigured, new { }, ct).ConfigureAwait(false);
+            return noDriver;
+        }
+
+        var result = await _aggregator.AggregateAsync(driver, tenantId, owner, name, runId, body, ct).ConfigureAwait(false);
         await EmitAsync(AgentDispatchEventTypes.ResultsCollectedSuccess, op, tenantId, repo, body.CorrelationId,
             AgentDispatchCredentialSources.Installation, runId, failureCode: null,
             new { runId, agentSuccess = result.AgentSuccess, prNumber = result.PrNumber }, ct).ConfigureAwait(false);
@@ -395,11 +507,14 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
                 return new AgentInstallationResult
                 { Success = false, FailureCode = AgentDispatchFailureCodes.PlatformError, FailureReason = "invalid repo", CorrelationId = corr };
 
-            var id = await _actions.ResolveInstallationIdAsync(owner, name, ct).ConfigureAwait(false);
-            return new AgentInstallationResult { Success = true, InstallationId = id, CorrelationId = corr };
+            // The wait-key scope: the App-plane installation row for the repo
+            // (the same registry the guard consulted). No platform client is
+            // involved — the id is registry data, and null (no row / non-App
+            // platform) keeps the pre-swap null semantics.
+            var installation = await _installations
+                .GetByRepoFullNameAsync($"{owner}/{name}").ConfigureAwait(false);
+            return new AgentInstallationResult { Success = true, InstallationId = installation?.InstallationId, CorrelationId = corr };
         }
-        // Review finding 5 — only a caller cancellation propagates; an internal
-        // resolution/HTTP timeout (TaskCanceledException, token != ct) is a typed failure.
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
@@ -418,7 +533,7 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
 
     /// <summary>Run the cross-tenant guard. On deny, emit the terminal FAILED event
     /// and return the 403 result (built by <paramref name="makeDenied"/> from the
-    /// deny reason); the platform is NEVER called and no installation is resolved.
+    /// deny reason); the platform is NEVER called and no driver is resolved.
     /// On allow, returns null so the caller proceeds.</summary>
     private async Task<T?> GuardOrDenyRunAsync<T>(
         Guid? tenantId, string repo, string operation, string failedEventType, string correlationId, long? runId,
@@ -427,14 +542,14 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
         var authz = await _authorizer.AuthorizeAsync(tenantId, repo, ct).ConfigureAwait(false);
         if (authz.Allowed) return null;
 
-        // credentialSource is null — no token/installation was resolved (fail-closed).
+        // credentialSource is null — no driver/credential was resolved (fail-closed).
         await EmitAsync(failedEventType, operation, tenantId, repo, correlationId, credentialSource: null,
             runId, AgentDispatchFailureCodes.RepoNotAuthorized, new { }, ct).ConfigureAwait(false);
         return makeDenied(authz.Reason);
     }
 
     /// <summary>Run one mediation op body; convert any unexpected exception (DB read,
-    /// client mint, transport) into a typed key-free PLATFORM_ERROR result plus
+    /// driver compose, transport) into a typed key-free PLATFORM_ERROR result plus
     /// exactly one terminal FAILED event. A cancellation is not a platform failure
     /// and propagates. Mirrors Story 38-1's ExecuteGuardedAsync.</summary>
     private async Task<T> ExecuteGuardedAsync<T>(
@@ -446,10 +561,6 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
         {
             return await body().ConfigureAwait(false);
         }
-        // Review finding 5 — only a CALLER cancellation propagates. An HttpClient /
-        // dispatch TIMEOUT surfaces as a TaskCanceledException whose token is NOT the
-        // caller's ct; rethrowing it would leak a raw 500 and skip the FAILED event
-        // (violating "never a raw 5xx" + "exactly one event"). Treat it as PLATFORM_ERROR.
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
@@ -498,8 +609,6 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
         }
         catch (Exception ex)
         {
-            // An append failure is logged at ERROR, NOT swallowed into a lost result —
-            // the mediation result still returns.
             _logger.LogError(ex,
                 "AGENT_DISPATCH.* event append failed (type={Type}); the mediation result still returns. correlationId={CorrelationId}, repo={Repo}, tenantId={TenantId}",
                 eventType, LogSanitizer.Clean(correlationId), LogSanitizer.Clean(repo), tenantId);
@@ -521,16 +630,11 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
     private static bool IsTerminalStatus(string? status) =>
         string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Review finding 4 — the dispatch POST is NON-idempotent: a 5xx (502/503/504) or a
-    /// transport error (0) may arrive AFTER GitHub already queued the <c>workflow_dispatch</c>,
-    /// so retrying would spawn a SECOND agent run for one issue (double LLM cost / PR
-    /// conflicts) while a single <c>RUN_TRIGGERED.SUCCESS</c> event masks the orphan.
-    /// We therefore auto-retry the dispatch ONLY on <c>429</c> (rate-limited ⇒ definitely
-    /// not queued). An ambiguous 5xx that masked a successful queue is reconciled by the
-    /// Monitor's discover phase, which finds the run created in the dispatch window.
-    /// (The idempotent READ ops — discover / get-run / collect — are looped by the
-    /// engine-side monitor and are safe to re-issue there.)
-    /// </summary>
-    private static bool IsDispatchRetryable(int statusCode) => statusCode == 429;
+    private static int? ParsePlatformStatus(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) return null;
+        var colon = reason.IndexOf(':');
+        var head = colon > 0 ? reason[..colon] : reason;
+        return int.TryParse(head.Trim(), out var status) && status is >= 100 and < 600 ? status : null;
+    }
 }

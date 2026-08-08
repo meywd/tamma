@@ -16,6 +16,16 @@ public class CITriggerResult
     public string PipelineUrl { get; set; } = string.Empty;
     public string? Error { get; set; }
     public DateTime TriggeredAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Epic 31 P3 (plan §4.3) — the typed SAFETY-NET outcome: true ONLY when
+    /// the mediation plane answered the exact <c>capability_unsupported</c>
+    /// failure code (the resolved platform cannot dispatch CI at all). The
+    /// workflows route this to the SAME alternative step as the §4 check step
+    /// (CI.WORKFLOW_DISPATCH.SKIPPED → human merge-approval path) — never
+    /// into the debug-retry loop, and never as a plain error.
+    /// </summary>
+    public bool Unsupported { get; set; }
 }
 
 /// <summary>

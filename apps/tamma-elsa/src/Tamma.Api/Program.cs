@@ -1010,6 +1010,12 @@ else
     builder.Services.AddSingleton<Tamma.Api.Services.Engine.IGitHubEngineCallbackService,
         Tamma.Api.Services.Engine.NullGitHubEngineCallbackService>();
 }
+// Epic 31 P3 (seam 5) — the PLATFORM-AGNOSTIC engine-callback service the
+// /api/engine/* git-proxy handlers now consume (IPlatformResolver →
+// driver.Client; the legacy IGitHubEngineCallbackService registrations above
+// are unconsumed after the reroute and are deleted in P3's final stage).
+builder.Services.AddScoped<Tamma.Api.Services.Engine.IEngineGitCallbackService,
+    Tamma.Api.Services.Engine.PlatformEngineCallbackService>();
 // Engine registry (audit finding 013). Until TammaEngine ports, the
 // in-memory impl materialises synthetic per-tenant entries from the
 // workflow store so the dashboard /engines tile is not blank.

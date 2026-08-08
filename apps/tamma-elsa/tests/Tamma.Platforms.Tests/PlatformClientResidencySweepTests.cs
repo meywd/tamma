@@ -120,20 +120,19 @@ public class PlatformClientResidencySweepTests
         // IGitPlatformClient), GitMediationService.cs (17 op cores swapped onto
         // IPlatformResolver → driver.Client), and IGitHubClientFactory.cs (the
         // chokepoint, deleted outright). Pin 26 → 21.
+        // P3 milestone 3 (2026-08-08) DELETED three entries — the ratchet's second
+        // turn: EngineEndpoints.cs (7 git-proxy handlers rerouted onto the
+        // platform-agnostic IEngineGitCallbackService), AgentDispatchMediationService.cs
+        // + ActionsResultAggregator.cs (swapped onto IPlatformResolver → driver.Actions /
+        // driver.Client). Pin 21 → 18.
         new("src/Tamma.Activities/AgentDispatch/IGitHubActionsClient.cs",
             "seam 6: the IGitHubActionsClient seam definition; P3 swaps consumers onto driver.Actions and deletes the surface"),
         new("src/Tamma.Activities/AgentDispatch/NullGitHubActionsClient.cs",
             "seam 6: null implementation of the IGitHubActionsClient seam; deleted with the seam in P3"),
-        new("src/Tamma.Api/Endpoints/EngineEndpoints.cs",
-            "seam 5: the 8 engine-callback handlers ride IGitHubEngineCallbackService; P3 reroutes them onto the driver plane"),
         new("src/Tamma.Api/Extensions/GitHubInstallationServiceCollectionExtensions.cs",
             "seam 7/10: DI wiring for the Octokit App client + installation router; P3/P4 move it into the GitHub driver"),
         new("src/Tamma.Api/Program.cs",
             "seams 3/5/6/7: composition root still registers IGitHubActionsClient/Octokit clients and the engine-callback service; drains across P2-P4"),
-        new("src/Tamma.Api/Services/AgentDispatch/ActionsResultAggregator.cs",
-            "seam 6: aggregates workflow-run results via IGitHubActionsClient; P3 swaps it onto driver.Actions"),
-        new("src/Tamma.Api/Services/AgentDispatch/AgentDispatchMediationService.cs",
-            "seam 6: dispatches agent runs via IGitHubActionsClient (IGitRepoAuthorizer-guarded); P3 swaps it onto driver.Actions"),
         new("src/Tamma.Api/Services/CIIntegrationService.cs",
             "seam 3: the static-token CI client over the named \"github\" HttpClient; P1 stage 2 absorbs the body, P3 deletes the class"),
         new("src/Tamma.Api/Services/Ci/CiClientFactory.cs",
@@ -174,7 +173,7 @@ public class PlatformClientResidencySweepTests
     /// neither appears in the baseline at all. May only go DOWN; every
     /// decrement ships with the deleted entries in the same diff.
     /// </summary>
-    internal const int PinnedCount = 21;
+    internal const int PinnedCount = 18;
 
     /// <summary>
     /// The pin's recorded history, oldest first; every element after the seed
@@ -187,7 +186,11 @@ public class PlatformClientResidencySweepTests
     /// GitMediationService.cs + IGitHubClientFactory.cs (deleted) + the three
     /// ADL ExecuteCoreAsync helpers (retyped onto IGitPlatformClient) left the
     /// baseline in the same diff.</para>
-    internal static readonly int[] PinHistory = [26, 21];
+    /// <para><b>21 → 18 (2026-08-08, Epic 31 P3 milestone 3).</b> The engine
+    /// git-proxy handlers + the agent-dispatch mediation/aggregation swapped
+    /// onto the driver plane; their three entries left the baseline in the
+    /// same diff.</para>
+    internal static readonly int[] PinHistory = [26, 21, 18];
 
     // ====================================================================
     // The sweep against reality.

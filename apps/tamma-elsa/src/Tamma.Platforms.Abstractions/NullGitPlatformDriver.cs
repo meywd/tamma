@@ -166,6 +166,19 @@ public sealed class NullGitPlatformDriver : IGitPlatformDriver
             ListBranchFileChangesRequest request, CancellationToken ct = default) =>
             CapabilityUnsupported<IReadOnlyList<PrFile>>();
 
+        // Epic 31 P3 (seam 5) — the engine-callback verbs follow the same rule.
+        public Task<PlatformResult<IReadOnlyList<Issue>>> ListIssuesAsync(
+            ListIssuesRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<Issue>>();
+
+        public Task<PlatformResult<Issue>> CreateIssueAsync(
+            CreateIssueRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<Issue>();
+
+        public Task<PlatformResult<SecurityAlerts>> ListSecurityAlertsAsync(
+            string owner, string repoName, string alertType, CancellationToken ct = default) =>
+            CapabilityUnsupported<SecurityAlerts>();
+
         public Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
             string owner, string repoName, string issueOrPrNumber, string body,
             CancellationToken ct = default) =>

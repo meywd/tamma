@@ -754,6 +754,109 @@ public sealed class GitHubPlatformClient : IGitPlatformClient
     }
 
     // ================================================================
+    // Epic 31 P3 (seam 5) — the engine-callback verbs: issue listing,
+    // issue creation, security-alert reads. Absorbed from
+    // OctokitGitHubEngineCallbackService (Octokit dropped — plain REST
+    // over GitHubHttpClient, same layering as everything above).
+    // ================================================================
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<IReadOnlyList<Issue>>> ListIssuesAsync(
+        ListIssuesRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var perPage = Math.Clamp(request.PerPage, 1, 100);
+        var page = Math.Max(1, request.Page);
+        var state = request.State?.ToLowerInvariant() switch
+        {
+            "closed" => "closed",
+            "all" => "all",
+            _ => "open",
+        };
+        var path = $"/repos/{Encode(request.Owner)}/{Encode(request.RepoName)}" +
+                   $"/issues?state={state}&per_page={perPage}&page={page}";
+        if (request.Labels is { Count: > 0 } labels)
+        {
+            path += $"&labels={Encode(string.Join(",", labels))}";
+        }
+
+        var result = await _http.GetJsonAsync<List<GitHubIssueDto>>(path, ct).ConfigureAwait(false);
+        return result.Map(list =>
+        {
+            // GitHub's issues endpoint returns PRs too — a row with a
+            // pull_request stanza is a PR, not an issue (the absorbed
+            // Octokit filter).
+            IReadOnlyList<Issue> issues = list
+                .Where(i => i.PullRequest is null)
+                .Select(MapIssue)
+                .ToList();
+            return issues;
+        });
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<Issue>> CreateIssueAsync(
+        Tamma.Platforms.Abstractions.Models.CreateIssueRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Title);
+
+        var body = new
+        {
+            title = request.Title,
+            body = request.Body,
+            labels = request.Labels ?? (IReadOnlyList<string>)[],
+            assignees = request.Assignees ?? (IReadOnlyList<string>)[],
+        };
+        var result = await _http
+            .PostJsonAsync<GitHubIssueDto>(
+                $"/repos/{Encode(request.Owner)}/{Encode(request.RepoName)}/issues", body, ct)
+            .ConfigureAwait(false);
+        return result.Map(MapIssue);
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<SecurityAlerts>> ListSecurityAlertsAsync(
+        string owner, string repoName, string alertType, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+
+        var wantDependabot = alertType is "dependabot" or "all";
+        var wantCodeScanning = alertType is "codeql" or "codeScanning" or "all";
+
+        var dependabot = wantDependabot
+            ? await FetchAlertsAsync($"/repos/{Encode(owner)}/{Encode(repoName)}/dependabot/alerts?state=open&per_page=100", ct)
+                .ConfigureAwait(false)
+            : [];
+        var codeScanning = wantCodeScanning
+            ? await FetchAlertsAsync($"/repos/{Encode(owner)}/{Encode(repoName)}/code-scanning/alerts?state=open&per_page=100", ct)
+                .ConfigureAwait(false)
+            : [];
+
+        return PlatformResult<SecurityAlerts>.FromOk(new SecurityAlerts(dependabot, codeScanning));
+    }
+
+    /// <summary>Per-scanner fetch — a repo with the scanner disabled (403/404)
+    /// contributes an EMPTY list rather than failing the read (the absorbed
+    /// per-scanner tolerance).</summary>
+    private async Task<IReadOnlyList<string>> FetchAlertsAsync(string path, CancellationToken ct)
+    {
+        var result = await _http
+            .GetJsonAsync<List<System.Text.Json.JsonElement>>(path, ct)
+            .ConfigureAwait(false);
+        if (result is PlatformResult<List<System.Text.Json.JsonElement>>.Ok ok)
+        {
+            return ok.Value.Select(e => e.GetRawText()).ToList();
+        }
+        _logger.LogWarning(
+            "Security-alert read failed for {Path} — scanner disabled or inaccessible; returning empty for that scanner",
+            path);
+        return [];
+    }
+
+    // ================================================================
     // Comments / webhooks / repo listing
     // ================================================================
 

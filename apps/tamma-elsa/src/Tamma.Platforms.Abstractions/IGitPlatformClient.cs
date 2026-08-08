@@ -226,6 +226,40 @@ public interface IGitPlatformClient
     Task<PlatformResult<IReadOnlyList<PrFile>>> ListBranchFileChangesAsync(
         ListBranchFileChangesRequest request, CancellationToken ct = default);
 
+    // ── Epic 31 P3 (seam 5) — the engine-callback verbs the loop's
+    //    work selection + triage flow ride on: issue listing, issue
+    //    creation, and the security-alert read. Same contract as the
+    //    other capability-gated verbs: a driver that cannot answer
+    //    returns PlatformError.InvalidRequest with code
+    //    "capability_unsupported" — never throws. ──
+
+    /// <summary>
+    /// List issues (excluding pull requests) matching the filter. The
+    /// work-item selection read. Capability:
+    /// <see cref="PlatformCapability.IssueLifecycle"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<Issue>>> ListIssuesAsync(
+        ListIssuesRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Create a new issue; returns the created issue with its REAL
+    /// platform <see cref="Issue.HtmlUrl"/> (no caller may fabricate a
+    /// github.com URL). Capability:
+    /// <see cref="PlatformCapability.IssueLifecycle"/>.
+    /// </summary>
+    Task<PlatformResult<Issue>> CreateIssueAsync(
+        CreateIssueRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// List open security alerts (dependency + static analysis) as
+    /// platform-native raw JSON. Platforms without a security-alert
+    /// surface answer <c>capability_unsupported</c>; a platform WITH
+    /// the surface but a repo where a scanner is disabled returns an
+    /// empty list for that scanner (never a failure).
+    /// </summary>
+    Task<PlatformResult<SecurityAlerts>> ListSecurityAlertsAsync(
+        string owner, string repoName, string alertType, CancellationToken ct = default);
+
     /// <summary>
     /// Post a top-level comment on an issue or PR.
     /// </summary>

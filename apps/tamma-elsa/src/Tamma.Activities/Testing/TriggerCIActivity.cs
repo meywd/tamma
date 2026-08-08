@@ -156,9 +156,15 @@ public class TriggerCIActivity : CodeActivity<CITriggerResult>
 
         if (!response.Success)
         {
+            // §4.3 safety net — EXACT-code match only: anything other than
+            // capability_unsupported stays an ordinary error (mis-classifying
+            // a real failure as "unsupported" would silently skip the CI gate).
+            var unsupported = string.Equals(
+                response.FailureCode, "capability_unsupported", StringComparison.Ordinal);
             return new CITriggerResult
             {
                 Success = false,
+                Unsupported = unsupported,
                 Error = response.FailureReason ?? response.FailureCode ?? "CI trigger failed",
                 TriggeredAt = DateTime.UtcNow
             };

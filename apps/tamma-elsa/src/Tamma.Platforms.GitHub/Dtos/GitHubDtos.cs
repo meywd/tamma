@@ -128,6 +128,11 @@ internal sealed class GitHubIssueDto
     [JsonPropertyName("state")] public string? State { get; set; }
     [JsonPropertyName("html_url")] public string? HtmlUrl { get; set; }
     [JsonPropertyName("labels")] public List<GitHubLabelDto>? Labels { get; set; }
+
+    /// <summary>Epic 31 P3 — non-null when the "issue" row is actually a
+    /// pull request (GitHub's issues endpoint returns both;
+    /// <c>ListIssuesAsync</c> filters PR rows out).</summary>
+    [JsonPropertyName("pull_request")] public object? PullRequest { get; set; }
 }
 
 internal sealed class GitHubReleaseDto
@@ -209,4 +214,19 @@ internal sealed class GitHubJobsListDto
 {
     [JsonPropertyName("total_count")] public int TotalCount { get; set; }
     [JsonPropertyName("jobs")] public List<GitHubJobDto>? Jobs { get; set; }
+}
+
+internal sealed class GitHubArtifactDto
+{
+    [JsonPropertyName("id")] public long Id { get; set; }
+    [JsonPropertyName("name")] public string? Name { get; set; }
+    [JsonPropertyName("size_in_bytes")] public long SizeInBytes { get; set; }
+    [JsonPropertyName("archive_download_url")] public string? ArchiveDownloadUrl { get; set; }
+    [JsonPropertyName("expired")] public bool Expired { get; set; }
+}
+
+internal sealed class GitHubArtifactsListDto
+{
+    [JsonPropertyName("total_count")] public int TotalCount { get; set; }
+    [JsonPropertyName("artifacts")] public List<GitHubArtifactDto>? Artifacts { get; set; }
 }

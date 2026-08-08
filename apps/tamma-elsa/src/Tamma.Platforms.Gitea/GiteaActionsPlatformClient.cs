@@ -199,6 +199,34 @@ public sealed class GiteaActionsPlatformClient : IGitPlatformActionsClient
     }
 
     /// <inheritdoc />
+    public async Task<PlatformResult<IReadOnlyList<Artifact>>> ListRunArtifactsAsync(
+        string owner, string repoName, string runId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runId);
+
+        // Gitea 1.22+ mirrors GitHub's per-run artifacts listing shape.
+        var path = $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}" +
+                   $"/actions/runs/{Encode(runId)}/artifacts";
+        var result = await _http
+            .GetJsonAsync<GiteaArtifactsListDto>(path, ct)
+            .ConfigureAwait(false);
+        return result.Map(list =>
+        {
+            IReadOnlyList<Artifact> artifacts = (list.Artifacts ?? new List<GiteaArtifactDto>())
+                .Select(a => new Artifact(
+                    Id: a.Id.ToString(),
+                    Name: a.Name ?? string.Empty,
+                    SizeBytes: a.Expired ? 0 : a.SizeInBytes,
+                    DownloadUrl: a.Expired ? string.Empty : a.ArchiveDownloadUrl ?? string.Empty))
+                .ToList();
+            return artifacts;
+        });
+    }
+
+    /// <inheritdoc />
     public async Task<PlatformResult<Stream>> DownloadArtifactAsync(
         string owner, string repoName, string artifactId,
         CancellationToken ct = default)

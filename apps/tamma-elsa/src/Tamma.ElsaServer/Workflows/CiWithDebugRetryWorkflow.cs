@@ -125,6 +125,37 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
         testsPassed.SetDisplayText("Tests Passed?");
 
         // ================================================================
+        // Epic 31 P3 (§4.3) — CI-unsupported check BEFORE the retry guard: a
+        // typed capability_unsupported from the testing pipeline means the
+        // platform cannot dispatch CI at all — retrying (and burning LLM debug
+        // budget) would answer identically. Propagate ciUnsupported=true up to
+        // the cycle, which routes it to the §4 alternative step
+        // (CI.WORKFLOW_DISPATCH.SKIPPED → the human merge-approval path).
+        // ================================================================
+        var ciUnsupportedCheck = new FlowDecision(ctx =>
+        {
+            var result = testResult.Get(ctx);
+            return result != null && result.TryGetValue("ciUnsupported", out var u)
+                && (u is true || string.Equals(u?.ToString(), "True", StringComparison.OrdinalIgnoreCase));
+        })
+        { Id = "CiUnsupportedCheck", Name = "CI Dispatch Unsupported?" };
+        ciUnsupportedCheck.SetDisplayText("CI Dispatch Unsupported?");
+
+        var finishUnsupportedOutputs = new Sequence
+        {
+            Id = "CiRetryFinishUnsupported",
+            Name = "Finish Unsupported",
+            Activities =
+            {
+                WithLabel(new SetOutput { Id = "SetCiRetryUnsupportedFailed", Name = "Set Failed", OutputName = new("passed"), OutputValue = new(_ => (object)false) }, "Set Failed"),
+                WithLabel(new SetOutput { Id = "SetCiRetryUnsupportedFlag", Name = "Set CI Unsupported", OutputName = new("ciUnsupported"), OutputValue = new(_ => (object)true) }, "Set CI Unsupported"),
+                WithLabel(new SetOutput { Id = "SetCiRetryUnsupportedError", Name = "Set Error Message", OutputName = new("errorMessage"), OutputValue = new(_ => (object)"capability_unsupported: the platform cannot dispatch CI workflows") }, "Set Error Message"),
+                WithLabel(new SetOutput { Id = "SetCiRetryCountUnsupported", Name = "Set CI Retry Count", OutputName = new("ciRetryCount"), OutputValue = new(ctx => (object)ciRetryCount.Get(ctx)) }, "Set CI Retry Count")
+            }
+        };
+        finishUnsupportedOutputs.SetDisplayText("Finish Unsupported");
+
+        // ================================================================
         // CI retry guard (< 3 retries)
         // ================================================================
         var ciRetryGuard = new FlowDecision(ctx => ciRetryCount.Get(ctx) < maxRetries.Get(ctx))
@@ -215,9 +246,9 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
             Activities =
             {
                 initInputs,
-                testingPipeline, testsPassed, ciRetryGuard,
+                testingPipeline, testsPassed, ciUnsupportedCheck, ciRetryGuard,
                 incrementCiRetry, dispatchCiDebugging,
-                finishPassOutputs, finishFailOutputs, finish
+                finishPassOutputs, finishFailOutputs, finishUnsupportedOutputs, finish
             },
             Connections =
             {
@@ -230,8 +261,10 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 // Tests passed -> finish pass
                 ConnectOutcome(testsPassed, "True", finishPassOutputs),
 
-                // Tests failed -> retry guard
-                ConnectOutcome(testsPassed, "False", ciRetryGuard),
+                // Tests failed -> §4.3 unsupported check FIRST, then retry guard
+                ConnectOutcome(testsPassed, "False", ciUnsupportedCheck),
+                ConnectOutcome(ciUnsupportedCheck, "True", finishUnsupportedOutputs),
+                ConnectOutcome(ciUnsupportedCheck, "False", ciRetryGuard),
 
                 // Retries remaining -> increment + debug
                 ConnectOutcome(ciRetryGuard, "True", incrementCiRetry),
@@ -241,9 +274,10 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 Connect(incrementCiRetry, dispatchCiDebugging),
                 Connect(dispatchCiDebugging, testingPipeline),
 
-                // Both finish outputs -> terminal
+                // All finish outputs -> terminal
                 Connect(finishPassOutputs, finish),
-                Connect(finishFailOutputs, finish)
+                Connect(finishFailOutputs, finish),
+                Connect(finishUnsupportedOutputs, finish)
             }
         };
     }

@@ -235,6 +235,7 @@ This rule is general: it applies to any third-party surface a workflow touches (
 | DG-4 | Merge-method unsupported (e.g. GitLab rebase) | Auto-fallback along fixed order rebase→squash→merge, audited. Fail loud only if none work. |
 | DG-5 | CI completion vehicle | Durable polling of `GetRunStatusAsync` first (P3, no ingress dependency); webhook wake as accelerator (P4). |
 | DG-6 | Merge-confirmation source of truth | Webhook resume is primary (matches audit intent); the 12h SLA stays as the exception path. Nothing resumes it today, so this is a new build either way. |
+| DG-7 | **CI dispatch unsupported** (the CI gate's alternative step, implemented in P3) | Check step (`CheckPlatformCapability(Actions)`) before the cycle's CI gate; unsupported → the alternative step emits `CI.WORKFLOW_DISPATCH.SKIPPED` and routes to code review + the **HUMAN merge-approval gate** — with the CI gate unsatisfied the cycle can NEVER auto-merge; a human decides the merge with the skip event on the record. `TriggerCIActivity` carries the §4.3 typed `Unsupported` safety net (exact `capability_unsupported` match), propagated up through `testing-pipeline` → `ci-with-debug-retry` (`ciUnsupported` output, no debug retries burned) onto the SAME alternative step. **Conservative default pending owner confirmation** — see §7 item 9. |
 
 ---
 
@@ -273,3 +274,4 @@ This rule is general: it applies to any third-party surface a workflow touches (
 6. **P6 acceptance depth** — GitLab full-stack E2E (mirror of P5, +3–4d) or mediation-level acceptance only?
 7. **`Tamma:PublicBaseUrl`** — confirm a new config key vs reusing `Tamma:ControlPlaneUrl` for the webhook callback URL.
 8. **Timing** — P1+P2 are the critical path (~2.5–3.5 weeks) to "mediation is platform-agnostic"; P3–P5 (~4–5 weeks) to "one issue completes on Gitea". Confirm this sequencing holds against other epic priorities.
+9. **DG-7 CI-unsupported routing (added 2026-08-08, P3)** — when the platform cannot dispatch CI at all, the cycle now SKIPS the CI gate with a `CI.WORKFLOW_DISPATCH.SKIPPED` audit event and routes to code review + the HUMAN merge-approval gate (never an auto-merge without CI). This is the conservative default: the alternative considered was failing the cycle outright (no merge path at all without CI), which would make every cycle on a CI-less platform terminal. Ratify the human-gate routing, or direct the stricter fail-the-cycle posture.

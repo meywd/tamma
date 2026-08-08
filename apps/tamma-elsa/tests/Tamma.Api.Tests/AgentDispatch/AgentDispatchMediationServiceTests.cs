@@ -4,22 +4,31 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
-using Tamma.Activities.AgentDispatch;
 using Tamma.Api.Services.AgentDispatch;
 using Tamma.Api.Services.Git;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
+using Tamma.Platforms.Abstractions;
+using Tamma.Platforms.Abstractions.Models;
 
 namespace Tamma.Api.Tests.AgentDispatch;
 
 /// <summary>
-/// Story 38-2 — <see cref="AgentDispatchMediationService"/> composition (guard →
-/// platform-via-Octokit → one DCB event). Every collaborator is faked; assertions
-/// cover the fail-closed guard order (deny ⇒ platform never called), the typed
-/// key-free failure taxonomy with preserved platformStatusCode, the
-/// exactly-one-terminal-event invariant + its tags, credential safety (the internal
-/// installation token surfaces only as the "installation" label), and the
-/// exception-guard PLATFORM_ERROR path (never a raw 5xx).
+/// Story 38-2 / Epic 31 P3 — <see cref="AgentDispatchMediationService"/>
+/// composition (guard → driver resolution → platform-through-the-abstraction →
+/// one DCB event).
+///
+/// <para><b>P3 note.</b> The pre-swap fixture faked the GitHub-only
+/// <c>IGitHubActionsClient</c>. The SETUP moved onto <see cref="IPlatformResolver"/>
+/// + <see cref="IGitPlatformActionsClient"/>; every BEHAVIORAL assertion (the
+/// guard-first fail-closed order, the typed key-free failure taxonomy with
+/// preserved platformStatusCode, only-429-retries dispatch, found=false
+/// keep-waiting polls, AC7 terminal-only poll events, the exactly-one-event
+/// invariant + tag shapes, credential safety, the exception-guard
+/// PLATFORM_ERROR path) is unchanged from the pre-swap fixture — that is the
+/// parity claim this file pins. New pins: the typed
+/// <c>capability_unsupported</c> dispatch code and the "dispatch accepted but
+/// uncorrelated" success arm.</para>
 /// </summary>
 [TestFixture]
 public class AgentDispatchMediationServiceTests
@@ -28,7 +37,10 @@ public class AgentDispatchMediationServiceTests
     private readonly Guid _tenant = Guid.NewGuid();
 
     private Mock<IGitRepoAuthorizer> _authorizer = null!;
-    private FakeGitHubActionsClient _actions = null!;
+    private Mock<IPlatformResolver> _resolver = null!;
+    private Mock<IInstallationRepository> _installations = null!;
+    private Mock<IGitPlatformClient> _client = null!;
+    private FakePlatformActionsClient _actions = null!;
     private Mock<IActionsResultAggregator> _aggregator = null!;
     private RecordingEventRepository _events = null!;
     private AgentDispatchMediationService _sut = null!;
@@ -37,12 +49,34 @@ public class AgentDispatchMediationServiceTests
     public void SetUp()
     {
         _authorizer = new Mock<IGitRepoAuthorizer>(MockBehavior.Strict);
-        _actions = new FakeGitHubActionsClient();
+        _resolver = new Mock<IPlatformResolver>(MockBehavior.Loose);
+        _installations = new Mock<IInstallationRepository>(MockBehavior.Loose);
+        _client = new Mock<IGitPlatformClient>(MockBehavior.Loose);
+        _actions = new FakePlatformActionsClient();
         _aggregator = new Mock<IActionsResultAggregator>(MockBehavior.Loose);
         _events = new RecordingEventRepository();
+
+        // Default: the workflow-file probe finds the file.
+        _client
+            .Setup(c => c.GetFileContentAsync(It.IsAny<GetFileContentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<byte[]>.FromOk(new byte[] { 1 }));
+
+        ResolveDriver();
+
         _sut = new AgentDispatchMediationService(
-            _authorizer.Object, _actions, _aggregator.Object, _events, NullLogger<AgentDispatchMediationService>.Instance);
+            _authorizer.Object, _resolver.Object, _installations.Object, _aggregator.Object, _events,
+            NullLogger<AgentDispatchMediationService>.Instance);
     }
+
+    private void ResolveDriver() => _resolver
+        .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        .ReturnsAsync(new MediationDriverResolution(
+            new FakePlatformDriver(_client.Object, _actions),
+            MediationCredentialSource.TenantInstallation));
+
+    private void NoDriver() => _resolver
+        .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        .ReturnsAsync((MediationDriverResolution?)null);
 
     private void Allow() => _authorizer
         .Setup(a => a.AuthorizeAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -68,9 +102,9 @@ public class AgentDispatchMediationServiceTests
 
         result.Success.Should().BeFalse();
         result.FailureCode.Should().Be(AgentDispatchFailureCodes.RepoNotAuthorized);
-        result.CredentialSource.Should().BeNull("no installation is resolved on a guard denial");
-        _actions.CheckWorkflowCalls.Should().Be(0, "the guard runs BEFORE any platform call");
-        _actions.DispatchCalls.Should().BeEmpty();
+        result.CredentialSource.Should().BeNull("no driver is resolved on a guard denial");
+        _actions.DispatchCalls.Should().BeEmpty("the guard runs BEFORE any platform call");
+        _resolver.Verify(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
 
         _events.Appended.Should().ContainSingle();
         var evt = _events.Appended.Single();
@@ -99,7 +133,8 @@ public class AgentDispatchMediationServiceTests
         var result = await _sut.CollectResultsAsync(_tenant, Repo, 55, new CollectAgentRunRequest { CorrelationId = "wf-1" });
 
         result.FailureCode.Should().Be(AgentDispatchFailureCodes.RepoNotAuthorized);
-        _aggregator.Verify(a => a.AggregateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<long>(),
+        _aggregator.Verify(a => a.AggregateAsync(
+            It.IsAny<IGitPlatformDriver>(), It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<long>(),
             It.IsAny<CollectAgentRunRequest>(), It.IsAny<CancellationToken>()), Times.Never);
         result.ToHttpResult().Let(StatusOf).Should().Be(403);
     }
@@ -109,7 +144,7 @@ public class AgentDispatchMediationServiceTests
     // ===================================================================
 
     [Test]
-    public async Task Trigger_Success_204_EmitsOneSuccessEvent_InstallationLabel()
+    public async Task Trigger_Success_EmitsOneSuccessEvent_InstallationLabel()
     {
         Allow();
 
@@ -120,6 +155,8 @@ public class AgentDispatchMediationServiceTests
         _actions.DispatchCalls.Should().HaveCount(1);
         _actions.DispatchCalls[0].Owner.Should().Be("acme");
         _actions.DispatchCalls[0].Repo.Should().Be("widgets");
+        result.WorkflowRunUrl.Should().Be("https://ci/run/1",
+            "P1's pollable-run dispatch lets mediation surface the run URL (pre-swap: always null)");
 
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(AgentDispatchEventTypes.RunTriggeredSuccess);
         result.ToHttpResult().Let(StatusOf).Should().Be(200);
@@ -127,10 +164,29 @@ public class AgentDispatchMediationServiceTests
     }
 
     [Test]
+    public async Task Trigger_DispatchAcceptedButUncorrelated_IsSuccess_NoRunUrl()
+    {
+        // The GitHub driver's typed "dispatch accepted (204) but the created
+        // run could not be correlated" — the dispatch HAPPENED; pre-swap this
+        // was the plain 204 success with no run URL (monitor discovers it).
+        Allow();
+        _actions.OnDispatch = (_, _, _) => PlatformResult<WorkflowRun>.FromError(
+            new PlatformError.Unknown("dispatch accepted (204) but the created run could not be correlated"));
+
+        var result = await _sut.TriggerRunAsync(_tenant, Repo, DispatchBody());
+
+        result.Success.Should().BeTrue();
+        result.WorkflowRunUrl.Should().BeNull();
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(AgentDispatchEventTypes.RunTriggeredSuccess);
+    }
+
+    [Test]
     public async Task Trigger_WorkflowMissing_200SuccessFalse_WorkflowNotFound()
     {
         Allow();
-        _actions.CheckWorkflow = (_, _, _) => new WorkflowFileCheck(false, false, "workflow_not_found");
+        _client
+            .Setup(c => c.GetFileContentAsync(It.IsAny<GetFileContentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<byte[]>.FromError(new PlatformError.NotFound()));
 
         var result = await _sut.TriggerRunAsync(_tenant, Repo, DispatchBody());
 
@@ -142,22 +198,37 @@ public class AgentDispatchMediationServiceTests
     }
 
     [Test]
-    public async Task Trigger_NotConfigured_200SuccessFalse_ActionsNotConfigured()
+    public async Task Trigger_NoDriverResolved_200SuccessFalse_ActionsNotConfigured()
     {
         Allow();
-        _actions.CheckWorkflow = (_, _, _) => new WorkflowFileCheck(false, true, "github_client_not_configured");
+        NoDriver();
 
         var result = await _sut.TriggerRunAsync(_tenant, Repo, DispatchBody());
 
         result.FailureCode.Should().Be(AgentDispatchFailureCodes.ActionsNotConfigured);
-        result.ToHttpResult().Let(StatusOf).Should().Be(200, "no 503 token path — the installation token is internal");
+        result.ToHttpResult().Let(StatusOf).Should().Be(200, "no 503 token path — the credential is internal to the driver");
+    }
+
+    [Test]
+    public async Task Trigger_DriverWithoutActionsSurface_ActionsNotConfigured()
+    {
+        Allow();
+        _resolver
+            .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MediationDriverResolution(
+                new FakePlatformDriver(_client.Object, actions: null),
+                MediationCredentialSource.TenantInstallation));
+
+        var result = await _sut.TriggerRunAsync(_tenant, Repo, DispatchBody());
+
+        result.FailureCode.Should().Be(AgentDispatchFailureCodes.ActionsNotConfigured);
     }
 
     [Test]
     public async Task Trigger_403_DispatchRejected_PreservesPlatformStatusCode()
     {
         Allow();
-        _actions.OnDispatch = (_, _, _, _, _) => new DispatchApiResult(403, "forbidden");
+        _actions.OnDispatch = (_, _, _) => PlatformResult<WorkflowRun>.FromError(new PlatformError.PermissionDenied());
 
         var result = await _sut.TriggerRunAsync(_tenant, Repo, DispatchBody());
 
@@ -168,14 +239,30 @@ public class AgentDispatchMediationServiceTests
     }
 
     [Test]
-    public async Task Trigger_RetriesOn429_ThenSucceeds()
+    public async Task Trigger_CapabilityUnsupported_SurfacesExactTypedCode()
+    {
+        Allow();
+        _actions.OnDispatch = (_, _, _) => PlatformResult<WorkflowRun>.FromError(
+            new PlatformError.InvalidRequest(PlatformErrorText.CapabilityUnsupportedCode, "no CI dispatch here"));
+
+        var result = await _sut.TriggerRunAsync(_tenant, Repo, DispatchBody());
+
+        result.Success.Should().BeFalse();
+        result.FailureCode.Should().Be(AgentDispatchFailureCodes.CapabilityUnsupported,
+            "the typed refusal must never be coarsened into PLATFORM_ERROR (plan §4)");
+    }
+
+    [Test]
+    public async Task Trigger_RetriesOnRateLimit_ThenSucceeds()
     {
         Allow();
         var attempts = 0;
-        _actions.OnDispatch = (_, _, _, _, _) =>
+        _actions.OnDispatch = (_, _, _) =>
         {
             attempts++;
-            return attempts < 2 ? new DispatchApiResult(429, "rate limited") : new DispatchApiResult(204, null);
+            return attempts < 2
+                ? PlatformResult<WorkflowRun>.FromError(new PlatformError.RateLimited(null))
+                : PlatformResult<WorkflowRun>.FromOk(FakePlatformActionsClient.Run(id: "9", status: "queued", conclusion: null));
         };
 
         var result = await _sut.TriggerRunAsync(_tenant, Repo, DispatchBody());
@@ -187,12 +274,12 @@ public class AgentDispatchMediationServiceTests
     [Test]
     public async Task Trigger_503_DoesNotRetry_SingleAttempt_TypedFailure()
     {
-        // Review finding 4 — a 503 (like 502/504/0) may arrive AFTER GitHub already
-        // queued the run, so the NON-idempotent dispatch POST must NOT auto-retry it
-        // (only 429 is retried). One attempt ⇒ one typed PLATFORM_ERROR, no orphan run.
+        // Review finding 4 — a 503 may arrive AFTER the platform already queued
+        // the run, so the NON-idempotent dispatch must NOT auto-retry it (only
+        // a rate-limit is retried). One attempt ⇒ one typed PLATFORM_ERROR.
         Allow();
         var attempts = 0;
-        _actions.OnDispatch = (_, _, _, _, _) => { attempts++; return new DispatchApiResult(503, "service unavailable"); };
+        _actions.OnDispatch = (_, _, _) => { attempts++; return PlatformResult<WorkflowRun>.FromServiceUnavailable(); };
 
         var result = await _sut.TriggerRunAsync(_tenant, Repo, DispatchBody());
 
@@ -212,8 +299,7 @@ public class AgentDispatchMediationServiceTests
     public async Task GetRun_Found_Returns200_Found_OnePolledEvent()
     {
         Allow();
-        _actions.RunsById[55] = new WorkflowRunSummary(55, "completed", "success", "https://gh/run/55",
-            DateTime.UtcNow.AddMinutes(-3), DateTime.UtcNow, "tamma/issue-7", "workflow_dispatch", "https://gh/run/55/artifacts");
+        _actions.RunsById["55"] = FakePlatformActionsClient.Run(id: "55", status: "completed", conclusion: "success", url: "https://gh/run/55");
 
         var result = await _sut.GetRunAsync(_tenant, Repo, 55, "wf-1");
 
@@ -229,7 +315,7 @@ public class AgentDispatchMediationServiceTests
     [Test]
     public async Task GetRun_NotVisibleYet_Returns200_FoundFalse_NoEvent()
     {
-        Allow(); // RunsById empty ⇒ GetWorkflowRunAsync returns null.
+        Allow(); // RunsById empty ⇒ GetRunStatusAsync answers NotFound.
 
         var result = await _sut.GetRunAsync(_tenant, Repo, 55, "wf-1");
 
@@ -243,8 +329,7 @@ public class AgentDispatchMediationServiceTests
     public async Task GetRun_InProgress_Returns200_Found_NoEvent()
     {
         Allow();
-        _actions.RunsById[55] = new WorkflowRunSummary(55, "in_progress", "", "https://gh/run/55",
-            DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow, "tamma/issue-7", "workflow_dispatch", "");
+        _actions.RunsById["55"] = FakePlatformActionsClient.Run(id: "55", status: "in_progress", conclusion: null, url: "https://gh/run/55");
 
         var result = await _sut.GetRunAsync(_tenant, Repo, 55, "wf-1");
 
@@ -260,7 +345,7 @@ public class AgentDispatchMediationServiceTests
         Allow();
         _actions.DefaultListRuns = new[]
         {
-            new WorkflowRunSummary(77, "in_progress", "", "u", DateTime.UtcNow, DateTime.UtcNow, "tamma/issue-7", "workflow_dispatch", "a"),
+            FakePlatformActionsClient.Run(id: "77", status: "in_progress", conclusion: null),
         };
 
         var result = await _sut.DiscoverRunAsync(_tenant, Repo, "tamma/issue-7", DateTime.UtcNow.AddMinutes(-1), "wf-1");
@@ -276,7 +361,7 @@ public class AgentDispatchMediationServiceTests
         Allow();
         _actions.DefaultListRuns = new[]
         {
-            new WorkflowRunSummary(88, "completed", "success", "u", DateTime.UtcNow, DateTime.UtcNow, "tamma/issue-7", "workflow_dispatch", "a"),
+            FakePlatformActionsClient.Run(id: "88", status: "completed", conclusion: "success"),
         };
 
         var result = await _sut.DiscoverRunAsync(_tenant, Repo, "tamma/issue-7", DateTime.UtcNow.AddMinutes(-1), "wf-1");
@@ -284,6 +369,21 @@ public class AgentDispatchMediationServiceTests
         result.Found.Should().BeTrue();
         result.RunId.Should().Be(88);
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(AgentDispatchEventTypes.RunPolledSuccess);
+    }
+
+    [Test]
+    public async Task Discover_RunOlderThanDispatchWindow_FoundFalse()
+    {
+        Allow();
+        _actions.DefaultListRuns = new[]
+        {
+            FakePlatformActionsClient.Run(id: "12", status: "completed", conclusion: "success",
+                started: DateTimeOffset.UtcNow.AddHours(-2)),
+        };
+
+        var result = await _sut.DiscoverRunAsync(_tenant, Repo, "tamma/issue-7", DateTime.UtcNow.AddMinutes(-1), "wf-1");
+
+        result.Found.Should().BeFalse("a stale run from before the dispatch window is not OUR run");
     }
 
     [Test]
@@ -306,11 +406,13 @@ public class AgentDispatchMediationServiceTests
     // ===================================================================
 
     [Test]
-    public async Task Collect_DelegatesToAggregator_EmitsOneCollectedEvent()
+    public async Task Collect_DelegatesToAggregator_WithTheResolvedDriver_EmitsOneCollectedEvent()
     {
         Allow();
         _aggregator
-            .Setup(a => a.AggregateAsync("acme", "widgets", 99, It.IsAny<CollectAgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .Setup(a => a.AggregateAsync(
+                It.IsAny<IGitPlatformDriver>(), It.IsAny<Guid?>(), "acme", "widgets", 99,
+                It.IsAny<CollectAgentRunRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentRunResultsResult { Success = true, AgentSuccess = true, PrNumber = 7, CredentialSource = "installation" });
 
         var result = await _sut.CollectResultsAsync(_tenant, Repo, 99, new CollectAgentRunRequest { CorrelationId = "wf-1" });
@@ -330,7 +432,9 @@ public class AgentDispatchMediationServiceTests
     public async Task ResolveInstallation_Allowed_ReturnsId_NoEvent()
     {
         Allow();
-        _actions.DefaultInstallationId = 4242;
+        _installations
+            .Setup(i => i.GetByRepoFullNameAsync(Repo))
+            .ReturnsAsync(new GitHubInstallation { InstallationId = 4242 });
 
         var result = await _sut.ResolveInstallationAsync(_tenant, Repo, "wf-1");
 
