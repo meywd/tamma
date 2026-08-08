@@ -769,6 +769,10 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Name = "Wait for PR Merged",
             Repository = new Input<string>(ctx => repository.Get(ctx)),
             PRNumber = new Input<int>(ctx => prNumber.Get(ctx)),
+            // Epic 31 P4 M2 — the bookmark name folds tenant + repo in (the
+            // merge-approval gate's SECURITY C2 convention) so the webhook
+            // resume seam is tenant-scoped.
+            TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
             MergeSha = new Output<string?>(mergeSha),
         };
         waitForMerged.SetDisplayText("Wait for PR Merged");

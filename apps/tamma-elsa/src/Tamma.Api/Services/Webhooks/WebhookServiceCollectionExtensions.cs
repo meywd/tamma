@@ -95,6 +95,21 @@ public static class WebhookServiceCollectionExtensions
         services.AddSingleton<IWebhookHandler>(sp => BuildCiWakeHandler(
             sp, PlatformKind.GitLab, "pipeline"));
 
+        // (c) Epic 31 P4 M2 (DG-6) — merged-PR → WaitForPRMerged resume.
+        //     Webhook resume is now the PRIMARY merge-confirmation source;
+        //     the 12h TimedOut SLA stays as the exception path. GitHub and
+        //     Gitea/Forgejo signal a merge as pull_request.closed with
+        //     pull_request.merged=true (the handler filters); GitLab ships a
+        //     first-class merge_request action=merge.
+        services.AddSingleton<IWebhookHandler>(sp => BuildPrMergedHandler(
+            sp, PlatformKind.GitHub, "pull_request.closed"));
+        services.AddSingleton<IWebhookHandler>(sp => BuildPrMergedHandler(
+            sp, PlatformKind.Gitea, "pull_request.closed"));
+        services.AddSingleton<IWebhookHandler>(sp => BuildPrMergedHandler(
+            sp, PlatformKind.Forgejo, "pull_request.closed"));
+        services.AddSingleton<IWebhookHandler>(sp => BuildPrMergedHandler(
+            sp, PlatformKind.GitLab, "merge_request.merge"));
+
         // ── Dispatcher + handler registry ──
         // Built as a factory so every registered IWebhookHandler lands in the
         // dispatcher's registry at first resolve — no hosted service needed
@@ -129,4 +144,13 @@ public static class WebhookServiceCollectionExtensions
             kind,
             pattern,
             sp.GetRequiredService<ILogger<CiRunCompletionWebhookHandler>>());
+
+    private static PrMergedWebhookHandler BuildPrMergedHandler(
+        IServiceProvider sp, PlatformKind kind, string pattern) =>
+        new(
+            sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            kind,
+            pattern,
+            sp.GetRequiredService<ILogger<PrMergedWebhookHandler>>());
 }

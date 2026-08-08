@@ -583,6 +583,22 @@ app.MapPost("/elsa/api/ci/waits/resume",
     Tamma.ElsaServer.Endpoints.CiWaitEndpoints.Resume)
     .RequireAuthorization();
 
+// Epic 31 P4 M2 (DG-6) — merged-PR webhook resume: Tamma.Api's platform
+// webhook handlers (GitHub pull_request.closed(merged=true), Gitea/Forgejo
+// equivalent, GitLab merge_request action=merge) forward here to resume the
+// cycle's WaitForPRMerged wait on the Merged edge with the mergeSha. The 12h
+// TimedOut SLA stays as the exception path. Bookmark lookup is tenant+repo-
+// qualified (the merge-approval C1/C2 convention) with a legacy unqualified
+// fallback bounded by the 12h SLA transition window; ambiguity refuses (409).
+// Same engine-control-surface / RequireAuthorization rationale — and the same
+// ungoverned-route accounting — as the merge/deploy/CI resume seams: this is
+// engine-internal surface reached only over the authenticated Tamma.Api→engine
+// hop, outside the Tamma.Api host the coverage sweep pins (its declared
+// engine-HTTP blind spot, GovernanceHostFixture docs; accounted 2026-08-08).
+app.MapPost("/elsa/api/adl/pr-merged/resume",
+    Tamma.ElsaServer.Endpoints.PrMergedResumeEndpoint.Resume)
+    .RequireAuthorization();
+
 app.UseSerilogRequestLogging();
 
 Log.Information("Tamma ELSA Server starting up...");

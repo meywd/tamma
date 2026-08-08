@@ -12,8 +12,19 @@ namespace Tamma.Activities.ADL;
 
 /// <summary>
 /// Bookmark-based activity that blocks until a PR is merged — OR a durable SLA deadline
-/// elapses, whichever happens first. Resumed by a GitHub webhook (pull_request.closed with
-/// merged=true) → <c>Merged</c>; or by the durable SLA timer → <c>TimedOut</c>.
+/// elapses, whichever happens first. Resumed by a merged-PR webhook (GitHub
+/// <c>pull_request.closed(merged=true)</c>, Gitea/Forgejo equivalent, GitLab
+/// <c>merge_request action=merge</c>) via the engine-side <c>PrMergedResumeEndpoint</c>
+/// → <c>Merged</c>; or by the durable SLA timer → <c>TimedOut</c>.
+///
+/// <para><b>Epic 31 P4 M2 (DG-6) — bookmark naming.</b> The bookmark now carries a
+/// tenant + repo qualifier (<see cref="BookmarkName"/>:
+/// <c>pr-merged-{tenant}-{repo}-{n}</c>, the <c>WaitForMergeApprovalActivity</c>
+/// SECURITY C2 convention) so two tenants — or two repos — with the same PR number
+/// can never resume each other's wait. Rollout-safe: NEW suspensions register only
+/// the qualified name; the resume endpoint matches BOTH the qualified name and the
+/// legacy <c>pr-merged-{n}</c> (<see cref="LegacyBookmarkName"/>) during the
+/// transition so instances suspended before this deploy stay resumable.</para>
 ///
 /// <para><b>Durable merge SLA timeout (SingleIssueCycle.md §Missing #6 — the tracked
 /// follow-up; landed 2026-07-02).</b> The merge is approved + performed synchronously inside
@@ -61,6 +72,14 @@ public class WaitForPRMergedActivity : TammaOutcomeActivity
     [Input(Description = "PR number")]
     public Input<int> PRNumber { get; set; } = default!;
 
+    /// <summary>
+    /// Epic 31 P4 M2 — owning tenant, folded into the bookmark name so the
+    /// resume seam is tenant-scoped. Optional: single-user mode leaves it
+    /// empty and the name carries the stable "none" segment.
+    /// </summary>
+    [Input(Description = "Owning tenant id (folded into the bookmark name; empty in single-user mode)")]
+    public Input<string?> TenantId { get; set; } = default!;
+
     [Output(Description = "Merge commit SHA")]
     public Output<string?> MergeSha { get; set; } = default!;
 
@@ -73,15 +92,41 @@ public class WaitForPRMergedActivity : TammaOutcomeActivity
         _configuration = configuration;
     }
 
+    /// <summary>
+    /// Canonical tenant+repo-qualified bookmark name (Epic 31 P4 M2). BOTH the
+    /// suspend side (this activity) and the resume side
+    /// (<c>PrMergedResumeEndpoint</c>) MUST call this single builder so the
+    /// names match byte-for-byte. Segments are normalized via
+    /// <see cref="WaitForMergeApprovalActivity.NormalizeSegment"/> — the same
+    /// transform the merge-approval gate uses.
+    /// </summary>
+    public static string BookmarkName(string? tenantId, string? repository, int prNumber)
+    {
+        var tenant = WaitForMergeApprovalActivity.NormalizeSegment(tenantId);
+        var repo = WaitForMergeApprovalActivity.NormalizeSegment(repository);
+        return $"pr-merged-{tenant}-{repo}-{prNumber}";
+    }
+
+    /// <summary>
+    /// Pre-P4 bookmark name. NEW suspensions never register it; the resume
+    /// endpoint still matches it so instances suspended before the deploy stay
+    /// resumable during the transition window. Delete once no pre-P4 instance
+    /// can still be suspended (12h SLA bounds that window).
+    /// </summary>
+    public static string LegacyBookmarkName(int prNumber) => $"pr-merged-{prNumber}";
+
     protected override Task RunAsync(ActivityExecutionContext context)
     {
         var prNumber = PRNumber.Get(context);
+        var tenantId = TenantId.GetOrDefault(context);
+        var repository = Repository.GetOrDefault(context);
 
-        // 1) Merge bookmark — resumed by the GitHub pull_request.closed(merged=true) webhook.
+        // 1) Merge bookmark — resumed by the merged-PR webhook through the
+        //    engine-side PrMergedResumeEndpoint (tenant+repo-qualified name).
         context.CreateBookmark(new CreateBookmarkArgs
         {
             Callback = OnMerged,
-            BookmarkName = $"pr-merged-{prNumber}",
+            BookmarkName = BookmarkName(tenantId, repository, prNumber),
             IncludeActivityInstanceId = false,
         });
 

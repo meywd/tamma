@@ -47,10 +47,10 @@ public class WebhookHandlerTests
         using var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<IWebhookEventDispatcher>();
 
-        // 2 GitHub installation patterns + 4 CI-wake handlers
-        // (GitHub, Gitea, Forgejo, GitLab).
-        dispatcher.HandlerCount.Should().Be(6,
-            "P4 M1 registers the first production handlers; before this milestone "
+        // 2 GitHub installation patterns + 4 CI-wake handlers + 4 merged-PR
+        // handlers (GitHub, Gitea, Forgejo, GitLab).
+        dispatcher.HandlerCount.Should().Be(10,
+            "P4 M1/M2 register the production handlers; before this milestone "
             + "the dispatcher had ZERO and verified deliveries were dropped");
     }
 
@@ -75,6 +75,10 @@ public class WebhookHandlerTests
             (PlatformKind.Gitea, "workflow_run"),
             (PlatformKind.Forgejo, "workflow_run"),
             (PlatformKind.GitLab, "pipeline"),
+            (PlatformKind.GitHub, "pull_request.closed"),
+            (PlatformKind.Gitea, "pull_request.closed"),
+            (PlatformKind.Forgejo, "pull_request.closed"),
+            (PlatformKind.GitLab, "merge_request.merge"),
         });
     }
 
