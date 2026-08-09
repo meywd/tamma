@@ -70,6 +70,21 @@ internal sealed class GitLabMergeRequest
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public string? Sha { get; set; }
+
+    /// <summary>
+    /// Epic 31 P6 M1 — base/start/head SHAs of the MR's latest diff
+    /// version (single-MR GET). Empty right after MR creation (populates
+    /// asynchronously per the API doc) — callers must tolerate null.
+    /// </summary>
+    public GitLabDiffRefs? DiffRefs { get; set; }
+}
+
+/// <summary>Wire shape of <c>merge_request.diff_refs</c>.</summary>
+internal sealed class GitLabDiffRefs
+{
+    public string? BaseSha { get; set; }
+    public string? StartSha { get; set; }
+    public string? HeadSha { get; set; }
 }
 
 internal sealed class GitLabUser

@@ -225,6 +225,23 @@ public class PlatformCapabilityContractTests
             () => handler.Count);
     }
 
+    private static DriverCase GitLabStyleCase(
+        string name, IReadOnlySet<PlatformCapability> capabilities, Version? detectedVersion)
+    {
+        var handler = new CountingAlways500Handler();
+        return new DriverCase(
+            name,
+            capabilities,
+            new GitLabPlatformClient(
+                new GitLabHttpClient(
+                    new HttpClient(handler),
+                    new GitLabAuth.PersonalAccessToken("test-token"),
+                    "https://gitlab.example"),
+                NullLogger<GitLabPlatformClient>.Instance,
+                detectedVersion),
+            () => handler.Count);
+    }
+
     private static IEnumerable<DriverCase> DriverCases()
     {
         yield return GitHubCase();
@@ -246,17 +263,18 @@ public class PlatformCapabilityContractTests
         yield return GiteaStyleCase(
             "Gitea (version unknown)", GiteaPlatformDriver.ComputeCapabilities(null), null);
 
-        var gitlabHandler = new CountingAlways500Handler();
-        yield return new DriverCase(
-            "GitLab",
-            PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitLab),
-            new GitLabPlatformClient(
-                new GitLabHttpClient(
-                    new HttpClient(gitlabHandler),
-                    new GitLabAuth.PersonalAccessToken("test-token"),
-                    "https://gitlab.example"),
-                NullLogger<GitLabPlatformClient>.Instance),
-            () => gitlabHandler.Count);
+        // Epic 31 P6 M1 — the GitLab driver is version-gated like Gitea's:
+        // ComputeCapabilities + the client take the SAME detected version, so
+        // flag and verb reality stay the paired product the contract pins.
+        // 16.11 ≥ the 13.9 lifecycle floor — the fullest capability set.
+        yield return GitLabStyleCase(
+            "GitLab", GitLabPlatformDriver.ComputeCapabilities(new Version(16, 11)), new Version(16, 11));
+
+        // The version-narrowed shape: a GitLab whose version probe FAILED must
+        // not advertise PrLifecycle and its verbs must answer the typed
+        // refusal without touching the network.
+        yield return GitLabStyleCase(
+            "GitLab (version unknown)", GitLabPlatformDriver.ComputeCapabilities(null), null);
 
         yield return new DriverCase(
             "Null",

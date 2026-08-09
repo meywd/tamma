@@ -101,14 +101,18 @@ public sealed class PlatformKindCapabilityMatrixTests
     {
         // Story 31-13 shipped GitHub; Epic 31 P5 M1 made Gitea real (PATCH
         // state / requested_reviewers / issue-side labels / WIP-title draft
-        // toggle) and Forgejo rides the Gitea shim. GitLab is P6; the
-        // deferred kinds (Bitbucket, AzureDevOps) have no driver at all.
-        // The driver-level narrowing (version floor 1.14 on Gitea/Forgejo)
-        // is asserted in the drivers' own ComputeCapabilities tests; the
-        // matrix rows here are the optimistic per-kind defaults.
+        // toggle) with Forgejo riding the Gitea shim; Epic 31 P6 M1 made
+        // GitLab real (state_event / reviewer_ids with in-driver username
+        // resolution / add_labels+remove_labels / "Draft: " title toggle).
+        // Only the deferred kinds (Bitbucket, AzureDevOps) have no driver.
+        // The driver-level narrowing (version floors: 1.14 on Gitea/Forgejo,
+        // 13.9 on GitLab) is asserted in the drivers' own
+        // ComputeCapabilities tests; the matrix rows here are the
+        // optimistic per-kind defaults.
         var advertising = new[]
         {
             PlatformKind.GitHub, PlatformKind.Gitea, PlatformKind.Forgejo,
+            PlatformKind.GitLab,
         };
 
         foreach (var kind in advertising)

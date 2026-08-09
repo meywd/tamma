@@ -35,12 +35,24 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
     private readonly GitLabHttpClient _http;
     private readonly ILogger<GitLabPlatformClient> _logger;
 
-    public GitLabPlatformClient(GitLabHttpClient http, ILogger<GitLabPlatformClient> logger)
+    /// <summary>Epic 31 P6 M1 — true when the factory-detected version is at
+    /// or above <see cref="GitLabPlatformDriver.MinimumPrLifecycleVersion"/>.
+    /// Kept in lock-step with <see cref="GitLabPlatformDriver.ComputeCapabilities"/>
+    /// (pinned by the capability contract test): below the floor — or when
+    /// the version probe failed — the six lifecycle verbs answer the typed
+    /// <c>capability_unsupported</c> refusal without touching the network.</summary>
+    private readonly bool _prLifecycleLive;
+
+    public GitLabPlatformClient(
+        GitLabHttpClient http,
+        ILogger<GitLabPlatformClient> logger,
+        Version? detectedVersion = null)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(logger);
         _http = http;
         _logger = logger;
+        _prLifecycleLive = GitLabPlatformDriver.SupportsPrLifecycle(detectedVersion);
     }
 
     /// <summary>
@@ -284,16 +296,32 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
         UpdatePullRequestRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var pid = EncodeProjectRef(request.Owner, request.RepoName);
 
         var body = new Dictionary<string, object?>();
         if (request.Title is not null) body["title"] = request.Title;
         if (request.Body is not null) body["description"] = request.Body;
 
+        return await PutMergeRequestAsync(
+            request.Owner, request.RepoName, request.PrNumber, body, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Shared PUT against the update-MR endpoint
+    /// (<c>PUT /projects/:id/merge_requests/:iid</c>) mapping the response
+    /// through <see cref="MrToPullRequestMapper"/>. All lifecycle verbs and
+    /// <see cref="UpdatePullRequestAsync"/> funnel through here.
+    /// </summary>
+    private async Task<PlatformResult<PullRequest>> PutMergeRequestAsync(
+        string owner, string repoName, string prNumber, object body, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prNumber);
+        var pid = EncodeProjectRef(owner, repoName);
         try
         {
             var (resp, mr) = await _http.PutJsonAsync<object, GitLabMergeRequest>(
-                $"projects/{pid}/merge_requests/{request.PrNumber}", body, ct).ConfigureAwait(false);
+                $"projects/{pid}/merge_requests/{prNumber}", body, ct).ConfigureAwait(false);
             using (resp)
             {
                 if (!resp.Response.IsSuccessStatusCode)
@@ -334,7 +362,7 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
         {
             source_branch = request.SourceBranch,
             target_branch = request.TargetBranch,
-            title = request.IsDraft ? $"Draft: {request.Title}" : request.Title,
+            title = request.IsDraft ? GitLabDraftTitle.AddDraftPrefix(request.Title) : request.Title,
             description = request.Body,
         };
         try
@@ -431,14 +459,48 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
     {
         ArgumentNullException.ThrowIfNull(request);
         var pid = EncodeProjectRef(request.Owner, request.RepoName);
+
+        // Epic 31 P6 M1 hardening — a discussion position needs the MR's REAL
+        // base/start/head SHAs. The old base=start=head=CommitSha shape only
+        // holds for a single-commit MR whose head IS that commit; on a
+        // multi-commit MR GitLab answers 400 ("must be a valid sha" line-code
+        // check fails). Fetch the MR's diff_refs (single-MR GET) and use them;
+        // fall back to the caller's CommitSha only when diff_refs is absent —
+        // the doc says it is "empty when the merge request is created and
+        // populates asynchronously", so a comment raced against a brand-new
+        // MR keeps the old best-effort behavior instead of failing the fetch.
+        var baseSha = request.CommitSha;
+        var startSha = request.CommitSha;
+        var headSha = request.CommitSha;
+        try
+        {
+            var (mrResp, mr) = await _http.GetJsonAsync<GitLabMergeRequest>(
+                $"projects/{pid}/merge_requests/{request.PrNumber}", ct).ConfigureAwait(false);
+            using (mrResp)
+            {
+                if (mrResp.Response.IsSuccessStatusCode
+                    && mr?.DiffRefs is { BaseSha: not null, HeadSha: not null } refs)
+                {
+                    baseSha = refs.BaseSha;
+                    startSha = refs.StartSha ?? refs.BaseSha;
+                    headSha = refs.HeadSha;
+                }
+            }
+        }
+        catch (HttpRequestException)
+        {
+            // Positioning lookup is best-effort; the discussion POST below
+            // surfaces the honest failure if the platform is really down.
+        }
+
         var body = new
         {
             body = request.Body,
             position = new
             {
-                base_sha = request.CommitSha,
-                start_sha = request.CommitSha,
-                head_sha = request.CommitSha,
+                base_sha = baseSha,
+                start_sha = startSha,
+                head_sha = headSha,
                 position_type = "text",
                 new_path = request.Path,
                 old_path = request.Path,
@@ -520,49 +582,242 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
         }
     }
 
-    // Story 31-13 — GitLab does not yet carry the PrLifecycle capability, so the
-    // six PR lifecycle verbs return capability_unsupported per the interface
-    // no-throw contract. Wiring them for real is 31-4 follow-up work, recorded via
-    // the absent capability flag.
+    // ================================================================
+    // Story 31-13 verbs, made REAL in Epic 31 P6 M1. Below the version
+    // floor (GitLabPlatformDriver.MinimumPrLifecycleVersion, incl. a
+    // failed probe) the verbs answer the typed capability_unsupported
+    // refusal without touching the network — in lock-step with the
+    // driver's ComputeCapabilities (pinned by the capability contract
+    // test).
+    // ================================================================
+
     private static Task<PlatformResult<PullRequest>> PrLifecycleUnsupported() =>
         Task.FromResult(PlatformResult<PullRequest>.FromError(
             new PlatformError.InvalidRequest("capability_unsupported",
-                "the GitLab driver does not implement PR lifecycle verbs yet (31-4)")));
+                "this GitLab instance is below the PR-lifecycle version floor "
+                + $"({GitLabPlatformDriver.MinimumPrLifecycleVersion}) or its version could not be detected")));
 
+    /// <inheritdoc />
     public Task<PlatformResult<PullRequest>> ClosePullRequestAsync(
         string owner, string repoName, string prNumber, CancellationToken ct = default) =>
-        PrLifecycleUnsupported();
+        _prLifecycleLive
+            ? PutMergeRequestAsync(owner, repoName, prNumber, new { state_event = "close" }, ct)
+            : PrLifecycleUnsupported();
 
+    /// <inheritdoc />
     public Task<PlatformResult<PullRequest>> ReopenPullRequestAsync(
         string owner, string repoName, string prNumber, CancellationToken ct = default) =>
-        PrLifecycleUnsupported();
+        _prLifecycleLive
+            ? PutMergeRequestAsync(owner, repoName, prNumber, new { state_event = "reopen" }, ct)
+            : PrLifecycleUnsupported();
 
-    public Task<PlatformResult<PullRequest>> RequestReviewersAsync(
-        RequestReviewersRequest request, CancellationToken ct = default) =>
-        PrLifecycleUnsupported();
+    /// <inheritdoc />
+    public async Task<PlatformResult<PullRequest>> RequestReviewersAsync(
+        RequestReviewersRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!_prLifecycleLive) return await PrLifecycleUnsupported().ConfigureAwait(false);
 
-    public Task<PlatformResult<PullRequest>> AddPullRequestLabelsAsync(
-        AddPullRequestLabelsRequest request, CancellationToken ct = default) =>
-        PrLifecycleUnsupported();
+        // GitLab takes numeric reviewer_ids, not usernames — the username→id
+        // resolver lives HERE, inside the driver (DG-3 owner decision). An
+        // unresolvable username answers the typed `reviewer_unresolvable`
+        // InvalidRequest, which mediation's DG-3 alternative step classifies
+        // into skip-with-label. Team reviewers have no GitLab equivalent on
+        // this endpoint (group review assignment is a Premium feature on a
+        // different surface) and are ignored.
+        var ids = new List<long>();
+        var unresolved = new List<string>();
+        foreach (var username in request.Reviewers
+                     .Where(r => !string.IsNullOrWhiteSpace(r))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var resolved = await TryResolveUserIdAsync(username, ct).ConfigureAwait(false);
+            if (resolved is not PlatformResult<long?>.Ok ok)
+            {
+                return resolved switch
+                {
+                    PlatformResult<long?>.Failed failed =>
+                        PlatformResult<PullRequest>.FromError(failed.Error),
+                    _ => PlatformResult<PullRequest>.FromServiceUnavailable(),
+                };
+            }
+            if (ok.Value is { } id) ids.Add(id);
+            else unresolved.Add(username);
+        }
 
-    public Task<PlatformResult<PullRequest>> RemovePullRequestLabelAsync(
-        string owner, string repoName, string prNumber, string label, CancellationToken ct = default) =>
-        PrLifecycleUnsupported();
+        if (unresolved.Count > 0)
+        {
+            return PlatformResult<PullRequest>.FromError(
+                new PlatformError.InvalidRequest(
+                    "reviewer_unresolvable",
+                    $"username(s) not resolvable on this GitLab instance: {string.Join(", ", unresolved)}"));
+        }
+        if (ids.Count == 0)
+        {
+            return PlatformResult<PullRequest>.FromError(
+                new PlatformError.InvalidRequest(
+                    "reviewer_unresolvable", "no resolvable reviewers were supplied"));
+        }
 
-    public Task<PlatformResult<PullRequest>> SetDraftAsync(
-        SetPullRequestDraftRequest request, CancellationToken ct = default) =>
-        PrLifecycleUnsupported();
+        return await PutMergeRequestAsync(
+            request.Owner, request.RepoName, request.PrNumber,
+            new { reviewer_ids = ids }, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<PullRequest>> AddPullRequestLabelsAsync(
+        AddPullRequestLabelsRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!_prLifecycleLive) return await PrLifecycleUnsupported().ConfigureAwait(false);
+
+        // `add_labels` is comma-separated label NAMES and — per the API doc —
+        // auto-creates missing project labels (GitHub-parity for free: the
+        // loop's tamma-* labels work on a fresh project). Caveat recorded:
+        // a label name containing a comma cannot be expressed through this
+        // wire format (GitLab would split it); such names are rejected here
+        // rather than silently split into two labels.
+        var names = request.Labels
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (names.Count == 0)
+        {
+            return await GetPullRequestAsync(
+                request.Owner, request.RepoName, request.PrNumber, ct).ConfigureAwait(false);
+        }
+        var withComma = names.Where(n => n.Contains(',', StringComparison.Ordinal)).ToList();
+        if (withComma.Count > 0)
+        {
+            return PlatformResult<PullRequest>.FromError(
+                new PlatformError.InvalidRequest(
+                    "label_name_unsupported",
+                    "GitLab's comma-separated add_labels wire format cannot express label "
+                    + $"name(s): {string.Join(" | ", withComma)}"));
+        }
+
+        return await PutMergeRequestAsync(
+            request.Owner, request.RepoName, request.PrNumber,
+            new { add_labels = string.Join(",", names) }, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<PullRequest>> RemovePullRequestLabelAsync(
+        string owner, string repoName, string prNumber, string label, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
+        if (!_prLifecycleLive) return await PrLifecycleUnsupported().ConfigureAwait(false);
+
+        // `remove_labels` is idempotent on GitLab's side — removing a label
+        // the MR doesn't carry (or that doesn't exist) succeeds and returns
+        // the MR unchanged, matching the live GitHub path's posture.
+        if (label.Contains(',', StringComparison.Ordinal))
+        {
+            return PlatformResult<PullRequest>.FromError(
+                new PlatformError.InvalidRequest(
+                    "label_name_unsupported",
+                    $"GitLab's comma-separated remove_labels wire format cannot express label name: {label}"));
+        }
+
+        return await PutMergeRequestAsync(
+            owner, repoName, prNumber, new { remove_labels = label }, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<PullRequest>> SetDraftAsync(
+        SetPullRequestDraftRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!_prLifecycleLive) return await PrLifecycleUnsupported().ConfigureAwait(false);
+
+        // Research (P6 M1, 2026-08-09): the update-MR API has NO draft field —
+        // draft is the title prefix ("Draft: " since 13.2; legacy WIP forms
+        // readable until 14.8, see GitLabDraftTitle). So the toggle is a
+        // title edit. Idempotent: a PR already in the requested state is
+        // returned unchanged (no PUT).
+        var pid = EncodeProjectRef(request.Owner, request.RepoName);
+        GitLabMergeRequest? dto;
+        try
+        {
+            var (resp, mr) = await _http.GetJsonAsync<GitLabMergeRequest>(
+                $"projects/{pid}/merge_requests/{request.PrNumber}", ct).ConfigureAwait(false);
+            using (resp)
+            {
+                if (!resp.Response.IsSuccessStatusCode)
+                {
+                    return PlatformResult<PullRequest>.FromError(
+                        GitLabErrorMapper.Map(resp.Response.StatusCode, resp.Body, resp.RetryAfter));
+                }
+                if (mr is null)
+                {
+                    return PlatformResult<PullRequest>.FromError(new PlatformError.NotFound());
+                }
+                dto = mr;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            return PlatformResult<PullRequest>.FromError(new PlatformError.ServiceUnavailable());
+        }
+
+        var title = dto.Title ?? string.Empty;
+        var isDraftNow = dto.Draft || dto.WorkInProgress || GitLabDraftTitle.HasDraftPrefix(title);
+        if (isDraftNow == request.Draft)
+        {
+            return PlatformResult<PullRequest>.FromOk(MrToPullRequestMapper.Map(dto));
+        }
+
+        var newTitle = request.Draft
+            ? GitLabDraftTitle.AddDraftPrefix(title)
+            : GitLabDraftTitle.StripDraftPrefix(title);
+        return await PutMergeRequestAsync(
+            request.Owner, request.RepoName, request.PrNumber,
+            new { title = newTitle }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Username→id lookup via <c>GET /users?username=</c> (exact-match
+    /// filter per the users API). Ok(null) = the username does not exist;
+    /// Failed = the lookup itself was rejected (auth, rate limit, …).
+    /// </summary>
+    private async Task<PlatformResult<long?>> TryResolveUserIdAsync(
+        string username, CancellationToken ct)
+    {
+        try
+        {
+            var (resp, users) = await _http.GetJsonAsync<List<GitLabUser>>(
+                $"users?username={Uri.EscapeDataString(username)}", ct).ConfigureAwait(false);
+            using (resp)
+            {
+                if (!resp.Response.IsSuccessStatusCode)
+                {
+                    return PlatformResult<long?>.FromError(
+                        GitLabErrorMapper.Map(resp.Response.StatusCode, resp.Body, resp.RetryAfter));
+                }
+                var match = users?.FirstOrDefault(u =>
+                    string.Equals(u.Username, username, StringComparison.OrdinalIgnoreCase));
+                return PlatformResult<long?>.FromOk(match?.Id);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            return PlatformResult<long?>.FromError(new PlatformError.ServiceUnavailable());
+        }
+    }
 
     // Epic 31 P1 (stage 1) — the loop verbs (issue lifecycle, releases,
     // review-comment listing, commit reads). GitLab's API supports all of them,
     // but the driver does not implement them yet, records that via the absent
     // IssueLifecycle / Releases / PrReviewCommentRead / CommitReads capability
     // flags, and answers with typed capability_unsupported per the interface
-    // no-throw contract. Real wiring is P6 (GitLab) work.
+    // no-throw contract. P6 scoped the GitLab driver to the six PR lifecycle
+    // verbs + review-comment/pipeline hardening (per the execution plan);
+    // the loop verbs stay typed-unsupported and are a recorded post-epic
+    // follow-up (the DG-mediated degradation paths keep cycles alive).
     private static Task<PlatformResult<T>> LoopVerbUnsupported<T>(string capability) =>
         Task.FromResult(PlatformResult<T>.FromError(
             new PlatformError.InvalidRequest("capability_unsupported",
-                $"the GitLab driver does not implement {capability} verbs yet (Epic 31 P6)")));
+                $"the GitLab driver does not implement {capability} verbs (post-Epic-31 follow-up)")));
 
     public Task<PlatformResult<Issue>> CloseIssueAsync(
         string owner, string repoName, string issueNumber, string? comment = null,
@@ -595,17 +850,18 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
         LoopVerbUnsupported<IReadOnlyList<PrFile>>("commit-read");
 
     // ── Epic 31 P3 (seam 5) — the engine-callback verbs stay typed-unsupported
-    //    on GitLab until P6 wires the driver end-to-end (issues use iids + a
-    //    different label model); the security-alert surface has no GitLab CE
-    //    equivalent of the abstraction's dependabot/code-scanning split. ──
+    //    on GitLab (issues use iids + a different label model); P6 scoped the
+    //    driver to the PR lifecycle family, so these are a recorded post-epic
+    //    follow-up. The security-alert surface has no GitLab CE equivalent of
+    //    the abstraction's dependabot/code-scanning split. ──
 
     public Task<PlatformResult<IReadOnlyList<Issue>>> ListIssuesAsync(
         ListIssuesRequest request, CancellationToken ct = default) =>
-        LoopVerbUnsupported<IReadOnlyList<Issue>>("issue listing (P6)");
+        LoopVerbUnsupported<IReadOnlyList<Issue>>("issue listing");
 
     public Task<PlatformResult<Issue>> CreateIssueAsync(
         Tamma.Platforms.Abstractions.Models.CreateIssueRequest request, CancellationToken ct = default) =>
-        LoopVerbUnsupported<Issue>("issue creation (P6)");
+        LoopVerbUnsupported<Issue>("issue creation");
 
     public Task<PlatformResult<SecurityAlerts>> ListSecurityAlertsAsync(
         string owner, string repoName, string alertType, CancellationToken ct = default) =>

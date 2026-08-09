@@ -126,4 +126,41 @@ public sealed class MrToPullRequestMapperTests
         add.Should().Be(0);
         del.Should().Be(0);
     }
+
+    // ── Epic 31 P6 M1 — draft inferred from the title prefix when the
+    //    booleans are absent (older instances / thin webhook payloads). ──
+
+    [TestCase("Draft: fix the thing", true)]
+    [TestCase("[Draft] fix the thing", true)]
+    [TestCase("(Draft) fix the thing", true)]
+    [TestCase("WIP: fix the thing", true)]
+    [TestCase("[WIP] fix the thing", true)]
+    [TestCase("draft: lower-case works too", true)]
+    [TestCase("fix the thing", false)]
+    [TestCase("Undrafted: not a draft marker", false)]
+    [TestCase("Drafting a fix", false)]
+    public void Map_infers_IsDraft_from_title_prefix(string title, bool expected)
+    {
+        var mr = new GitLabMergeRequest
+        {
+            Iid = 7,
+            Title = title,
+            State = "opened",
+            Draft = false,
+            WorkInProgress = false,
+        };
+        MrToPullRequestMapper.Map(mr).IsDraft.Should().Be(expected);
+    }
+
+    [Test]
+    public void DraftTitle_helpers_add_and_strip_prefixes()
+    {
+        GitLabDraftTitle.AddDraftPrefix("fix").Should().Be("Draft: fix");
+        GitLabDraftTitle.AddDraftPrefix("Draft: fix").Should().Be("Draft: fix",
+            "adding to an already-drafted title is idempotent");
+        GitLabDraftTitle.StripDraftPrefix("Draft: fix").Should().Be("fix");
+        GitLabDraftTitle.StripDraftPrefix("Draft: [WIP] fix").Should().Be("fix",
+            "stacked prefixes strip in one call");
+        GitLabDraftTitle.StripDraftPrefix("fix").Should().Be("fix");
+    }
 }

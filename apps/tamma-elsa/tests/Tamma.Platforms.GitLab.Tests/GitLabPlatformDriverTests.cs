@@ -22,14 +22,49 @@ public sealed class GitLabPlatformDriverTests
     }
 
     [Test]
-    public void Driver_capabilities_match_matrix_defaults()
+    public void Driver_capabilities_match_matrix_defaults_at_or_above_the_lifecycle_floor()
     {
         var (client, _) = TestFactory.BuildClient();
         var (actions, _) = TestFactory.BuildActions();
-        var driver = new GitLabPlatformDriver(client, actions);
+        var driver = new GitLabPlatformDriver(
+            client, actions, detectedVersion: new Version(16, 11));
 
         var defaults = PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitLab);
-        driver.Capabilities.Should().BeEquivalentTo(defaults);
+        driver.Capabilities.Should().BeEquivalentTo(defaults,
+            "16.11 is above the 13.9 PR-lifecycle floor so nothing is narrowed away");
+        driver.DetectedVersion.Should().Be(new Version(16, 11));
+    }
+
+    [Test]
+    public void Driver_narrows_PrLifecycle_below_the_floor_or_when_probe_failed()
+    {
+        // Epic 31 P6 M1 — the version gate, both narrowed shapes.
+        GitLabPlatformDriver.ComputeCapabilities(new Version(13, 8))
+            .Should().NotContain(PlatformCapability.PrLifecycle,
+                "13.8 shipped reviewer_ids but the update endpoint ignored it until 13.9");
+        GitLabPlatformDriver.ComputeCapabilities(null)
+            .Should().NotContain(PlatformCapability.PrLifecycle,
+                "a failed version probe is conservatively unsupported");
+        GitLabPlatformDriver.ComputeCapabilities(new Version(13, 9))
+            .Should().Contain(PlatformCapability.PrLifecycle, "13.9 is the floor");
+
+        var (client, _) = TestFactory.BuildClient();
+        var (actions, _) = TestFactory.BuildActions();
+        var driver = new GitLabPlatformDriver(client, actions);
+        driver.Capabilities.Should().NotContain(PlatformCapability.PrLifecycle,
+            "no detected version = the conservative set");
+        driver.DetectedVersion.Should().BeNull();
+    }
+
+    [Test]
+    public void ParseVersion_handles_edition_and_prerelease_suffixes()
+    {
+        GitLabPlatformDriverFactory.ParseVersion("16.11.1-ee").Should().Be(new Version(16, 11, 1));
+        GitLabPlatformDriverFactory.ParseVersion("17.0.0").Should().Be(new Version(17, 0, 0));
+        GitLabPlatformDriverFactory.ParseVersion("16.10.0-pre+abc").Should().Be(new Version(16, 10, 0));
+        GitLabPlatformDriverFactory.ParseVersion("").Should().BeNull();
+        GitLabPlatformDriverFactory.ParseVersion("not-a-version").Should().BeNull();
+        GitLabPlatformDriverFactory.ParseVersion(null).Should().BeNull();
     }
 
     [Test]

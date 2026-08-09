@@ -16,7 +16,11 @@ namespace Tamma.Platforms.GitLab.Mapping;
 ///         have a separate concept.</item>
 ///   <item><b>Draft flag</b>: GitLab uses both <c>draft</c> (newer) and
 ///         <c>work_in_progress</c> (legacy). Either being true sets
-///         <see cref="PullRequest.IsDraft"/>.</item>
+///         <see cref="PullRequest.IsDraft"/>; Epic 31 P6 M1 also infers
+///         draft from the <c>Draft:</c>/<c>[Draft]</c>/<c>(Draft)</c> (and
+///         legacy <c>WIP</c>) title prefixes via
+///         <see cref="GitLabDraftTitle"/> for payloads that omit the
+///         booleans.</item>
 ///   <item><b>Number</b>: GitLab MRs have two ids — <c>id</c>
 ///         (global) and <c>iid</c> (per-project). Callers always
 ///         address by <c>iid</c>, so the mapper surfaces that.</item>
@@ -35,7 +39,7 @@ internal static class MrToPullRequestMapper
             SourceBranch: mr.SourceBranch ?? string.Empty,
             TargetBranch: mr.TargetBranch ?? string.Empty,
             State: MapState(mr.State),
-            IsDraft: mr.Draft || mr.WorkInProgress,
+            IsDraft: mr.Draft || mr.WorkInProgress || GitLabDraftTitle.HasDraftPrefix(mr.Title),
             HtmlUrl: mr.WebUrl ?? string.Empty,
             AuthorLogin: mr.Author?.Username ?? mr.Author?.Name ?? string.Empty,
             CreatedAt: mr.CreatedAt,

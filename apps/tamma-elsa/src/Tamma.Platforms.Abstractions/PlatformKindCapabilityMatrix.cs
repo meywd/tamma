@@ -102,6 +102,16 @@ public static class PlatformKindCapabilityMatrix
                 PlatformCapability.PrFileReview,      // MR diff notes
                 PlatformCapability.WebhookStaticToken,
                 PlatformCapability.ListAccessibleRepos,
+                // Epic 31 P6 M1 — the GitLab driver implements the six 31-13
+                // lifecycle verbs for real (state_event close/reopen,
+                // reviewer_ids with an in-driver username→id resolver,
+                // labels via add_labels/remove_labels, draft via the
+                // "Draft: " title-prefix edit). The driver's
+                // ComputeCapabilities narrows this away below the 13.9
+                // floor (reviewer_ids: introduced 13.8, honored by the
+                // update endpoint only from 13.9) or when the version
+                // probe failed.
+                PlatformCapability.PrLifecycle,
             }.ToFrozenSet(),
 
             [PlatformKind.Bitbucket] = new[]
