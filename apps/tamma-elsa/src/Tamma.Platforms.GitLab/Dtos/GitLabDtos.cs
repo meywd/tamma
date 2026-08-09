@@ -71,6 +71,21 @@ internal sealed class GitLabMergeRequest
     public DateTimeOffset UpdatedAt { get; set; }
     public string? Sha { get; set; }
 
+    /// <summary>Epic 31 P6 M2 — merge read-backs the merge activity depends
+    /// on (it fails loud on a missing SHA). <c>merge_commit_sha</c> is set
+    /// when a merge commit exists; squash merges report
+    /// <c>squash_commit_sha</c> instead.</summary>
+    public string? MergeCommitSha { get; set; }
+    public string? SquashCommitSha { get; set; }
+
+    /// <summary>Legacy mergeability enum (<c>can_be_merged</c> /
+    /// <c>cannot_be_merged</c> / <c>unchecked</c> / …).</summary>
+    public string? MergeStatus { get; set; }
+
+    /// <summary>Finer-grained status (15.6+): <c>mergeable</c>,
+    /// <c>broken_status</c>, <c>conflict</c>, <c>checking</c>, …</summary>
+    public string? DetailedMergeStatus { get; set; }
+
     /// <summary>
     /// Epic 31 P6 M1 — base/start/head SHAs of the MR's latest diff
     /// version (single-MR GET). Empty right after MR creation (populates

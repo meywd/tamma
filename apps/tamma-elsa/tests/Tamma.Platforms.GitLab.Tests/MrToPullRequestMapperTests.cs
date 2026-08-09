@@ -152,6 +152,44 @@ public sealed class MrToPullRequestMapperTests
         MrToPullRequestMapper.Map(mr).IsDraft.Should().Be(expected);
     }
 
+    // ── Epic 31 P6 M2 — merge read-backs (the merge activity fails loud on
+    //    a missing SHA; a squash merge reports squash_commit_sha only). ──
+
+    [Test]
+    public void Map_surfaces_merge_commit_sha_and_falls_back_to_squash_sha()
+    {
+        var mergeCommit = new GitLabMergeRequest
+        {
+            Iid = 5, State = "merged", MergeCommitSha = "merge000",
+        };
+        MrToPullRequestMapper.Map(mergeCommit).MergeCommitSha.Should().Be("merge000");
+
+        var squashed = new GitLabMergeRequest
+        {
+            Iid = 5, State = "merged", SquashCommitSha = "squash111",
+        };
+        MrToPullRequestMapper.Map(squashed).MergeCommitSha.Should().Be("squash111",
+            "a squash merge reports squash_commit_sha; merge_commit_sha can be null there");
+    }
+
+    [TestCase("mergeable", null, true)]
+    [TestCase(null, "can_be_merged", true)]
+    [TestCase("conflict", "cannot_be_merged", false)]
+    [TestCase(null, "cannot_be_merged", false)]
+    [TestCase("checking", null, null)]
+    [TestCase("unchecked", "unchecked", null)]
+    [TestCase("draft_status", "can_be_merged", true)]
+    [TestCase(null, null, null)]
+    public void MapMergeable_maps_only_confirmed_shapes(
+        string? detailed, string? legacy, bool? expected)
+    {
+        var mr = new GitLabMergeRequest
+        {
+            Iid = 5, DetailedMergeStatus = detailed, MergeStatus = legacy,
+        };
+        MrToPullRequestMapper.MapMergeable(mr).Should().Be(expected);
+    }
+
     [Test]
     public void DraftTitle_helpers_add_and_strip_prefixes()
     {

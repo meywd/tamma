@@ -177,14 +177,16 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      # gitlab-ce is ~3 GB — give the pull plenty of retries.
+      # gitlab-ce is ~3 GB — give the pull plenty of retries. The tag is
+      # PINNED to the fixture's baseline (GitLabContainerFixture.GitLabImage);
+      # bumping it is a deliberate decision, not "latest = better".
       - name: Pull GitLab CE image (with retry)
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
           max_attempts: 3
           retry_wait_seconds: 60
-          command: docker pull gitlab/gitlab-ce:latest
+          command: docker pull gitlab/gitlab-ce:16.11.10-ce.0
 
       - name: Restore
         working-directory: apps/tamma-elsa

@@ -69,6 +69,8 @@ substitute the cheaper version.
 > `docs/stories/epic-31/EXECUTION-PLAN.md` (phases P0–P6), started 2026-08-07 on
 > owner instruction ("don't wait"). Demand is asserted by the owner directly — the
 > phantom-citation note below stands as history but no longer gates the work.
+> **Execution completed through P6 on 2026-08-09** (per-phase commit table in the
+> plan's status header); the "what is true today" paragraph below is now historical.
 
 **Decision**: undecided, therefore frozen. Do not invest in GitLab / Gitea / Forgejo /
 Bitbucket / Azure DevOps driver depth until someone names a real prospect.

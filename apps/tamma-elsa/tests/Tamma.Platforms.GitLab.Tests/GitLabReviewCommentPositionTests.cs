@@ -68,11 +68,43 @@ public class GitLabReviewCommentPositionTests
     }
 
     [Test]
+    public async Task LineComment_WhenDiffRefsSlowToPopulate_RetriesUntilPresent()
+    {
+        // Live-verified (16.11): diff_refs is null for ~2s after MR creation.
+        // The driver retries the MR read briefly; the SECOND read here carries
+        // the refs and the position must use them.
+        var (client, handler) = TestFactory.BuildClient();
+        client.DiffRefsRetryDelay = TimeSpan.Zero;
+        handler.EnqueueResponse(_ => FakeHttpMessageHandler.Json(HttpStatusCode.OK,
+            """
+            {"id":100,"iid":3,"title":"feat","state":"opened",
+              "source_branch":"feat/x","target_branch":"main",
+              "author":{"username":"bot","id":7},
+              "created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}
+            """));
+        handler.EnqueueResponse(_ => FakeHttpMessageHandler.Json(HttpStatusCode.OK, TwoCommitMrJson));
+        handler.EnqueueResponse(_ => FakeHttpMessageHandler.Json(HttpStatusCode.Created, DiscussionJson));
+
+        var result = await client.CreatePullRequestReviewCommentAsync(
+            new CreatePullRequestReviewCommentRequest(
+                "g", "p", "3", "src/foo.cs", 10, "please fix", "commit1-not-head"));
+
+        result.Should().BeOfType<PlatformResult<IssueComment>.Ok>();
+        var post = handler.Requests.Last();
+        using var doc = JsonDocument.Parse(post.Body!);
+        doc.RootElement.GetProperty("position").GetProperty("head_sha").GetString()
+            .Should().Be("commit2-head", "the second (populated) read supplied the refs");
+    }
+
+    [Test]
     public async Task LineComment_WhenDiffRefsAbsent_FallsBackToCallerSha()
     {
-        // Fresh-MR race: diff_refs populates asynchronously; the driver keeps
-        // the old single-SHA best-effort shape instead of failing the comment.
+        // Fresh-MR race exhausted: diff_refs never populates within the retry
+        // budget; the driver keeps the old single-SHA best-effort shape
+        // instead of failing the comment.
         var (client, handler) = TestFactory.BuildClient();
+        client.DiffRefsRetryAttempts = 2;
+        client.DiffRefsRetryDelay = TimeSpan.Zero;
         handler.AddRoute(HttpMethod.Get, "/merge_requests/3",
             _ => FakeHttpMessageHandler.Json(HttpStatusCode.OK,
                 """

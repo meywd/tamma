@@ -43,6 +43,16 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
     /// <c>capability_unsupported</c> refusal without touching the network.</summary>
     private readonly bool _prLifecycleLive;
 
+    /// <summary>Epic 31 P6 — bounded wait for a fresh MR's <c>diff_refs</c>
+    /// to populate before the review-comment position falls back to the
+    /// caller's single SHA (observed ~2s async population on 16.11).
+    /// Internal-settable so unit tests exercising the fallback don't pay the
+    /// full wait.</summary>
+    internal int DiffRefsRetryAttempts { get; set; } = 5;
+
+    /// <inheritdoc cref="DiffRefsRetryAttempts"/>
+    internal TimeSpan DiffRefsRetryDelay { get; set; } = TimeSpan.FromSeconds(1);
+
     public GitLabPlatformClient(
         GitLabHttpClient http,
         ILogger<GitLabPlatformClient> logger,
@@ -460,37 +470,52 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
         ArgumentNullException.ThrowIfNull(request);
         var pid = EncodeProjectRef(request.Owner, request.RepoName);
 
-        // Epic 31 P6 M1 hardening — a discussion position needs the MR's REAL
+        // Epic 31 P6 hardening — a discussion position needs the MR's REAL
         // base/start/head SHAs. The old base=start=head=CommitSha shape only
         // holds for a single-commit MR whose head IS that commit; on a
-        // multi-commit MR GitLab answers 400 ("must be a valid sha" line-code
-        // check fails). Fetch the MR's diff_refs (single-MR GET) and use them;
-        // fall back to the caller's CommitSha only when diff_refs is absent —
-        // the doc says it is "empty when the merge request is created and
-        // populates asynchronously", so a comment raced against a brand-new
-        // MR keeps the old best-effort behavior instead of failing the fetch.
+        // multi-commit MR the live platform rejects it (observed: 500 on
+        // 16.11; the line-code validation 400 on other versions). Fetch the
+        // MR's diff_refs (single-MR GET) and use them. diff_refs is "empty
+        // when the merge request is created, populates asynchronously" (per
+        // the API doc; observed ~2s on 16.11), so the driver retries the read
+        // briefly before falling back to the caller's CommitSha — the
+        // fallback keeps a comment raced against a brand-new MR best-effort
+        // instead of failing the fetch outright.
         var baseSha = request.CommitSha;
         var startSha = request.CommitSha;
         var headSha = request.CommitSha;
-        try
+        for (var attempt = 0; attempt < DiffRefsRetryAttempts; attempt++)
         {
-            var (mrResp, mr) = await _http.GetJsonAsync<GitLabMergeRequest>(
-                $"projects/{pid}/merge_requests/{request.PrNumber}", ct).ConfigureAwait(false);
-            using (mrResp)
+            try
             {
-                if (mrResp.Response.IsSuccessStatusCode
-                    && mr?.DiffRefs is { BaseSha: not null, HeadSha: not null } refs)
+                var (mrResp, mr) = await _http.GetJsonAsync<GitLabMergeRequest>(
+                    $"projects/{pid}/merge_requests/{request.PrNumber}", ct).ConfigureAwait(false);
+                using (mrResp)
                 {
-                    baseSha = refs.BaseSha;
-                    startSha = refs.StartSha ?? refs.BaseSha;
-                    headSha = refs.HeadSha;
+                    if (!mrResp.Response.IsSuccessStatusCode)
+                    {
+                        break; // let the discussion POST surface the honest failure
+                    }
+                    if (mr?.DiffRefs is { BaseSha: not null, HeadSha: not null } refs)
+                    {
+                        baseSha = refs.BaseSha;
+                        startSha = refs.StartSha ?? refs.BaseSha;
+                        headSha = refs.HeadSha;
+                        break;
+                    }
                 }
             }
-        }
-        catch (HttpRequestException)
-        {
-            // Positioning lookup is best-effort; the discussion POST below
-            // surfaces the honest failure if the platform is really down.
+            catch (HttpRequestException)
+            {
+                // Positioning lookup is best-effort; the discussion POST below
+                // surfaces the honest failure if the platform is really down.
+                break;
+            }
+
+            if (attempt + 1 < DiffRefsRetryAttempts)
+            {
+                await Task.Delay(DiffRefsRetryDelay, ct).ConfigureAwait(false);
+            }
         }
 
         var body = new

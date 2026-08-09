@@ -43,7 +43,42 @@ internal static class MrToPullRequestMapper
             HtmlUrl: mr.WebUrl ?? string.Empty,
             AuthorLogin: mr.Author?.Username ?? mr.Author?.Name ?? string.Empty,
             CreatedAt: mr.CreatedAt,
-            UpdatedAt: mr.UpdatedAt);
+            UpdatedAt: mr.UpdatedAt)
+        {
+            // Epic 31 P6 M2 — merge read-backs. The merge activity fails loud
+            // on a missing SHA, so both merge shapes are covered: a merge
+            // commit reports merge_commit_sha; a squash merge reports
+            // squash_commit_sha (merge_commit_sha can be null there).
+            MergeCommitSha = mr.MergeCommitSha ?? mr.SquashCommitSha,
+            Mergeable = MapMergeable(mr),
+            MergeableState = mr.DetailedMergeStatus ?? mr.MergeStatus,
+        };
+    }
+
+    /// <summary>
+    /// Platform-computed mergeability. Only POSITIVE confirmations map:
+    /// <c>can_be_merged</c>/<c>mergeable</c> → true; the CONFIRMED conflict
+    /// shapes (<c>cannot_be_merged</c> legacy, <c>conflict</c> detailed) →
+    /// false; anything else (unchecked / checking / absent / the
+    /// non-conflict blocked reasons like <c>draft_status</c>) → null so the
+    /// merge activity's conflict gate never fires on a still-computing or
+    /// merely-blocked MR.
+    /// </summary>
+    public static bool? MapMergeable(GitLabMergeRequest mr)
+    {
+        ArgumentNullException.ThrowIfNull(mr);
+        if (string.Equals(mr.DetailedMergeStatus, "mergeable", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mr.MergeStatus, "can_be_merged", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (string.Equals(mr.DetailedMergeStatus, "conflict", StringComparison.OrdinalIgnoreCase)
+            || (mr.DetailedMergeStatus is null
+                && string.Equals(mr.MergeStatus, "cannot_be_merged", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+        return null;
     }
 
     public static PullRequestState MapState(string? state) => state switch

@@ -1,7 +1,21 @@
 # Epic 31 — Multi-Git-Platform Execution Plan
 
 **Date**: 2026-08-05 (amended 2026-08-07: §4 mechanism shape decided by owner — is-supported check step before every platform/third-party action, defined alternative step when unsupported)
-**Status**: ACTIVE — owner-directed completion plan
+**Status**: COMPLETED 2026-08-09 — all phases P0–P6 executed and pushed. Per-phase commits:
+
+| Phase | Commits | Landed |
+|---|---|---|
+| P0 — docs truth | `f700098` | story statuses corrected, D3 note, stale `[Ignore]` strings |
+| P1 — GitHub driver real + ratchet | `ca9a9b2` (stage 1: abstraction verbs, capability contract, residency ratchet red-first), `5035c38` (stage 2: driver absorbs live REST/GraphQL, both credential modes, probe fixed) | capability contract exemption list drained to its terminal ZERO |
+| P2 — activation + mediation swap | `b46b6f2` | config-tier activation, `github_installations` bridge, GitMediationService on `IPlatformResolver`, cache-invalidation subscriber |
+| P3 — CI / agent dispatch / engine callbacks | `8d1e63e`, `2a51d80`, `e0d7928`, `0d7712e` | CI plane + TriggerCI on `driver.Actions`, CI completion poller (DG-5), engine callbacks on the driver plane, GitHub-only surfaces deleted (ratchet 18→6) |
+| P4 — webhooks + registration + CI secrets | `4f7ceed`, `202a99f`, `2d6e1c0`, `ce5d53f` | first production handlers, merged-PR resume (DG-6), `git.webhook.register` live, CI secrets un-severed (ratchet 6→**0**) |
+| P5 — Gitea end-to-end | `7552b93`, `9cdbdcc`, `90657df` | Gitea lifecycle verbs real (1.14 floor), DG-2/3/4 pairs in the cycle, full-stack Gitea E2E (headline scenario green, zero GitHub config) |
+| P6 — GitLab | `316d170` (lifecycle verbs + diff_refs hardening + pipeline wiring verified), plus the M2 wrap-up commit carrying this table (harness real + mediation acceptance + docs truth) | GitLab lifecycle verbs real (13.9 floor feature-detected), GitLab harness un-stubbed (nightly), mediation-level acceptance; full-stack GitLab E2E deferred per §7 item 6's default |
+
+Recorded follow-ups that outlive the epic: the engine-DRIVEN E2E is blocked on an LLM stub (no fake/echo LLM provider exists — `GiteaFullStackE2ETests` records this); `github_installations` is GitHub-named but carries non-GitHub single-user grant rows (naming debt, P5 finding); GitLab's loop verbs (issue lifecycle / releases / commits / security alerts) stay typed-`capability_unsupported` by design with DG degradation keeping cycles alive.
+
+**Original status**: ACTIVE — owner-directed completion plan
 **Supersedes**: the Epic 31 freeze in D3 of `.dev/decisions/2026-08-04-post-wave-d-decisions.md`. By owner direction the epic is unfrozen and the architecture below is decided; do not re-litigate it. (D3's factual note stands: `docs/research/multi-git-platform-2026.md` never existed — demand is now asserted by the owner, not that citation.)
 
 **The decided architecture** (owner, restated):
@@ -266,12 +280,14 @@ This rule is general: it applies to any third-party surface a workflow touches (
 
 ## 7. Owner decision list
 
-1. **DG-1 draft policy** — approve the recommendation (create draft where supported; un-draft `capability_unsupported` = satisfied-with-audit-event)? This is the one that stops Gitea/GitLab cycles from perma-failing.
-2. **DG-2/3/4** — approve the degradation recommendations for review-comment downgrade, reviewer skip, merge-method fallback?
-3. **Single-user activation shape** — plan chose a config-backed resolver tier (nothing persisted) over startup row-seeding. Ratify?
-4. **GitHub App registry bridge** — plan chose upsert-on-callback + one-time backfill into `tenant_platform_installations` (App tokens as credential *references*). Ratify?
-5. **Legacy webhook route deprecation window** — how long does `/api/github/webhooks` dual-run after P4's handlers reach parity?
-6. **P6 acceptance depth** — GitLab full-stack E2E (mirror of P5, +3–4d) or mediation-level acceptance only?
-7. **`Tamma:PublicBaseUrl`** — confirm a new config key vs reusing `Tamma:ControlPlaneUrl` for the webhook callback URL.
-8. **Timing** — P1+P2 are the critical path (~2.5–3.5 weeks) to "mediation is platform-agnostic"; P3–P5 (~4–5 weeks) to "one issue completes on Gitea". Confirm this sequencing holds against other epic priorities.
-9. **DG-7 CI-unsupported routing (added 2026-08-08, P3)** — when the platform cannot dispatch CI at all, the cycle now SKIPS the CI gate with a `CI.WORKFLOW_DISPATCH.SKIPPED` audit event and routes to code review + the HUMAN merge-approval gate (never an auto-merge without CI). This is the conservative default: the alternative considered was failing the cycle outright (no merge path at all without CI), which would make every cycle on a CI-less platform terminal. Ratify the human-gate routing, or direct the stricter fail-the-cycle posture.
+> **Execution disposition (2026-08-09, epic completed).** None of these were explicitly answered during execution, so each phase proceeded on the stated recommendation/default, as this plan directs. What was APPLIED is marked below; items the owner may still revisit remain open — revisiting any of them is now a change request against shipped behavior, not a plan decision.
+
+1. **DG-1 draft policy** — **APPLIED as recommended** (P2/P5): draft created where create-draft works; un-draft `capability_unsupported` = mark-satisfied-with-audit-event (`GIT.PR_DRAFT_SET.SKIPPED`).
+2. **DG-2/3/4** — **APPLIED as recommended** (P5 for Gitea, P6 for GitLab): review-comment downgrade to plain `file:line` comment, reviewer skip-with-label (`reviewer_unresolvable` typed by the GitLab driver's in-driver resolver), merge-method fallback rebase→squash→merge consuming exactly `merge_method_unsupported`.
+3. **Single-user activation shape** — **APPLIED as planned** (P2): config-backed resolver tier, nothing persisted. *Open for ratification.*
+4. **GitHub App registry bridge** — **APPLIED as planned** (P2): upsert-on-callback + backfill; App tokens as credential references. *Open for ratification.*
+5. **Legacy webhook route deprecation window** — **STILL OPEN**: `/api/github/webhooks` dual-runs with cross-route idempotency since P4; no end date set. Owner call.
+6. **P6 acceptance depth** — **DEFAULT APPLIED**: mediation-level acceptance (`GitLabCycleMediationAcceptanceTests` — branch → draft MR → multi-commit review comment → labels → un-draft → merge with DG-4 fallback) + the real GitLab driver harness (nightly container suite). Full-stack GitLab E2E (P5 mirror) remains un-built; commissioning it is an owner add-on.
+7. **`Tamma:PublicBaseUrl`** — **APPLIED as planned** (P4): new config key. *Open for ratification.*
+8. **Timing** — overtaken by events; the epic completed 2026-08-05→2026-08-09.
+9. **DG-7 CI-unsupported routing** — **CONSERVATIVE DEFAULT APPLIED** (P3): CI-skip → `CI.WORKFLOW_DISPATCH.SKIPPED` → code review + HUMAN merge-approval gate; never auto-merge without CI. *Open: owner may still direct the stricter fail-the-cycle posture.*
