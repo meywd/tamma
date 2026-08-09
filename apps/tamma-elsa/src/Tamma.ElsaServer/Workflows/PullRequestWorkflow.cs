@@ -144,6 +144,62 @@ public class PullRequestWorkflow : WorkflowBase
         captureDescription.SetDisplayText("Capture Description");
 
         // ================================================================
+        // 2b. Epic 31 P5 M2 (DG-3) — the §4 IS-SUPPORTED CHECK STEP for the
+        // reviewer request. Reviewers ride the PrLifecycle verb family
+        // (RequestReviewersAsync); when the resolved driver positively lacks
+        // it, the alternative step emits GIT.PR_REVIEWERS.SKIPPED and CLEARS
+        // the reviewers input so the PR step runs without a doomed request.
+        // No reviewers requested → the check is skipped entirely (nothing
+        // capability-gated is being asked for). The PR step itself carries
+        // the §4.3 safety net: a reviewer request the platform refuses at
+        // runtime is captured by the mediation core (reviewersSkipped +
+        // needs-reviewer label + the same audit event) and NEVER fails the
+        // PR step.
+        // ================================================================
+        var hasReviewers = new FlowDecision(ctx =>
+            ParseReviewerCount(reviewersVar.Get(ctx)) > 0)
+        { Id = "HasReviewers", Name = "Reviewers Requested?" };
+        hasReviewers.SetDisplayText("Reviewers Requested?");
+
+        var checkReviewersSupported = new CheckPlatformCapabilityActivity
+        {
+            Id = "CheckReviewersSupported",
+            Name = "Reviewer Request Supported?",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            Capability = new Input<string>("PrLifecycle"),
+            TenantId = new Input<string?>(ctx => tenantIdVar.Get(ctx)),
+        };
+        checkReviewersSupported.SetDisplayText("Reviewer Request Supported?");
+
+        // DG-3's alternative step — audited skip (silent skips are forbidden,
+        // §4.4), then the reviewers input is cleared and the PR step proceeds.
+        var markReviewersSkipped = new EmitPrEventActivity
+        {
+            Id = "MarkReviewersSkipped",
+            Name = "Emit GIT.PR_REVIEWERS.SKIPPED",
+            EventType = new Input<string>(_ => PrEvents.ReviewersSkipped),
+            IssueNumber = new Input<int>(ctx => issueNumberVar.Get(ctx)),
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            PrNumber = new Input<int>(_ => 0), // no PR yet — the skip precedes creation
+            TenantId = new Input<string?>(ctx => tenantIdVar.Get(ctx)),
+            DataJson = new Input<string?>(ctx => JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["reason"] = "capability_unsupported",
+                ["reviewerCount"] = ParseReviewerCount(reviewersVar.Get(ctx)),
+                ["decidedBy"] = "check-step",
+            })),
+        };
+        markReviewersSkipped.SetDisplayText("Emit GIT.PR_REVIEWERS.SKIPPED");
+
+        var clearReviewers = new SetVariable
+        {
+            Id = "ClearReviewers", Name = "Clear Reviewers (unsupported)",
+            Variable = reviewersVar,
+            Value = new Input<object?>(_ => (object)"[]"),
+        };
+        clearReviewers.SetDisplayText("Clear Reviewers (unsupported)");
+
+        // ================================================================
         // 3. Create (or reuse/update) the PR
         // ================================================================
         var createPr = new CreatePullRequestActivity
@@ -250,7 +306,9 @@ public class PullRequestWorkflow : WorkflowBase
             Start = readInputs,
             Activities =
             {
-                readInputs, generateDescription, captureDescription, createPr,
+                readInputs, generateDescription, captureDescription,
+                hasReviewers, checkReviewersSupported, markReviewersSkipped, clearReviewers,
+                createPr,
                 emitSuccess, successOutputs,
                 failureOutputs, emitFailed, finish,
             },
@@ -258,7 +316,18 @@ public class PullRequestWorkflow : WorkflowBase
             {
                 Connect(readInputs, generateDescription),
                 Connect(generateDescription, captureDescription),
-                Connect(captureDescription, createPr),
+
+                // Epic 31 P5 M2 (DG-3) — reviewers requested? → §4 check step
+                // before the PR step (which performs the reviewer request);
+                // unsupported → audited skip → clear reviewers → PR step.
+                // No reviewers → straight to the PR step (nothing gated).
+                Connect(captureDescription, hasReviewers),
+                ConnectOutcome(hasReviewers, "False", createPr),
+                ConnectOutcome(hasReviewers, "True", checkReviewersSupported),
+                ConnectOutcome(checkReviewersSupported, "Supported", createPr),
+                ConnectOutcome(checkReviewersSupported, "Unsupported", markReviewersSkipped),
+                Connect(markReviewersSkipped, clearReviewers),
+                Connect(clearReviewers, createPr),
 
                 // Created / Updated → success path
                 ConnectOutcome(createPr, "Created", emitSuccess),
@@ -329,6 +398,11 @@ public class PullRequestWorkflow : WorkflowBase
         try { return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>(); }
         catch { return new List<string>(); }
     }
+
+    /// <summary>DG-3 gate predicate: how many reviewers the caller actually
+    /// requested (0 for empty/blank/unparseable — the check step only runs
+    /// when a capability-gated request is really being made).</summary>
+    internal static int ParseReviewerCount(string? reviewersJson) => SafeList(reviewersJson).Count;
 
     private static FlowConnection Connect(IActivity source, IActivity target)
         => new(new FlowEndpoint(source), new FlowEndpoint(target));

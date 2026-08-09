@@ -498,6 +498,11 @@ public sealed record GitCallResponse
     [JsonPropertyName("branchDeleted")] public bool? BranchDeleted { get; init; }
     [JsonPropertyName("alreadyMerged")] public bool? AlreadyMerged { get; init; }
 
+    // Epic 31 P5 M2 — §4 degradation read-backs (additive; null = undegraded).
+    [JsonPropertyName("reviewersSkipped")] public bool? ReviewersSkipped { get; init; }
+    [JsonPropertyName("reviewCommentDowngraded")] public bool? ReviewCommentDowngraded { get; init; }
+    [JsonPropertyName("appliedMergeStrategy")] public string? AppliedMergeStrategy { get; init; }
+
     [JsonPropertyName("issueStatus")] public string? IssueStatus { get; init; }
 
     [JsonPropertyName("comments")] public IReadOnlyList<GitCommentDto>? Comments { get; init; }

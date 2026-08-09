@@ -66,18 +66,30 @@ public class GitMediationServiceTests
 
     private sealed class FakeDriver : IGitPlatformDriver
     {
-        public FakeDriver(IGitPlatformClient client) => Client = client;
+        public FakeDriver(IGitPlatformClient client, IReadOnlySet<PlatformCapability>? capabilities = null)
+        {
+            Client = client;
+            Capabilities = capabilities ?? new HashSet<PlatformCapability>
+            {
+                PlatformCapability.PrLifecycle,
+                // P5 M2 (DG-2): the mediation review-comment core consults the
+                // resolved driver's capabilities before attempting the anchored
+                // post — the default fixture driver is anchoring-capable so the
+                // pre-M2 behavioral pins run unchanged.
+                PlatformCapability.PrFileReview,
+            };
+        }
+
         public PlatformKind Kind => PlatformKind.GitHub;
         public IGitPlatformClient Client { get; }
         public IGitPlatformActionsClient? Actions => null;
-        public IReadOnlySet<PlatformCapability> Capabilities { get; } =
-            new HashSet<PlatformCapability> { PlatformCapability.PrLifecycle };
+        public IReadOnlySet<PlatformCapability> Capabilities { get; }
     }
 
-    private void ResolveDriver(string source) => _resolver
+    private void ResolveDriver(string source, IReadOnlySet<PlatformCapability>? capabilities = null) => _resolver
         .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
         .ReturnsAsync(new MediationDriverResolution(
-            new FakeDriver(_client.Object),
+            new FakeDriver(_client.Object, capabilities),
             source == GitCredentialSources.Byok
                 ? MediationCredentialSource.TenantInstallation
                 : MediationCredentialSource.PlatformDefault));
@@ -740,6 +752,223 @@ public class GitMediationServiceTests
         _client.Verify(c => c.CreatePullRequestReviewCommentAsync(
             It.IsAny<CreatePullRequestReviewCommentRequest>(), It.IsAny<CancellationToken>()), Times.Never);
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrReviewCommentedFailed);
+    }
+
+    // ===================================================================
+    // Epic 31 P5 M2 — §4 degradation pairs at the mediation layer
+    // (DG-2 review-comment downgrade, DG-3 reviewer skip, DG-4 merge-
+    // method fallback). Every degraded trip is audited; nothing is
+    // silently dropped; real failures are never mis-classified (§4.5).
+    // ===================================================================
+
+    [Test]
+    public async Task ReviewCommentPr_DriverWithoutPrFileReview_DowngradesToPlainComment_WithAuditEvent()
+    {
+        Allow();
+        // DG-2 check step: the resolved driver positively lacks PrFileReview —
+        // the anchored post is never attempted.
+        ResolveDriver(GitCredentialSources.Byok,
+            new HashSet<PlatformCapability> { PlatformCapability.PrLifecycle });
+        string? postedBody = null;
+        _client.Setup(c => c.CreateIssueCommentAsync("acme", "widgets", "15", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, string, string, CancellationToken>((_, _, _, b, _) => postedBody = b)
+            .ReturnsAsync(Ok(new IssueComment("88", "x", "bot", DateTimeOffset.UtcNow)));
+
+        var body = new PrReviewCommentRequest { Body = "nit: rename this", CommitId = "sha1", Path = "src/a.cs", Line = 5, CorrelationId = "corr-rc" };
+        var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeTrue("the feedback is NEVER dropped (DG-2)");
+        result.Outcome.Should().Be("Commented");
+        result.ReviewCommentDowngraded.Should().BeTrue();
+        result.CommentId.Should().Be(88);
+        postedBody.Should().Contain("src/a.cs:5", "the downgraded body carries file:line");
+        postedBody.Should().Contain("nit: rename this");
+        _client.Verify(c => c.CreatePullRequestReviewCommentAsync(
+            It.IsAny<CreatePullRequestReviewCommentRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _events.Appended.Select(e => e.Type).Should().BeEquivalentTo(new[]
+        {
+            GitEventTypes.PrReviewCommentDowngraded,
+            GitEventTypes.PrReviewCommentedSuccess,
+        }, "an audited downgrade + exactly one terminal success");
+    }
+
+    [Test]
+    public async Task ReviewCommentPr_AnchoringRejected_DowngradesToPlainComment()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        // §4.3 safety net: the platform rejects the anchor (line not in diff).
+        _client.Setup(c => c.CreatePullRequestReviewCommentAsync(
+                It.IsAny<CreatePullRequestReviewCommentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<IssueComment>(new PlatformError.InvalidRequest(
+                "invalid_request", "line 5 is not part of the diff")));
+        _client.Setup(c => c.CreateIssueCommentAsync("acme", "widgets", "15", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(new IssueComment("89", "x", "bot", DateTimeOffset.UtcNow)));
+
+        var body = new PrReviewCommentRequest { Body = "nit", CommitId = "sha1", Path = "a.cs", Line = 5, CorrelationId = "corr-rc" };
+        var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeTrue();
+        result.ReviewCommentDowngraded.Should().BeTrue();
+        _events.Appended.Select(e => e.Type).Should().Contain(GitEventTypes.PrReviewCommentDowngraded);
+    }
+
+    [Test]
+    public async Task ReviewCommentPr_RealFailure_IsNotDowngraded()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        // §4.5 — an auth failure is a REAL failure; downgrading it would hide
+        // a broken credential behind a plain comment.
+        _client.Setup(c => c.CreatePullRequestReviewCommentAsync(
+                It.IsAny<CreatePullRequestReviewCommentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<IssueComment>(new PlatformError.AuthExpired()));
+
+        var body = new PrReviewCommentRequest { Body = "nit", CommitId = "sha1", Path = "a.cs", Line = 5, CorrelationId = "corr-rc" };
+        var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeFalse();
+        _client.Verify(c => c.CreateIssueCommentAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrReviewCommentedFailed);
+    }
+
+    [Test]
+    public async Task ReviewCommentPr_DowngradeFailingToo_FailsLoud_NeverSilentlyDrops()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok,
+            new HashSet<PlatformCapability> { PlatformCapability.PrLifecycle });
+        _client.Setup(c => c.CreateIssueCommentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<IssueComment>(new PlatformError.NotFound()));
+
+        var body = new PrReviewCommentRequest { Body = "nit", CommitId = "sha1", Path = "a.cs", Line = 5, CorrelationId = "corr-rc" };
+        var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeFalse("a dropped review comment must be LOUD");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrReviewCommentedFailed);
+    }
+
+    [Test]
+    public async Task CreatePr_ReviewerRequestUnsupported_SkipsWithLabelAndAuditEvent_PrStepSucceeds()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        NoExistingOpenPr();
+        _client.Setup(c => c.OpenPullRequestAsync(It.IsAny<OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr()));
+        _client.Setup(c => c.RequestReviewersAsync(It.IsAny<RequestReviewersRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<PullRequest>(new PlatformError.InvalidRequest(
+                "capability_unsupported", "no reviewer API")));
+        AddPullRequestLabelsRequest? labelCall = null;
+        _client.Setup(c => c.AddPullRequestLabelsAsync(It.IsAny<AddPullRequestLabelsRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<AddPullRequestLabelsRequest, CancellationToken>((r, _) => labelCall = r)
+            .ReturnsAsync(Ok(Pr()));
+
+        var body = new CreatePrRequest
+        {
+            Title = "[ADL] #7: thing", Body = "body", HeadRef = "feature", BaseRef = "main",
+            Reviewers = new[] { "alice" }, CorrelationId = "corr-pr",
+        };
+        var result = await _sut.CreatePullRequestAsync(_tenant, Repo, body);
+
+        result.Success.Should().BeTrue("DG-3 — a skipped reviewer request must NOT fail the PR step");
+        result.ReviewersSkipped.Should().BeTrue();
+        labelCall.Should().NotBeNull("the skip labels the PR for a human");
+        labelCall!.Labels.Should().Contain(Tamma.Activities.ADL.CreatePullRequestActivity.ReviewersSkippedLabel);
+        _events.Appended.Select(e => e.Type).Should().BeEquivalentTo(new[]
+        {
+            GitEventTypes.PrReviewersSkipped,
+            GitEventTypes.PrOpenedSuccess,
+        }, "an audited skip + exactly one terminal success");
+    }
+
+    [Test]
+    public async Task CreatePr_NoReviewersRequested_EmitsNoSkipEvent()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        NoExistingOpenPr();
+        _client.Setup(c => c.OpenPullRequestAsync(It.IsAny<OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr()));
+
+        var result = await _sut.CreatePullRequestAsync(_tenant, Repo, PrBody());
+
+        result.Success.Should().BeTrue();
+        result.ReviewersSkipped.Should().BeNull("no reviewer request was made — nothing was skipped");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrOpenedSuccess);
+    }
+
+    [Test]
+    public async Task MergePr_MethodUnsupported_FallsBackAlongFixedOrder_WithAuditEvent()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.GetPullRequestAsync("acme", "widgets", "15", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Open, mergeable: true)));
+        var attempted = new List<MergeMethod>();
+        _client.Setup(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<MergePullRequestRequest, CancellationToken>((r, _) => attempted.Add(r.Method))
+            .ReturnsAsync((MergePullRequestRequest r, CancellationToken _) =>
+                r.Method == MergeMethod.Rebase
+                    ? Fail<PullRequest>(new PlatformError.InvalidRequest(
+                        "merge_method_unsupported", "rebase not allowed on this project"))
+                    : Ok(Pr(state: PullRequestState.Merged, mergeSha: "sha-merged")));
+
+        var body = new MergePrRequest
+        {
+            MergeStrategy = "rebase", IssueNumber = 0, BranchName = "feature",
+            AutoDeleteBranch = false, CloseAssociatedIssue = false, CorrelationId = "corr-merge",
+        };
+        var result = await _sut.MergePullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeTrue("DG-4 — the fallback merges instead of failing");
+        result.MergeSha.Should().Be("sha-merged");
+        result.AppliedMergeStrategy.Should().Be("squash", "rebase→squash is the first fallback hop");
+        attempted.Should().Equal(MergeMethod.Rebase, MergeMethod.Squash);
+        _events.Appended.Select(e => e.Type).Should().BeEquivalentTo(new[]
+        {
+            GitEventTypes.PrMergeMethodFallback,
+            GitEventTypes.PrMergedSuccess,
+        }, "an audited fallback + exactly one terminal success");
+    }
+
+    [Test]
+    public async Task MergePr_RealFailure_DoesNotConsumeTheFallback()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.GetPullRequestAsync("acme", "widgets", "15", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Open, mergeable: true)));
+        _client.Setup(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<PullRequest>(new PlatformError.InvalidRequest(
+                "merge_conflict", "409: merge conflict")));
+
+        var result = await _sut.MergePullRequestAsync(_tenant, Repo, 15, MergeBody());
+
+        result.Success.Should().BeFalse("§4.5 — only the exact typed code is consumed by the fallback");
+        _client.Verify(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()),
+            Times.Once, "a real failure fails loud immediately — no method roulette");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrMergeFailed);
+    }
+
+    [Test]
+    public async Task MergePr_EveryMethodUnsupported_FailsLoud()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.GetPullRequestAsync("acme", "widgets", "15", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Open, mergeable: true)));
+        _client.Setup(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<PullRequest>(new PlatformError.InvalidRequest(
+                "merge_method_unsupported", "nope")));
+
+        var result = await _sut.MergePullRequestAsync(_tenant, Repo, 15, MergeBody());
+
+        result.Success.Should().BeFalse("DG-4 — fail loud only when NO method works");
+        _client.Verify(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(3), "the full fixed order (requested + remaining) was tried");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrMergeFailed);
     }
 
     // ===================================================================

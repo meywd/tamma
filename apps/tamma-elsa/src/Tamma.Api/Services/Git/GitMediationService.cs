@@ -215,7 +215,10 @@ public sealed class GitMediationService : IGitMediationService
     // PlatformDefault ⇒ "platform".
     // ===================================================================
 
-    private sealed record ResolvedClient(IGitPlatformClient Client, string Source);
+    private sealed record ResolvedClient(
+        IGitPlatformClient Client,
+        string Source,
+        IReadOnlySet<PlatformCapability> Capabilities);
 
     private async Task<ResolvedClient?> ResolveClientAsync(Guid? tenantId, CancellationToken ct)
     {
@@ -227,7 +230,7 @@ public sealed class GitMediationService : IGitMediationService
         var source = resolution.Source == MediationCredentialSource.TenantInstallation
             ? GitCredentialSources.Byok
             : GitCredentialSources.Platform;
-        return new ResolvedClient(resolution.Driver.Client, source);
+        return new ResolvedClient(resolution.Driver.Client, source, resolution.Driver.Capabilities);
     }
 
     /// <summary>Legacy-string + capability projection of a non-Ok platform result.</summary>
@@ -346,10 +349,29 @@ public sealed class GitMediationService : IGitMediationService
                 PrUrl = outcome.PrUrl,
                 Reused = outcome.Reused,
                 IsDraft = outcome.IsDraft,
+                ReviewersSkipped = outcome.ReviewersSkipped ? true : null,
                 CorrelationId = body.CorrelationId,
             };
+
+            // Epic 31 P5 M2 (DG-3) — a reviewer request the platform did not
+            // perform is on the record: the core labeled the PR
+            // (needs-reviewer) and this audit row carries the key-free
+            // reason. The PR step itself is NOT failed (§4). Additional
+            // audit event; the terminal PR_OPENED event below is unchanged.
+            if (outcome.ReviewersSkipped)
+            {
+                await EmitAsync(GitEventTypes.PrReviewersSkipped, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+                    new
+                    {
+                        prNumber = outcome.PrNumber,
+                        reason = outcome.ReviewersSkipReason ?? "unknown",
+                        reviewerCount = body.Reviewers?.Count ?? 0,
+                        label = CreatePullRequestActivity.ReviewersSkippedLabel,
+                    }, ct).ConfigureAwait(false);
+            }
+
             await EmitAsync(GitEventTypes.PrOpenedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
-                new { prNumber = outcome.PrNumber, reused = outcome.Reused, outcome = outcome.Outcome }, ct).ConfigureAwait(false);
+                new { prNumber = outcome.PrNumber, reused = outcome.Reused, outcome = outcome.Outcome, reviewersSkipped = outcome.ReviewersSkipped }, ct).ConfigureAwait(false);
             return ok;
         }
 
@@ -402,11 +424,29 @@ public sealed class GitMediationService : IGitMediationService
                 IssueClosed = outcome.IssueClosed,
                 BranchDeleted = outcome.BranchDeleted,
                 AlreadyMerged = outcome.AlreadyMerged,
+                AppliedMergeStrategy = outcome.AppliedStrategy,
                 FailureReason = outcome.FailureReason, // warnings (partial), key-free
                 CorrelationId = body.CorrelationId,
             };
+
+            // Epic 31 P5 M2 (DG-4) — the fixed-order method fallback is on
+            // the record (§4.4): which method was asked for, which one the
+            // platform actually accepted. Additional audit row; the terminal
+            // PR_MERGED event below is unchanged.
+            if (outcome.MethodFallbackFrom is not null)
+            {
+                await EmitAsync(GitEventTypes.PrMergeMethodFallback, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+                    new
+                    {
+                        prNumber,
+                        requestedMethod = outcome.MethodFallbackFrom,
+                        appliedMethod = outcome.AppliedStrategy,
+                        fallbackOrder = "rebase>squash>merge",
+                    }, ct).ConfigureAwait(false);
+            }
+
             await EmitAsync(GitEventTypes.PrMergedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
-                new { prNumber, issueNumber = body.IssueNumber, alreadyMerged = outcome.AlreadyMerged, outcome = outcome.Outcome }, ct).ConfigureAwait(false);
+                new { prNumber, issueNumber = body.IssueNumber, alreadyMerged = outcome.AlreadyMerged, outcome = outcome.Outcome, appliedStrategy = outcome.AppliedStrategy }, ct).ConfigureAwait(false);
             return ok;
         }
 
@@ -943,6 +983,17 @@ public sealed class GitMediationService : IGitMediationService
         var (owner, repoName) = GitRepoName.Split(repo);
         var prText = prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
+        // ── Epic 31 P5 M2 (DG-2) — the §4 check step at mediation altitude:
+        // a driver that positively lacks PrFileReview never even attempts the
+        // anchored post; the alternative step (plain PR comment carrying
+        // file:line) runs directly. The feedback is NEVER dropped.
+        if (!cred.Capabilities.Contains(PlatformCapability.PrFileReview))
+        {
+            return await DowngradeReviewCommentAsync(
+                tenantId, repo, prNumber, body, cred, owner, repoName, prText,
+                reason: "capability_unsupported", ct).ConfigureAwait(false);
+        }
+
         // Anchor SHA: the caller's commit id, else the PR head branch tip (the
         // live path's head-SHA fallback, reproduced over the abstraction).
         var commitSha = body.CommitId;
@@ -963,7 +1014,26 @@ public sealed class GitMediationService : IGitMediationService
                 owner, repoName, prText, body.Path, body.Line, body.Body, commitSha!, body.Side), ct).ConfigureAwait(false);
 
         if (res is not PlatformResult<PModels.IssueComment>.Ok resOk)
+        {
+            // §4.3 safety net + anchoring failure: the typed
+            // capability_unsupported refusal (stale/lying probe) and the
+            // platform's anchor rejection (InvalidRequest — e.g. line not in
+            // the diff, GitLab position 400) DOWNGRADE to a plain comment.
+            // Auth / not-found / rate-limit / transport failures stay REAL
+            // failures (§4.5 — never mis-classify a real failure as
+            // degradation).
+            if (res is PlatformResult<PModels.IssueComment>.Failed anchoredFail
+                && anchoredFail.Error is PlatformError.InvalidRequest)
+            {
+                var reason = PlatformErrorText.IsCapabilityUnsupported(anchoredFail.Error)
+                    ? "capability_unsupported"
+                    : "anchoring_failed";
+                return await DowngradeReviewCommentAsync(
+                    tenantId, repo, prNumber, body, cred, owner, repoName, prText,
+                    reason, ct).ConfigureAwait(false);
+            }
             return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, cred.Source, Describe(res), new { prNumber }, ct).ConfigureAwait(false);
+        }
 
         var ok = new GitMediationResult
         {
@@ -978,6 +1048,51 @@ public sealed class GitMediationService : IGitMediationService
             new { prNumber, commentId = ok.CommentId }, ct).ConfigureAwait(false);
         return ok;
     }
+
+    /// <summary>
+    /// Epic 31 P5 M2 (DG-2) — the review-comment alternative step: post the
+    /// SAME feedback as a plain PR comment carrying <c>file:line</c> in the
+    /// body, emit the GIT.PR_REVIEW_COMMENT.DOWNGRADED audit event (§4.4 —
+    /// silent downgrades are forbidden), then the normal terminal success
+    /// event. If even the plain comment fails, that is a REAL loud failure —
+    /// the feedback is never silently dropped.
+    /// </summary>
+    private async Task<GitMediationResult> DowngradeReviewCommentAsync(
+        Guid? tenantId, string repo, int prNumber, PrReviewCommentRequest body,
+        ResolvedClient cred, string owner, string repoName, string prText,
+        string reason, CancellationToken ct)
+    {
+        var op = GitEventTypes.PrReviewCommentOperation;
+        var downgradedBody = BuildDowngradedReviewCommentBody(body.Path, body.Line, body.Body);
+
+        var posted = await cred.Client.CreateIssueCommentAsync(
+            owner, repoName, prText, downgradedBody, ct).ConfigureAwait(false);
+        if (posted is not PlatformResult<PModels.IssueComment>.Ok postedOk)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, cred.Source, Describe(posted), new { prNumber, downgraded = true }, ct).ConfigureAwait(false);
+
+        await EmitAsync(GitEventTypes.PrReviewCommentDowngraded, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+            new { prNumber, reason, path = body.Path, line = body.Line }, ct).ConfigureAwait(false);
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "Commented",
+            PrNumber = prNumber,
+            CommentId = int.TryParse(postedOk.Value.Id, out var cid) ? cid : 0,
+            ReviewCommentDowngraded = true,
+            CorrelationId = body.CorrelationId,
+        };
+        await EmitAsync(GitEventTypes.PrReviewCommentedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+            new { prNumber, commentId = ok.CommentId, downgraded = true }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    /// <summary>The downgraded body keeps the anchor visible to humans:
+    /// <c>**Review note for `path:line`**</c> + the original feedback.
+    /// Public for the degradation-pair tests.</summary>
+    public static string BuildDowngradedReviewCommentBody(string path, int line, string body) =>
+        $"**Review note for `{path}:{line}`** _(line-anchored comment unavailable; posted as a plain comment)_\n\n{body}";
 
     private async Task<GitMediationResult> RequestPullRequestReviewersCoreAsync(Guid? tenantId, string repo, int prNumber, PrReviewersRequest body, CancellationToken ct)
     {

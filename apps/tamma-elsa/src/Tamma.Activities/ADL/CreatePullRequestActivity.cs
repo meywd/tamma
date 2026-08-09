@@ -253,13 +253,16 @@ public class CreatePullRequestActivity : Activity
 
             // Best-effort post-create metadata (labels + reviewers) — the live
             // path's TryAdd*/TryRequest* posture: a failure here MUST NOT fail
-            // PR creation (Story 2.8 AC3 — degrade gracefully).
-            await TryApplyMetadataAsync(client, owner, repoName, createdOk.Value.Number, request, logger);
+            // PR creation (Story 2.8 AC3 — degrade gracefully). Epic 31 P5 M2
+            // (DG-3): a reviewer skip is surfaced on the outcome so the
+            // mediation layer emits GIT.PR_REVIEWERS.SKIPPED — never silent.
+            var metadata = await TryApplyMetadataAsync(client, owner, repoName, createdOk.Value.Number, request, logger);
 
             logger?.LogInformation("Created {Kind} PR #{Number}",
                 draft ? "draft" : "ready", createdOk.Value.Number);
             return PrCreationOutcome.Create(
-                ParsePrNumber(createdOk.Value.Number), createdOk.Value.HtmlUrl, draft);
+                ParsePrNumber(createdOk.Value.Number), createdOk.Value.HtmlUrl, draft,
+                metadata.ReviewersSkipped, metadata.ReviewersSkipReason);
         }
         catch (Exception ex)
         {
@@ -286,16 +289,28 @@ public class CreatePullRequestActivity : Activity
             return (null, DescribeFailure(updated));
         }
 
-        await TryApplyMetadataAsync(client, owner, repoName, open.Number, request, logger);
+        var metadata = await TryApplyMetadataAsync(client, owner, repoName, open.Number, request, logger);
 
         return (PrCreationOutcome.Reuse(
             ParsePrNumber(updatedOk.Value.Number),
             string.IsNullOrEmpty(updatedOk.Value.HtmlUrl) ? open.HtmlUrl : updatedOk.Value.HtmlUrl,
-            open.IsDraft), null);
+            open.IsDraft,
+            metadata.ReviewersSkipped, metadata.ReviewersSkipReason), null);
     }
 
-    /// <summary>Best-effort labels + reviewers (never fails the PR step).</summary>
-    private static async Task TryApplyMetadataAsync(
+    /// <summary>Epic 31 P5 M2 (DG-3) — the label a skipped reviewer request
+    /// leaves on the PR so a human notices no reviewer was assigned.</summary>
+    public const string ReviewersSkippedLabel = "needs-reviewer";
+
+    internal readonly record struct PrMetadataOutcome(bool ReviewersSkipped, string? ReviewersSkipReason);
+
+    /// <summary>Best-effort labels + reviewers (never fails the PR step).
+    /// Epic 31 P5 M2 (DG-3): a reviewer request the platform did not perform
+    /// (capability unsupported / unresolvable / refusal) is RECORDED — the PR
+    /// is labeled <see cref="ReviewersSkippedLabel"/> best-effort and the skip
+    /// + key-free reason are returned so the caller emits the
+    /// GIT.PR_REVIEWERS.SKIPPED audit event. Silent skips are forbidden (§4.4).</summary>
+    private static async Task<PrMetadataOutcome> TryApplyMetadataAsync(
         Tamma.Platforms.Abstractions.IGitPlatformClient client,
         string owner,
         string repoName,
@@ -319,21 +334,69 @@ public class CreatePullRequestActivity : Activity
             }
         }
 
-        if (request.Reviewers is { Count: > 0 })
+        if (request.Reviewers is not { Count: > 0 })
         {
-            try
+            return new PrMetadataOutcome(false, null);
+        }
+
+        string? skipReason = null;
+        try
+        {
+            var reviewers = await client.RequestReviewersAsync(
+                new Tamma.Platforms.Abstractions.Models.RequestReviewersRequest(
+                    owner, repoName, prNumber, request.Reviewers));
+            if (reviewers is not Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok)
             {
-                var reviewers = await client.RequestReviewersAsync(
-                    new Tamma.Platforms.Abstractions.Models.RequestReviewersRequest(
-                        owner, repoName, prNumber, request.Reviewers));
-                if (reviewers is not Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok)
-                    logger?.LogWarning("Reviewer request for PR #{Number} failed (continuing)", prNumber);
-            }
-            catch (Exception ex)
-            {
-                logger?.LogWarning(ex, "Failed to request reviewers on PR #{Number} (continuing)", prNumber);
+                skipReason = ClassifyReviewerSkip(reviewers);
+                logger?.LogWarning(
+                    "Reviewer request for PR #{Number} skipped ({Reason}) — continuing without reviewers (DG-3)",
+                    prNumber, skipReason);
             }
         }
+        catch (Exception ex)
+        {
+            skipReason = "api_error";
+            logger?.LogWarning(ex, "Failed to request reviewers on PR #{Number} (continuing, DG-3)", prNumber);
+        }
+
+        if (skipReason is null)
+        {
+            return new PrMetadataOutcome(false, null);
+        }
+
+        // DG-3's alternative-step content: label the PR so a human sees no
+        // reviewer was assigned. Best-effort — a label failure does not fail
+        // the PR step either (the audit event still records the skip).
+        try
+        {
+            var labeled = await client.AddPullRequestLabelsAsync(
+                new Tamma.Platforms.Abstractions.Models.AddPullRequestLabelsRequest(
+                    owner, repoName, prNumber, new List<string> { ReviewersSkippedLabel }));
+            if (labeled is not Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok)
+                logger?.LogWarning("Could not label PR #{Number} '{Label}' after reviewer skip", prNumber, ReviewersSkippedLabel);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Could not label PR #{Number} '{Label}' after reviewer skip", prNumber, ReviewersSkippedLabel);
+        }
+
+        return new PrMetadataOutcome(true, skipReason);
+    }
+
+    /// <summary>Key-free classification of a reviewer-request refusal. The
+    /// exact <c>capability_unsupported</c> code is preserved (§4.5 exact-match
+    /// discipline); everything else coarsens through the legacy projection.</summary>
+    internal static string ClassifyReviewerSkip(
+        Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest> result)
+    {
+        if (result is Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Failed f)
+        {
+            if (Tamma.Platforms.Abstractions.PlatformErrorText.IsCapabilityUnsupported(f.Error))
+                return "capability_unsupported";
+            if (f.Error is Tamma.Platforms.Abstractions.PlatformError.InvalidRequest)
+                return "reviewer_unresolvable";
+        }
+        return ClassifyError(DescribeFailure(result));
     }
 
     private static string DescribeFailure<T>(Tamma.Platforms.Abstractions.PlatformResult<T> result) =>
@@ -575,11 +638,38 @@ public sealed class PrCreationOutcome
     public bool Reused { get; init; }
     public string? ErrorCode { get; init; }
 
-    public static PrCreationOutcome Create(int number, string? url, bool isDraft)
-        => new() { Outcome = "Created", PrNumber = number, PrUrl = url, IsDraft = isDraft, Reused = false };
+    // ── Epic 31 P5 M2 (DG-3) — reviewer-request degradation read-backs.
+    //    The reviewer request is best-effort post-create metadata (a failure
+    //    never fails the PR step), but a skip is NEVER silent: the core
+    //    records it here so the mediation layer emits the
+    //    GIT.PR_REVIEWERS.SKIPPED audit event (§4.4). ──
 
-    public static PrCreationOutcome Reuse(int number, string? url, bool isDraft)
-        => new() { Outcome = "Updated", PrNumber = number, PrUrl = url, IsDraft = isDraft, Reused = true };
+    /// <summary>True when reviewers were requested but the platform did not
+    /// perform the request (capability unsupported / unresolvable reviewer /
+    /// refusal). The PR itself was created/updated fine.</summary>
+    public bool ReviewersSkipped { get; init; }
+
+    /// <summary>Key-free reason for the skip (e.g. <c>capability_unsupported</c>
+    /// or the coarse legacy error string).</summary>
+    public string? ReviewersSkipReason { get; init; }
+
+    public static PrCreationOutcome Create(
+        int number, string? url, bool isDraft,
+        bool reviewersSkipped = false, string? reviewersSkipReason = null)
+        => new()
+        {
+            Outcome = "Created", PrNumber = number, PrUrl = url, IsDraft = isDraft, Reused = false,
+            ReviewersSkipped = reviewersSkipped, ReviewersSkipReason = reviewersSkipReason,
+        };
+
+    public static PrCreationOutcome Reuse(
+        int number, string? url, bool isDraft,
+        bool reviewersSkipped = false, string? reviewersSkipReason = null)
+        => new()
+        {
+            Outcome = "Updated", PrNumber = number, PrUrl = url, IsDraft = isDraft, Reused = true,
+            ReviewersSkipped = reviewersSkipped, ReviewersSkipReason = reviewersSkipReason,
+        };
 
     public static PrCreationOutcome Failed(string errorCode)
         => new() { Outcome = "Error", ErrorCode = errorCode };

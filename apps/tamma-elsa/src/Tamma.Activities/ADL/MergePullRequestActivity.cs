@@ -178,7 +178,9 @@ public class MergePullRequestActivity : TammaOutcomeActivity
         var outcome = MapResponse(response);
 
         MergeSha.Set(context, outcome.MergeSha ?? "");
-        AppliedStrategy.Set(context, strategy);
+        // Epic 31 P5 M2 (DG-4) — surface the method that actually merged
+        // (the mediation core may have fallen back along rebase→squash→merge).
+        AppliedStrategy.Set(context, outcome.AppliedStrategy ?? strategy);
         IssueClosed.Set(context, outcome.IssueClosed);
         BranchDeleted.Set(context, outcome.BranchDeleted);
         AlreadyMerged.Set(context, outcome.AlreadyMerged);
@@ -211,7 +213,10 @@ public class MergePullRequestActivity : TammaOutcomeActivity
                 response.IssueClosed ?? false,
                 response.BranchDeleted ?? false,
                 response.AlreadyMerged ?? false,
-                warnings);
+                warnings) with
+            {
+                AppliedStrategy = response.AppliedMergeStrategy,
+            };
         }
 
         return MergeOutcome.Failed(
@@ -294,16 +299,51 @@ public class MergePullRequestActivity : TammaOutcomeActivity
                 return MergeOutcome.Failed("merge_conflict", reason);
             }
 
-            // ── 2. Merge (configurable strategy) ──
-            var mergeResult = await client.MergePullRequestAsync(
-                new Tamma.Platforms.Abstractions.Models.MergePullRequestRequest(
-                    owner, repoName, prNumberText, ToMergeMethod(strategy)));
-            if (mergeResult is not Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok mergedOk)
+            // ── 2. Merge (configurable strategy) — Epic 31 P5 M2 (DG-4):
+            // when the platform refuses the requested method with the EXACT
+            // typed merge_method_unsupported code (GitLab's rebase answers
+            // exactly this), auto-fall back along the fixed order
+            // rebase→squash→merge. Any other failure (conflict, permission,
+            // protection) fails loud immediately — §4.5 exact-code-match
+            // discipline; a real failure must never be consumed as
+            // "try another method". The applied strategy is surfaced on the
+            // outcome so mediation emits GIT.PR_MERGE.METHOD_FALLBACK.
+            Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok? mergedOk = null;
+            var appliedStrategy = strategy;
+            foreach (var candidate in BuildMethodFallbackOrder(strategy))
             {
+                var mergeResult = await client.MergePullRequestAsync(
+                    new Tamma.Platforms.Abstractions.Models.MergePullRequestRequest(
+                        owner, repoName, prNumberText, ToMergeMethod(candidate)));
+                if (mergeResult is Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Ok ok)
+                {
+                    mergedOk = ok;
+                    appliedStrategy = candidate;
+                    break;
+                }
+
+                if (IsMergeMethodUnsupported(mergeResult))
+                {
+                    logger?.LogWarning(
+                        "Merge method {Method} unsupported for PR #{Pr} — DG-4 fallback continues (rebase→squash→merge)",
+                        candidate, prNumber);
+                    continue;
+                }
+
                 var error = DescribeFailure(mergeResult);
                 var code = ClassifyError(error);
                 logger?.LogError("Failed to merge PR #{Pr}: {Error}", prNumber, error);
                 return MergeOutcome.Failed(code, error);
+            }
+
+            if (mergedOk is null)
+            {
+                // Every method in the fixed order was typed-unsupported —
+                // fail LOUD (DG-4's "fail loud only if none work").
+                logger?.LogError("No merge method accepted by the platform for PR #{Pr}", prNumber);
+                return MergeOutcome.Failed(
+                    "merge_method_unsupported",
+                    "the platform refused every merge method in the fallback order (rebase, squash, merge)");
             }
 
             var mergeSha = mergedOk.Value.MergeCommitSha ?? "";
@@ -315,12 +355,17 @@ public class MergePullRequestActivity : TammaOutcomeActivity
                 return MergeOutcome.Failed("api_error", "merge reported success but returned no commit SHA");
             }
 
-            logger?.LogInformation("Merged PR #{Pr} (strategy {Strategy}) → {Sha}", prNumber, strategy, mergeSha);
+            logger?.LogInformation("Merged PR #{Pr} (strategy {Strategy}) → {Sha}", prNumber, appliedStrategy, mergeSha);
 
             // ── 3. Verified post-merge cleanup ──
-            return await CompletePostMergeAsync(
+            var outcome = await CompletePostMergeAsync(
                 client, owner, repoName, issueNumber, branchName, mergeSha,
                 alreadyMerged: false, autoDeleteBranch, closeIssue, logger);
+            return outcome with
+            {
+                AppliedStrategy = appliedStrategy,
+                MethodFallbackFrom = appliedStrategy == strategy ? null : strategy,
+            };
         }
         catch (Exception ex)
         {
@@ -337,6 +382,36 @@ public class MergePullRequestActivity : TammaOutcomeActivity
             "rebase" => Tamma.Platforms.Abstractions.Models.MergeMethod.Rebase,
             _ => Tamma.Platforms.Abstractions.Models.MergeMethod.Squash,
         };
+
+    /// <summary>DG-4's fixed fallback order. The requested method is tried
+    /// first; when the platform answers the exact typed
+    /// <c>merge_method_unsupported</c> code, the remaining methods are tried
+    /// in the owner-decided order rebase→squash→merge.</summary>
+    internal static readonly string[] MethodFallbackOrder = ["rebase", "squash", "merge"];
+
+    /// <summary>Requested method first, then the fixed order minus it.</summary>
+    internal static IReadOnlyList<string> BuildMethodFallbackOrder(string requested)
+    {
+        var normalized = NormalizeStrategy(requested);
+        var order = new List<string>(4) { normalized };
+        foreach (var m in MethodFallbackOrder)
+        {
+            if (!string.Equals(m, normalized, StringComparison.Ordinal)) order.Add(m);
+        }
+        return order;
+    }
+
+    /// <summary>§4.5 exact-code classification: ONLY the typed
+    /// <c>merge_method_unsupported</c> InvalidRequest code (ordinal match —
+    /// GitLab's rebase refusal answers exactly this) is consumed by the DG-4
+    /// fallback. Everything else — including <c>capability_unsupported</c>
+    /// (the whole merge verb missing; another method cannot help) — stays a
+    /// real failure.</summary>
+    internal static bool IsMergeMethodUnsupported(
+        Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest> result) =>
+        result is Tamma.Platforms.Abstractions.PlatformResult<Tamma.Platforms.Abstractions.Models.PullRequest>.Failed f
+        && f.Error is Tamma.Platforms.Abstractions.PlatformError.InvalidRequest ir
+        && string.Equals(ir.Code, "merge_method_unsupported", StringComparison.Ordinal);
 
     private static string DescribeFailure<T>(Tamma.Platforms.Abstractions.PlatformResult<T> result) =>
         result switch
@@ -476,7 +551,7 @@ public class MergePullRequestActivity : TammaOutcomeActivity
 /// merge; the workflow's <c>SetSuccess</c> reads <c>Outcome != "Error"</c>, NOT a
 /// non-empty SHA (the old false-success inference).
 /// </summary>
-public sealed class MergeOutcome
+public sealed record MergeOutcome
 {
     public string Outcome { get; init; } = "Error";
     public string? MergeSha { get; init; }
@@ -486,6 +561,18 @@ public sealed class MergeOutcome
     public bool Partial { get; init; }
     public string? FailureCode { get; init; }
     public string? FailureReason { get; init; }
+
+    // ── Epic 31 P5 M2 (DG-4) — merge-method fallback read-backs. ──
+
+    /// <summary>The strategy that actually performed the merge (null on
+    /// failure paths and on the idempotent already-merged path).</summary>
+    public string? AppliedStrategy { get; init; }
+
+    /// <summary>The originally requested strategy when the fixed-order
+    /// fallback re-routed the merge; null when no fallback occurred. A
+    /// non-null value is mirrored by a GIT.PR_MERGE.METHOD_FALLBACK audit
+    /// event at the mediation layer.</summary>
+    public string? MethodFallbackFrom { get; init; }
 
     /// <summary>True when the merge happened (clean OR with warnings).</summary>
     public bool MergeSucceeded => Outcome != "Error";
