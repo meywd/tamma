@@ -96,10 +96,22 @@ public sealed class GiteaContainerFixture : PlatformIntegrationFixture
             // Disable mailer + actions registration token endpoint
             // checks so the cold boot is fast.
             .WithEnvironment("GITEA__mailer__ENABLED", "false")
+            // Epic 31 P5 M3 — Gitea blocks webhook deliveries to private /
+            // loopback addresses by default (webhook.ALLOWED_HOST_LIST =
+            // external, since 1.15). The E2E's callback URL resolves to the
+            // docker host gateway (a private address), so the fixture must
+            // allow it or every delivery is silently dropped.
+            .WithEnvironment("GITEA__webhook__ALLOWED_HOST_LIST", "*")
             // Random-port mapping; testcontainers picks an unused
             // host port and exposes it as GetMappedPublicPort(3000).
             .WithPortBinding(3000, true)
             .WithPortBinding(22, true)
+            // Epic 31 P5 M3 — the full-stack E2E runs Tamma.Api as a HOST
+            // process; Gitea's outbound webhooks must reach it, so the
+            // container resolves host.docker.internal to the docker host
+            // gateway (Linux needs the explicit --add-host; Docker Desktop
+            // provides it natively and tolerates the duplicate).
+            .WithExtraHost("host.docker.internal", "host-gateway")
             .Build();
 
         await _container.StartAsync(ct).ConfigureAwait(false);

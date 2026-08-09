@@ -111,3 +111,49 @@ The Docker probe runs once at type init (cached for the whole test
 run lifetime) — no per-test daemon round-trips. See
 `DockerAvailability.cs:1` for the implementation pattern, mirroring
 the wave-A `chromadb.integration.test.ts` gating.
+
+## Epic 31 P5 M3 — the Gitea full-stack E2E vehicle
+
+`GiteaFullStackE2ETests` (+ `Fixtures/GiteaFullStackFixture`) is the
+compose-style acceptance vehicle for the epic's headline: the cycle's
+git surface completes on Gitea with ZERO GitHub configuration.
+
+Topology (one logical deployment):
+
+```
+┌ containers ────────────────────────────┐   ┌ host processes ───────────┐
+│ gitea/gitea:1.21   postgres:17 ×2      │   │ Tamma.Api (REAL binary,   │
+│  └ webhooks → host.docker.internal ────┼──▶│  dotnet Tamma.Api.dll,    │
+│    (--add-host host-gateway)           │◀──┼─ driver HTTP → Gitea)     │
+└────────────────────────────────────────┘   └───────────────────────────┘
+```
+
+- Single-user activation via the `Platform:` config tier (kind=gitea +
+  the fixture bot PAT). Nothing persisted; no onboarding call.
+- Every `GitHub*`/`GitHub__*` env var is scrubbed from the API child
+  process; the zero-GitHub test pins it (plus: no tenant platform
+  installations, and the only `github_installations` row is the
+  mediation guard's repo-GRANT row with AppId=0 — the guard registry
+  is GitHub-named but platform-agnostic in role; naming cleanup is a
+  recorded follow-up).
+- `Tamma:PublicBaseUrl=http://host.docker.internal:{port}` +
+  `Webhooks:Secrets:gitea` make the P4 startup registrar leave a live
+  hook whose merged-PR delivery crosses the container gateway back
+  into the 31-7 receiver (asserted via `platform_webhook_deliveries`).
+- The suite is `Category=GiteaE2E` + `Nightly`: it rides the
+  `gitea-e2e-nightly` job (schedule / workflow_dispatch / PR label
+  `run-gitea-e2e`). Run locally with:
+
+  ```bash
+  dotnet build Tamma.sln          # the fixture launches src/Tamma.Api's own bin output
+  dotnet test tests/Tamma.Platforms.IntegrationTests --filter "TestCategory=GiteaE2E"
+  ```
+
+Recorded gap (see the explicitly-Ignored
+`FullEngineCycle_SingleIssue_CompletesOnGitea`): driving the cycle from
+the Tamma.ElsaServer engine process needs an LLM stub — the plan/review/
+task steps run through `POST /api/v1/llm/call` and no fake/echo provider
+exists in the codebase. The scripted no-LLM seam that DOES exist
+(`LocalExecutor`'s `IProcessRunner` / CLI exec-request protocol) covers
+only the agent plane. Until an LLM stub lands, the engine-driven variant
+cannot run anywhere, nightly CI included.
