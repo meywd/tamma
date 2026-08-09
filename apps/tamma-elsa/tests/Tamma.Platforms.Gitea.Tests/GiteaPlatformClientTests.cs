@@ -262,10 +262,37 @@ public class GiteaPlatformClientTests
         pr.Number.Should().Be("99");
         pr.IsDraft.Should().BeTrue();
         var posted = handler.Requests.First(r => r.Method == HttpMethod.Post);
-        posted.Body.Should().Contain("\"title\":\"new\"")
+        // P5 M1 — Gitea has no create-side draft field (ignored server-side);
+        // draft IS the WIP title prefix, so a draft open prefixes the title.
+        posted.Body.Should().Contain("\"title\":\"WIP: new\"")
             .And.Contain("\"head\":\"feat/y\"")
             .And.Contain("\"base\":\"main\"")
             .And.Contain("\"draft\":true");
+    }
+
+    [Test]
+    public async Task OpenPullRequestAsync_DoesNotPrefixTitle_WhenNotDraft()
+    {
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls?state=open",
+            HttpStatusCode.OK, "[]");
+        handler.EnqueueJson(HttpMethod.Post,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls",
+            HttpStatusCode.Created,
+            """
+            {"number":100,"title":"plain","body":null,"state":"open",
+              "merged":false,"draft":false,"html_url":"https://x",
+              "user":{"login":"bot"},
+              "head":{"ref":"feat/z"},"base":{"ref":"main"},
+              "created_at":"2026-04-21T00:00:00Z","updated_at":"2026-04-21T00:00:00Z"}
+            """);
+
+        await client.OpenPullRequestAsync(new OpenPullRequestRequest(
+            "octo", "repo", "plain", "feat/z", "main", IsDraft: false));
+
+        var posted = handler.Requests.First(r => r.Method == HttpMethod.Post);
+        posted.Body.Should().Contain("\"title\":\"plain\"");
     }
 
     // ───────────── GetPullRequestAsync ─────────────
@@ -465,19 +492,40 @@ public class GiteaPlatformClientTests
     }
 
     [Test]
-    public async Task ListAccessibleReposAsync_StopsOnError()
+    public async Task ListAccessibleReposAsync_ThrowsTyped_OnPlatformRejection()
     {
+        // P5 M1 probe strictness: a 403/401 must THROW typed, never complete
+        // as a silent empty enumeration — otherwise a junk credential passes
+        // the onboarding auth probe (the vacuous-probe class P1 closed for
+        // GitHub).
         var (client, _, handler, _) = GiteaTestFixtures.Build();
         handler.EnqueueJson(HttpMethod.Get,
             "https://gitea.example.com/api/v1/user/repos?page=1",
             HttpStatusCode.Forbidden, "{}");
 
-        var collected = new List<Repo>();
-        await foreach (var r in client.ListAccessibleReposAsync())
+        var act = async () =>
         {
-            collected.Add(r);
-        }
+            await foreach (var _ in client.ListAccessibleReposAsync()) { }
+        };
 
-        collected.Should().BeEmpty();
+        (await act.Should().ThrowAsync<GiteaPlatformApiException>())
+            .Which.Error.Should().BeOfType<PlatformError.PermissionDenied>();
+    }
+
+    [Test]
+    public async Task ListAccessibleReposAsync_ThrowsTyped_OnUnauthorized()
+    {
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/user/repos?page=1",
+            HttpStatusCode.Unauthorized, "{}");
+
+        var act = async () =>
+        {
+            await foreach (var _ in client.ListAccessibleReposAsync()) { }
+        };
+
+        (await act.Should().ThrowAsync<GiteaPlatformApiException>())
+            .Which.Error.Should().BeOfType<PlatformError.AuthExpired>();
     }
 }

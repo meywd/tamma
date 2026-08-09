@@ -27,6 +27,37 @@ public sealed class GiteaPlatformDriver : IGitPlatformDriver
     /// </summary>
     public static readonly Version MinimumActionsVersion = new(1, 21);
 
+    /// <summary>
+    /// Epic 31 P5 M1 — floor for the six 31-13 PR lifecycle verbs. The
+    /// binding constraint is the review-request endpoint
+    /// (<c>POST /repos/{o}/{r}/pulls/{n}/requested_reviewers</c>), present
+    /// since Gitea 1.14 (verified against <c>routers/api/v1/api.go</c> on
+    /// release/v1.14). Close/reopen (PATCH state), issue-side label
+    /// add/remove by id, and the WIP-title draft toggle all predate it.
+    /// Research note (2026-08-09): Gitea has NEVER shipped a <c>draft</c>
+    /// field on Create/EditPullRequestOption (checked v1.19..v1.24 and
+    /// main) — draft state is the WIP title prefix; the response-side
+    /// <c>draft</c> boolean exists only since 1.22 (see
+    /// <see cref="MinimumDraftFieldVersion"/>), so the client infers draft
+    /// from the title prefix on older instances.
+    /// </summary>
+    public static readonly Version MinimumPrLifecycleVersion = new(1, 14);
+
+    /// <summary>
+    /// Lowest Gitea version whose PR API RESPONSES carry the computed
+    /// <c>draft</c> boolean (added in 1.22; absent ≤1.21). Below this the
+    /// client's title-prefix inference is the only draft signal.
+    /// </summary>
+    public static readonly Version MinimumDraftFieldVersion = new(1, 22);
+
+    /// <summary>True when the detected version supports the PR lifecycle
+    /// verb family. A null version (probe failed) is conservatively
+    /// unsupported — the client then answers the typed
+    /// <c>capability_unsupported</c> refusal without touching the network,
+    /// per the capability contract.</summary>
+    public static bool SupportsPrLifecycle(Version? detectedVersion) =>
+        detectedVersion is not null && detectedVersion >= MinimumPrLifecycleVersion;
+
     public PlatformKind Kind => PlatformKind.Gitea;
 
     public IGitPlatformClient Client { get; }
@@ -73,6 +104,13 @@ public sealed class GiteaPlatformDriver : IGitPlatformDriver
             // Gitea Secrets API ships alongside Actions in 1.21; older
             // instances don't have it.
             defaults.Remove(PlatformCapability.Secrets);
+        }
+        // Epic 31 P5 M1 — lifecycle verbs need 1.14+ (requested_reviewers);
+        // a failed version probe conservatively drops the flag so the client
+        // answers typed capability_unsupported instead of guessing.
+        if (!SupportsPrLifecycle(detectedVersion))
+        {
+            defaults.Remove(PlatformCapability.PrLifecycle);
         }
         return defaults;
     }

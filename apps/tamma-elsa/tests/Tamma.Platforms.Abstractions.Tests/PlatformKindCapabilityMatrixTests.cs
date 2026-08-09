@@ -97,15 +97,28 @@ public sealed class PlatformKindCapabilityMatrixTests
     }
 
     [Test]
-    public void PrLifecycle_IsAdvertisedByGitHubOnly()
+    public void PrLifecycle_IsAdvertisedByExactlyTheDriversThatPerformIt()
     {
-        // Story 31-13 — GitHub is the only driver that performs the full PR
-        // lifecycle today; every other kind must NOT advertise it (they return
-        // capability_unsupported).
-        PlatformKindCapabilityMatrix.DefaultsFor(PlatformKind.GitHub)
-            .Should().Contain(PlatformCapability.PrLifecycle);
+        // Story 31-13 shipped GitHub; Epic 31 P5 M1 made Gitea real (PATCH
+        // state / requested_reviewers / issue-side labels / WIP-title draft
+        // toggle) and Forgejo rides the Gitea shim. GitLab is P6; the
+        // deferred kinds (Bitbucket, AzureDevOps) have no driver at all.
+        // The driver-level narrowing (version floor 1.14 on Gitea/Forgejo)
+        // is asserted in the drivers' own ComputeCapabilities tests; the
+        // matrix rows here are the optimistic per-kind defaults.
+        var advertising = new[]
+        {
+            PlatformKind.GitHub, PlatformKind.Gitea, PlatformKind.Forgejo,
+        };
 
-        foreach (var kind in Enum.GetValues<PlatformKind>().Where(k => k != PlatformKind.GitHub))
+        foreach (var kind in advertising)
+        {
+            PlatformKindCapabilityMatrix.DefaultsFor(kind)
+                .Should().Contain(PlatformCapability.PrLifecycle,
+                    $"{kind}'s driver performs the six lifecycle verbs for real");
+        }
+
+        foreach (var kind in Enum.GetValues<PlatformKind>().Except(advertising))
         {
             PlatformKindCapabilityMatrix.DefaultsFor(kind)
                 .Should().NotContain(PlatformCapability.PrLifecycle,

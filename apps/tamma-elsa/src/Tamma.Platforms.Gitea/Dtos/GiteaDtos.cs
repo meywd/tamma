@@ -137,6 +137,19 @@ internal sealed class GiteaPullRequestDto
     [JsonPropertyName("merged")]
     public bool Merged { get; set; }
 
+    /// <summary>Present on every supported version (json name is
+    /// <c>merge_commit_sha</c> even though the Go field is
+    /// <c>MergedCommitID</c>).</summary>
+    [JsonPropertyName("merge_commit_sha")]
+    public string? MergeCommitSha { get; set; }
+
+    /// <summary>False while the merge-check is still running AND on a
+    /// confirmed conflict — the mapper only surfaces a positive true.</summary>
+    [JsonPropertyName("mergeable")]
+    public bool Mergeable { get; set; }
+
+    /// <summary>Response-side draft boolean — Gitea 1.22+ only (computed
+    /// server-side from the WIP title prefix); absent ≤1.21.</summary>
     [JsonPropertyName("draft")]
     public bool Draft { get; set; }
 

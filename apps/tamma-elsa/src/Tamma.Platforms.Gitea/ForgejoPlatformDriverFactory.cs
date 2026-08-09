@@ -109,7 +109,8 @@ public sealed class ForgejoPlatformDriverFactory : IGitPlatformDriverFactory
         var client = new GiteaPlatformClient(
             giteaHttp,
             host,
-            _loggerFactory.CreateLogger<GiteaPlatformClient>());
+            _loggerFactory.CreateLogger<GiteaPlatformClient>(),
+            detected);
 
         IGitPlatformActionsClient? actions = null;
         if (capabilities.Contains(PlatformCapability.Actions))

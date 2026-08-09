@@ -196,11 +196,26 @@ public sealed class PlatformConnectService : IPlatformConnectService
                     $"Factory for {request.Kind} reports Kind={factory.Kind}.");
             }
 
-            // Probe the driver. Different platforms accept different
-            // probe shapes — we run a no-op pagination over the
-            // accessible-repos enumerable. Drivers without that
-            // capability return an empty sequence; the call still
-            // exercises the auth handshake.
+            // Epic 31 P5 M1 — probe STRICTNESS (the plan's class-closing
+            // fix): a driver that cannot enumerate accessible repos cannot
+            // prove the credential authenticates, so connect FAILS instead
+            // of treating an un-probed credential as connected. (GitHub's
+            // instance of the vacuous probe was fixed in P1 by making its
+            // listing throw typed; this closes the class for every kind —
+            // Gitea/GitLab listings now also throw typed on failure rather
+            // than yielding an empty "success".)
+            if (!driver.Capabilities.Contains(PlatformCapability.ListAccessibleRepos))
+            {
+                return PlatformConnectResult.Failure(
+                    "auth_probe_unsupported",
+                    $"The {request.Kind} driver cannot enumerate accessible repos, " +
+                    "so the credential cannot be verified at connect time.");
+            }
+
+            // Probe the driver: a no-op pagination over the accessible-repos
+            // enumerable. An empty yield now genuinely means "this credential
+            // sees zero repos" (still a successful auth handshake); an auth
+            // or transport failure throws typed and lands in the catch below.
             await foreach (var _ in driver.Client.ListAccessibleReposAsync(ct)
                 .ConfigureAwait(false))
             {

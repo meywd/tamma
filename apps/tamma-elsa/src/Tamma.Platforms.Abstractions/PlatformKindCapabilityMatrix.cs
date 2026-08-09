@@ -63,6 +63,13 @@ public static class PlatformKindCapabilityMatrix
                 PlatformCapability.PrFileReview,
                 PlatformCapability.WebhookHmac,
                 PlatformCapability.ListAccessibleRepos,
+                // Epic 31 P5 M1 — the Gitea driver implements the six 31-13
+                // lifecycle verbs for real (PATCH state, requested_reviewers,
+                // issue-side labels, WIP-title draft toggle). The driver's
+                // ComputeCapabilities narrows this away below the 1.14 floor
+                // (requested_reviewers endpoint) or when the version probe
+                // failed.
+                PlatformCapability.PrLifecycle,
                 // PerAppInstallationAuth: Gitea OAuth2 apps support
                 // installation-style flows but only partial vs GitHub.
                 // Driver may add it conditionally in 31-4.
@@ -76,6 +83,10 @@ public static class PlatformKindCapabilityMatrix
                 PlatformCapability.PrFileReview,
                 PlatformCapability.WebhookHmac,
                 PlatformCapability.ListAccessibleRepos,
+                // Epic 31 P5 M1 — Forgejo rides the Gitea shim, so the
+                // lifecycle verbs are real here too (same version floor,
+                // narrowed by ForgejoPlatformDriver.ComputeCapabilities).
+                PlatformCapability.PrLifecycle,
                 // Forgejo retains Gitea API compat; 31-5 ships a
                 // compat-mode driver that re-uses Gitea's. Same
                 // baseline.

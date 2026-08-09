@@ -205,7 +205,8 @@ public class PlatformCapabilityContractTests
             () => handler.Count);
     }
 
-    private static DriverCase GiteaStyleCase(string name, IReadOnlySet<PlatformCapability> capabilities)
+    private static DriverCase GiteaStyleCase(
+        string name, IReadOnlySet<PlatformCapability> capabilities, Version? detectedVersion)
     {
         var handler = new CountingAlways500Handler();
         var http = new GiteaHttpClient(
@@ -217,7 +218,10 @@ public class PlatformCapabilityContractTests
         return new DriverCase(
             name,
             capabilities,
-            new GiteaPlatformClient(http, "gitea.example"),
+            // The factory hands the client the SAME detected version it fed
+            // ComputeCapabilities — mirrored here so flag and verb reality
+            // stay the paired product the contract pins.
+            new GiteaPlatformClient(http, "gitea.example", detectedVersion: detectedVersion),
             () => handler.Count);
     }
 
@@ -226,12 +230,21 @@ public class PlatformCapabilityContractTests
         yield return GitHubCase();
 
         // Version 1.22 ≥ MinimumActionsVersion so nothing is narrowed away —
-        // the fullest capability set the driver can compute.
+        // the fullest capability set the driver can compute (incl. the P5 M1
+        // PrLifecycle flag, floor 1.14).
         yield return GiteaStyleCase(
-            "Gitea", GiteaPlatformDriver.ComputeCapabilities(new Version(1, 22)));
+            "Gitea", GiteaPlatformDriver.ComputeCapabilities(new Version(1, 22)), new Version(1, 22));
 
         yield return GiteaStyleCase(
-            "Forgejo", ForgejoPlatformDriver.ComputeCapabilities(new Version(1, 22)));
+            "Forgejo", ForgejoPlatformDriver.ComputeCapabilities(new Version(1, 22)), new Version(1, 22));
+
+        // Epic 31 P5 M1 — the version-narrowed shape: a Gitea whose version
+        // probe FAILED must not advertise PrLifecycle and its verbs must
+        // answer the typed refusal without touching the network. Pinning
+        // this case keeps ComputeCapabilities and the client's version gate
+        // from drifting apart.
+        yield return GiteaStyleCase(
+            "Gitea (version unknown)", GiteaPlatformDriver.ComputeCapabilities(null), null);
 
         var gitlabHandler = new CountingAlways500Handler();
         yield return new DriverCase(

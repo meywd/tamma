@@ -93,6 +93,14 @@ public sealed class ForgejoPlatformDriver : IGitPlatformDriver
             defaults.Remove(PlatformCapability.Artifacts);
             defaults.Remove(PlatformCapability.Secrets);
         }
+        // Epic 31 P5 M1 — lifecycle floor mirrors Gitea's (Forgejo forked at
+        // 1.18, well above the 1.14 requested_reviewers floor; Forgejo v7+
+        // reports 7.x/12.x-style versions that also clear it). Kept as an
+        // explicit line so a future Forgejo divergence is a one-line edit.
+        if (!GiteaPlatformDriver.SupportsPrLifecycle(detectedVersion))
+        {
+            defaults.Remove(PlatformCapability.PrLifecycle);
+        }
         return defaults;
     }
 }
