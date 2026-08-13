@@ -72,19 +72,56 @@ public sealed class PlatformEngineCallbackService : IEngineGitCallbackService
     private readonly IPlatformResolver _resolver;
     private readonly IEventRepository _events;
     private readonly ILogger<PlatformEngineCallbackService> _logger;
+    private readonly Tamma.Data.Repositories.IInstallationRepository? _appInstallations;
 
     public PlatformEngineCallbackService(
         IPlatformResolver resolver,
         IEventRepository events,
-        ILogger<PlatformEngineCallbackService> logger)
+        ILogger<PlatformEngineCallbackService> logger,
+        Tamma.Data.Repositories.IInstallationRepository? appInstallations = null)
     {
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _appInstallations = appInstallations;
     }
 
-    private async Task<IGitPlatformClient?> ResolveClientAsync(Guid? tenantId, CancellationToken ct)
+    /// <summary>
+    /// Epic 31 review (F-high) — PER-REPO installation resolution first,
+    /// tenant-primary mediation resolution second. The pre-Epic-31 engine
+    /// callback resolved the App installation PER REPO; the P3 swap replaced
+    /// that with tenant-primary, so a tenant with the App on multiple
+    /// installations got 404s (a GitHub App installation token cannot see a
+    /// sibling installation's repos) on every repo of the non-primary
+    /// installation — work selection silently stopped there.
+    /// </summary>
+    private async Task<IGitPlatformClient?> ResolveClientAsync(
+        Guid? tenantId, string owner, string repo, CancellationToken ct)
     {
+        if (tenantId is { } tid && tid != Guid.Empty && _appInstallations is not null)
+        {
+            try
+            {
+                var install = await _appInstallations
+                    .GetByRepoFullNameAsync($"{owner}/{repo}")
+                    .ConfigureAwait(false);
+                if (install?.TenantId == tid)
+                {
+                    var perRepo = await _resolver.ResolveForRepoInstallationAsync(
+                        tid, PlatformKind.GitHub,
+                        install.InstallationId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ct).ConfigureAwait(false);
+                    if (perRepo is not null) return perRepo.Client;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "Per-repo installation resolution failed for {Owner}/{Repo}; "
+                    + "falling back to tenant-primary resolution", owner, repo);
+            }
+        }
+
         var resolution = await _resolver.ResolveForMediationAsync(tenantId, ct).ConfigureAwait(false);
         return resolution?.Driver.Client;
     }
@@ -94,7 +131,7 @@ public sealed class PlatformEngineCallbackService : IEngineGitCallbackService
     public async Task<GitHubCallbackResult<JsonElement>> ReadRepoConfigAsync(
         Guid? tenantId, string owner, string repo, string branch, CancellationToken ct = default)
     {
-        var client = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
+        var client = await ResolveClientAsync(tenantId, owner, repo, ct).ConfigureAwait(false);
         if (client is null) return GitHubCallbackResult<JsonElement>.NotConfigured();
 
         foreach (var path in RepoConfigPaths)
@@ -137,7 +174,7 @@ public sealed class PlatformEngineCallbackService : IEngineGitCallbackService
         Guid? tenantId, string owner, string repo, string state, string? labels, int perPage, int page,
         CancellationToken ct = default)
     {
-        var client = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
+        var client = await ResolveClientAsync(tenantId, owner, repo, ct).ConfigureAwait(false);
         if (client is null) return GitHubCallbackResult<IssueListResult>.NotConfigured();
 
         var labelList = string.IsNullOrWhiteSpace(labels)
@@ -158,7 +195,7 @@ public sealed class PlatformEngineCallbackService : IEngineGitCallbackService
     public async Task<GitHubCallbackResult<SecurityAlertResult>> ListSecurityAlertsAsync(
         Guid? tenantId, string owner, string repo, string alertType, CancellationToken ct = default)
     {
-        var client = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
+        var client = await ResolveClientAsync(tenantId, owner, repo, ct).ConfigureAwait(false);
         if (client is null) return GitHubCallbackResult<SecurityAlertResult>.NotConfigured();
 
         var res = await client.ListSecurityAlertsAsync(owner, repo, alertType, ct).ConfigureAwait(false);
@@ -188,7 +225,7 @@ public sealed class PlatformEngineCallbackService : IEngineGitCallbackService
     public async Task<GitHubCallbackResult<IssueCommentResult>> PostIssueCommentAsync(
         Guid? tenantId, string owner, string repo, int issueNumber, string body, CancellationToken ct = default)
     {
-        var client = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
+        var client = await ResolveClientAsync(tenantId, owner, repo, ct).ConfigureAwait(false);
         if (client is null) return GitHubCallbackResult<IssueCommentResult>.NotConfigured();
 
         var res = await client.CreateIssueCommentAsync(
@@ -205,7 +242,7 @@ public sealed class PlatformEngineCallbackService : IEngineGitCallbackService
     public async Task<GitHubCallbackResult<string[]>> AddIssueLabelsAsync(
         Guid? tenantId, string owner, string repo, int issueNumber, string[] labels, CancellationToken ct = default)
     {
-        var client = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
+        var client = await ResolveClientAsync(tenantId, owner, repo, ct).ConfigureAwait(false);
         if (client is null) return GitHubCallbackResult<string[]>.NotConfigured();
 
         var res = await client.AddIssueLabelsAsync(
@@ -218,7 +255,7 @@ public sealed class PlatformEngineCallbackService : IEngineGitCallbackService
     public async Task<GitHubCallbackResult<bool>> RemoveIssueLabelAsync(
         Guid? tenantId, string owner, string repo, int issueNumber, string label, CancellationToken ct = default)
     {
-        var client = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
+        var client = await ResolveClientAsync(tenantId, owner, repo, ct).ConfigureAwait(false);
         if (client is null) return GitHubCallbackResult<bool>.NotConfigured();
 
         var res = await client.RemoveIssueLabelAsync(
@@ -232,7 +269,7 @@ public sealed class PlatformEngineCallbackService : IEngineGitCallbackService
         Guid? tenantId, string owner, string repo, string title, string? body,
         string[]? labels, string[]? assignees, CancellationToken ct = default)
     {
-        var client = await ResolveClientAsync(tenantId, ct).ConfigureAwait(false);
+        var client = await ResolveClientAsync(tenantId, owner, repo, ct).ConfigureAwait(false);
         if (client is null) return GitHubCallbackResult<CreatedIssueResult>.NotConfigured();
 
         var res = await client.CreateIssueAsync(

@@ -47,11 +47,14 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
     private static readonly int[] RetryDelaysMs = { 1000, 2000, 4000 };
     private const string DefaultWorkflowFile = "tamma-agent.yml";
 
-    /// <summary>The GitHub driver's typed "dispatch accepted but the run could
-    /// not be correlated" message prefix — the dispatch itself SUCCEEDED, so it
-    /// maps to a successful trigger with no run URL (the monitor discovers it),
-    /// exactly like the pre-swap 204 path.</summary>
-    internal const string DispatchAcceptedPrefix = "dispatch accepted";
+    /// <summary>The Actions driver's typed "dispatch accepted but the run
+    /// could not be correlated" message prefix — the dispatch itself
+    /// SUCCEEDED, so it maps to a successful trigger with no run URL (the
+    /// monitor discovers it), exactly like the pre-swap 204 path. Epic 31
+    /// review (F-medium): now the SHARED abstraction constant so the CI
+    /// mediation plane applies the same interpretation instead of
+    /// coarsening the miss into a hard trigger failure.</summary>
+    internal const string DispatchAcceptedPrefix = PlatformErrorText.DispatchAcceptedPrefix;
 
     public AgentDispatchMediationService(
         IGitRepoAuthorizer authorizer,
@@ -73,8 +76,38 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
     // Driver resolution
     // ===================================================================
 
-    private async Task<IGitPlatformDriver?> ResolveDriverAsync(Guid? tenantId, CancellationToken ct)
+    /// <summary>
+    /// Epic 31 review (F-high) — PER-REPO installation resolution first
+    /// (repo → App-plane installation row → that installation's driver,
+    /// tenant-scoped), tenant-primary mediation resolution second. The
+    /// pre-swap <c>OctokitGitHubActionsClient</c> resolved per repo; riding
+    /// the tenant-primary driver 404s for repos of a sibling installation
+    /// (a GitHub App installation token cannot see them).
+    /// </summary>
+    private async Task<IGitPlatformDriver?> ResolveDriverAsync(Guid? tenantId, string repo, CancellationToken ct)
     {
+        if (tenantId is { } tid && tid != Guid.Empty)
+        {
+            try
+            {
+                var install = await _installations.GetByRepoFullNameAsync(repo).ConfigureAwait(false);
+                if (install?.TenantId == tid)
+                {
+                    var perRepo = await _platformResolver.ResolveForRepoInstallationAsync(
+                        tid, PlatformKind.GitHub,
+                        install.InstallationId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ct).ConfigureAwait(false);
+                    if (perRepo is not null) return perRepo;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "Per-repo installation resolution failed for {Repo}; "
+                    + "falling back to tenant-primary resolution", LogSanitizer.Clean(repo));
+            }
+        }
+
         var resolution = await _platformResolver.ResolveForMediationAsync(tenantId, ct).ConfigureAwait(false);
         return resolution?.Driver;
     }
@@ -120,7 +153,7 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
                 AgentDispatchFailureCodes.PlatformError, $"Invalid repository format '{repo}' (expected 'owner/repo')", null, ct)
                 .ConfigureAwait(false);
 
-        var driver = await ResolveDriverAsync(tenantId, ct).ConfigureAwait(false);
+        var driver = await ResolveDriverAsync(tenantId, repo, ct).ConfigureAwait(false);
         if (driver?.Actions is null)
             return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
                 AgentDispatchFailureCodes.ActionsNotConfigured,
@@ -300,7 +333,7 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
         if (!parsed)
             return await PollNotFoundAsync(tenantId, repo, op, correlationId, null, ct).ConfigureAwait(false);
 
-        var driver = await ResolveDriverAsync(tenantId, ct).ConfigureAwait(false);
+        var driver = await ResolveDriverAsync(tenantId, repo, ct).ConfigureAwait(false);
         if (driver?.Actions is null)
             return await PollNotFoundAsync(tenantId, repo, op, correlationId, null, ct).ConfigureAwait(false);
 
@@ -353,7 +386,7 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
         if (!parsed)
             return await PollNotFoundAsync(tenantId, repo, op, correlationId, runId, ct).ConfigureAwait(false);
 
-        var driver = await ResolveDriverAsync(tenantId, ct).ConfigureAwait(false);
+        var driver = await ResolveDriverAsync(tenantId, repo, ct).ConfigureAwait(false);
         if (driver?.Actions is null)
             return await PollNotFoundAsync(tenantId, repo, op, correlationId, runId, ct).ConfigureAwait(false);
 
@@ -465,7 +498,7 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
             return badRepo;
         }
 
-        var driver = await ResolveDriverAsync(tenantId, ct).ConfigureAwait(false);
+        var driver = await ResolveDriverAsync(tenantId, repo, ct).ConfigureAwait(false);
         if (driver is null)
         {
             var noDriver = new AgentRunResultsResult

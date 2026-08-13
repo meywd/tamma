@@ -40,6 +40,26 @@ public static class PlatformErrorText
         && string.Equals(ir.Code, CapabilityUnsupportedCode, StringComparison.Ordinal);
 
     /// <summary>
+    /// Epic 31 review (F-medium) — the message prefix an Actions driver's
+    /// <c>DispatchWorkflowAsync</c> uses when the platform ACCEPTED the
+    /// dispatch (204) but the created run could not be correlated within
+    /// the probe window. The run is (very likely) starting — a caller that
+    /// treats this answer as a trigger FAILURE re-dispatches a run that is
+    /// already executing (duplicate CI/agent runs) or escalates spuriously.
+    /// Both mediation planes (agent-dispatch and CI) special-case it as
+    /// success-without-a-correlated-run via
+    /// <see cref="IsDispatchAcceptedCorrelationMiss(PlatformError)"/>.
+    /// </summary>
+    public const string DispatchAcceptedPrefix = "dispatch accepted (204)";
+
+    /// <summary>True iff <paramref name="error"/> is the driver's typed
+    /// "accepted but not correlated" answer (prefix match on the
+    /// <see cref="PlatformError.Unknown"/> reason).</summary>
+    public static bool IsDispatchAcceptedCorrelationMiss(PlatformError error) =>
+        error is PlatformError.Unknown u
+        && u.Reason.StartsWith(DispatchAcceptedPrefix, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Project a typed error into the legacy status-prefixed string.
     /// </summary>
     public static string ToLegacyString(PlatformError error)

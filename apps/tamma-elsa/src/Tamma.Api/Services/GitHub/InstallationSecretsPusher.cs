@@ -47,15 +47,18 @@ public sealed class DriverInstallationSecretsPusher : IInstallationSecretsPusher
     public const string NotConfiguredError = "github_client_not_configured";
 
     private readonly IPlatformResolver _resolver;
+    private readonly Tamma.Data.Repositories.IInstallationRepository? _appInstallations;
     private readonly ILogger<DriverInstallationSecretsPusher> _logger;
 
     public DriverInstallationSecretsPusher(
         IPlatformResolver resolver,
-        ILogger<DriverInstallationSecretsPusher> logger)
+        ILogger<DriverInstallationSecretsPusher> logger,
+        Tamma.Data.Repositories.IInstallationRepository? appInstallations = null)
     {
         ArgumentNullException.ThrowIfNull(resolver);
         ArgumentNullException.ThrowIfNull(logger);
         _resolver = resolver;
+        _appInstallations = appInstallations;
         _logger = logger;
     }
 
@@ -69,64 +72,127 @@ public sealed class DriverInstallationSecretsPusher : IInstallationSecretsPusher
         ArgumentNullException.ThrowIfNull(repos);
         if (repos.Count == 0) return Array.Empty<SecretProvisionResult>();
 
-        ICiSecretsProvisioner? secrets = null;
+        // Epic 31 review (F-high) — group repos by the App-plane installation
+        // that owns them and resolve PER INSTALLATION: a tenant with the App
+        // on multiple installations cannot push a sibling installation's
+        // repos through the tenant-primary driver (its token cannot see
+        // them). Repos without a registry row (BYOK / single-installation)
+        // ride the tenant's GitHub-kind driver, the pre-review behavior.
+        var groups = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        for (var i = 0; i < repos.Count; i++)
+        {
+            var key = string.Empty; // "" = tenant-kind fallback tier
+            if (_appInstallations is not null)
+            {
+                try
+                {
+                    var install = await _appInstallations
+                        .GetByRepoFullNameAsync($"{repos[i].Owner}/{repos[i].Repo}")
+                        .ConfigureAwait(false);
+                    if (install?.TenantId == tenantId)
+                    {
+                        key = install.InstallationId.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex,
+                        "Repo→installation lookup failed for {Owner}/{Repo}; using the tenant driver",
+                        repos[i].Owner, repos[i].Repo);
+                }
+            }
+            (groups.TryGetValue(key, out var list) ? list : groups[key] = new List<int>()).Add(i);
+        }
+
+        var results = new SecretProvisionResult[repos.Count];
+        foreach (var (installationExternalId, indexes) in groups)
+        {
+            var secrets = await ResolveSecretsAsync(tenantId, installationExternalId, ct)
+                .ConfigureAwait(false);
+            if (secrets is null)
+            {
+                // The retired seam's degraded mode, verbatim: the repo reports
+                // github_client_not_configured so the caller's summary shows
+                // exactly which repos still need the secret.
+                foreach (var i in indexes)
+                {
+                    results[i] = new SecretProvisionResult(
+                        repos[i].Owner, repos[i].Repo, false, NotConfiguredError);
+                }
+                continue;
+            }
+
+            var targets = indexes
+                .Select(i => (CiSecretTarget)new CiSecretTarget.Repo(repos[i].Owner, repos[i].Repo))
+                .ToList();
+
+            IReadOnlyList<CiSecretProvisionResult> provisioned;
+            try
+            {
+                provisioned = await secrets.ProvisionSecretAsync(
+                    CiSecretScope.Repo,
+                    targets,
+                    secretName,
+                    new RedactedSecret(secretValue),
+                    metadata: null,
+                    ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "CI-secrets push threw for tenant {TenantId}; recording per-repo failures", tenantId);
+                foreach (var i in indexes)
+                {
+                    results[i] = new SecretProvisionResult(
+                        repos[i].Owner, repos[i].Repo, false, $"unknown:{ex.GetType().Name}");
+                }
+                continue;
+            }
+
+            // Map back positionally — the provisioner returns one result per
+            // target in order.
+            for (var j = 0; j < indexes.Count; j++)
+            {
+                var i = indexes[j];
+                results[i] = j < provisioned.Count
+                    ? new SecretProvisionResult(
+                        repos[i].Owner, repos[i].Repo, provisioned[j].Success, provisioned[j].Error)
+                    : new SecretProvisionResult(
+                        repos[i].Owner, repos[i].Repo, false, "unknown:missing_result");
+            }
+        }
+        return results;
+    }
+
+    /// <summary>Resolve the secrets surface for one group: the specific
+    /// installation when the repo registry named one, else the tenant's
+    /// GitHub-kind driver; a per-installation miss also falls back to the
+    /// tenant driver (never a widened credential — the fallback is the same
+    /// tenant's own primary installation).</summary>
+    private async Task<ICiSecretsProvisioner?> ResolveSecretsAsync(
+        Guid tenantId, string installationExternalId, CancellationToken ct)
+    {
         try
         {
-            var driver = await _resolver
+            IGitPlatformDriver? driver = null;
+            if (installationExternalId.Length > 0)
+            {
+                driver = await _resolver
+                    .ResolveForRepoInstallationAsync(
+                        tenantId, PlatformKind.GitHub, installationExternalId, ct)
+                    .ConfigureAwait(false);
+            }
+            driver ??= await _resolver
                 .ResolveForTenantAsync(tenantId, PlatformKind.GitHub, ct)
                 .ConfigureAwait(false);
-            secrets = driver?.CiSecrets;
+            return driver?.CiSecrets;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex,
                 "GitHub driver resolution failed for tenant {TenantId} during secret push", tenantId);
+            return null;
         }
-
-        if (secrets is null)
-        {
-            // The retired seam's degraded mode, verbatim: every repo reports
-            // github_client_not_configured so the caller's summary shows
-            // exactly which repos still need the secret.
-            return repos
-                .Select(r => new SecretProvisionResult(r.Owner, r.Repo, false, NotConfiguredError))
-                .ToList();
-        }
-
-        var targets = repos
-            .Select(r => (CiSecretTarget)new CiSecretTarget.Repo(r.Owner, r.Repo))
-            .ToList();
-
-        IReadOnlyList<CiSecretProvisionResult> results;
-        try
-        {
-            results = await secrets.ProvisionSecretAsync(
-                CiSecretScope.Repo,
-                targets,
-                secretName,
-                new RedactedSecret(secretValue),
-                metadata: null,
-                ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(ex,
-                "CI-secrets push threw for tenant {TenantId}; recording per-repo failures", tenantId);
-            return repos
-                .Select(r => new SecretProvisionResult(
-                    r.Owner, r.Repo, false, $"unknown:{ex.GetType().Name}"))
-                .ToList();
-        }
-
-        // Map back positionally — the provisioner returns one result per
-        // target in order.
-        var mapped = new List<SecretProvisionResult>(results.Count);
-        for (var i = 0; i < results.Count; i++)
-        {
-            var (owner, repo) = i < repos.Count ? repos[i] : ("", "");
-            mapped.Add(new SecretProvisionResult(
-                owner, repo, results[i].Success, results[i].Error));
-        }
-        return mapped;
     }
 }

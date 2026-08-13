@@ -271,6 +271,55 @@ public class CiMediationServiceTests
     }
 
     // ================================================================
+    // Epic 31 review (F-medium) — a dispatch-accepted correlation MISS is
+    // success-without-a-correlated-run (the run is starting), never a hard
+    // trigger failure: coarsening it re-triggered a run that was already
+    // executing (duplicate CI) or escalated spuriously. Same posture the
+    // agent-dispatch plane already had.
+    // ================================================================
+
+    [Test]
+    public async Task TriggerTests_DispatchAcceptedButUncorrelated_IsSuccess_WithUnpollableSentinelRunId()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Platform, _actions.Object);
+        _actions.Setup(a => a.DispatchWorkflowAsync(
+                "acme", "widgets", It.IsAny<WorkflowDispatchRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<WorkflowRun>(new PlatformError.Unknown(
+                PlatformErrorText.DispatchAcceptedPrefix
+                + " but the created run could not be correlated; the run may still start")));
+
+        var result = await _sut.TriggerTestsAsync(_tenant, Repo, TriggerBody());
+
+        result.Success.Should().BeTrue(
+            "the platform ACCEPTED the dispatch (204) — only the run correlation missed");
+        result.TestRun!.RunId.Should().Be("unknown",
+            "DG-5's unpollable sentinel: the CI-wait poller excludes it (the webhook "
+            + "accelerator / timeout SLA own the wait) instead of polling a fabricated id");
+        _actions.Verify(a => a.GetRunStatusAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never, "there is no correlated run to poll");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(CiEventTypes.TestsTriggeredSuccess);
+    }
+
+    [Test]
+    public async Task TriggerTests_OtherUnknownError_StaysAHardFailure()
+    {
+        // Only the exact dispatch-accepted prefix is success — any other
+        // Unknown is a real failure (mis-classifying would skip the CI gate).
+        Allow();
+        ResolveDriver(GitCredentialSources.Platform, _actions.Object);
+        _actions.Setup(a => a.DispatchWorkflowAsync(
+                "acme", "widgets", It.IsAny<WorkflowDispatchRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<WorkflowRun>(new PlatformError.Unknown("something else went wrong")));
+
+        var result = await _sut.TriggerTestsAsync(_tenant, Repo, TriggerBody());
+
+        result.Success.Should().BeFalse();
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(CiEventTypes.TestsTriggeredFailed);
+    }
+
+    // ================================================================
     // Wire error strings — PlatformErrorText parity (pinned BEFORE the swap)
     // ================================================================
 

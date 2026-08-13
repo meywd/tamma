@@ -323,4 +323,91 @@ public class EngineCallbackContractTests
         (await service.CreateIssueAsync(null, "a", "b", "T", null, null, null)).ServiceUnavailable.Should().BeTrue();
         (await service.ReadRepoConfigAsync(null, "a", "b", "main")).ServiceUnavailable.Should().BeTrue();
     }
+
+    // ── Epic 31 review (F-high) — per-repo installation resolution: a repo
+    //    owned by the tenant's NON-primary App installation must ride that
+    //    installation's driver (the primary's token cannot see it), while a
+    //    repo with no App-plane row keeps the tenant-primary resolution. ──
+
+    [Test]
+    public async Task ListIssues_RepoOfNonPrimaryInstallation_RidesThePerRepoDriver()
+    {
+        var tenant = Guid.NewGuid();
+
+        var perRepoClient = new Mock<IGitPlatformClient>(MockBehavior.Loose);
+        perRepoClient
+            .Setup(c => c.ListIssuesAsync(It.IsAny<ListIssuesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<IReadOnlyList<Issue>>.FromOk(new List<Issue>()));
+        var primaryClient = new Mock<IGitPlatformClient>(MockBehavior.Loose);
+
+        var appInstallations = new Mock<IInstallationRepository>();
+        appInstallations
+            .Setup(r => r.GetByRepoFullNameAsync("acme/widgets"))
+            .ReturnsAsync(new GitHubInstallation
+            {
+                Id = Guid.NewGuid(),
+                InstallationId = 777L,
+                TenantId = tenant,
+                AccountLogin = "acme",
+            });
+
+        var resolver = new Mock<IPlatformResolver>();
+        resolver
+            .Setup(r => r.ResolveForRepoInstallationAsync(
+                tenant, PlatformKind.GitHub, "777", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FakeDriver(perRepoClient.Object));
+        resolver
+            .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MediationDriverResolution(
+                new FakeDriver(primaryClient.Object), MediationCredentialSource.TenantInstallation));
+
+        var service = new PlatformEngineCallbackService(
+            resolver.Object, new RecordingEventRepository(),
+            NullLogger<PlatformEngineCallbackService>.Instance, appInstallations.Object);
+
+        var result = await service.ListIssuesAsync(tenant, "acme", "widgets", "open", null, 30, 1);
+
+        result.ServiceUnavailable.Should().BeFalse();
+        perRepoClient.Verify(c => c.ListIssuesAsync(
+            It.IsAny<ListIssuesRequest>(), It.IsAny<CancellationToken>()), Times.Once,
+            "the repo's OWN installation driver must serve the call — the tenant-primary "
+            + "installation's token cannot see a sibling installation's repos (404)");
+        primaryClient.Verify(c => c.ListIssuesAsync(
+            It.IsAny<ListIssuesRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task ListIssues_RepoWithoutAppPlaneRow_FallsBackToTenantPrimaryResolution()
+    {
+        var tenant = Guid.NewGuid();
+        var primaryClient = new Mock<IGitPlatformClient>(MockBehavior.Loose);
+        primaryClient
+            .Setup(c => c.ListIssuesAsync(It.IsAny<ListIssuesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PlatformResult<IReadOnlyList<Issue>>.FromOk(new List<Issue>()));
+
+        var appInstallations = new Mock<IInstallationRepository>();
+        appInstallations
+            .Setup(r => r.GetByRepoFullNameAsync(It.IsAny<string>()))
+            .ReturnsAsync((GitHubInstallation?)null);
+
+        var resolver = new Mock<IPlatformResolver>();
+        resolver
+            .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MediationDriverResolution(
+                new FakeDriver(primaryClient.Object), MediationCredentialSource.TenantInstallation));
+
+        var service = new PlatformEngineCallbackService(
+            resolver.Object, new RecordingEventRepository(),
+            NullLogger<PlatformEngineCallbackService>.Instance, appInstallations.Object);
+
+        var result = await service.ListIssuesAsync(tenant, "acme", "widgets", "open", null, 30, 1);
+
+        result.ServiceUnavailable.Should().BeFalse();
+        primaryClient.Verify(c => c.ListIssuesAsync(
+            It.IsAny<ListIssuesRequest>(), It.IsAny<CancellationToken>()), Times.Once,
+            "a BYOK / single-installation repo keeps the pre-review tenant-primary path");
+        resolver.Verify(r => r.ResolveForRepoInstallationAsync(
+            It.IsAny<Guid>(), It.IsAny<PlatformKind>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 }

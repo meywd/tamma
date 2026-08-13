@@ -118,7 +118,52 @@ public sealed class GitHubActionsPlatformClientTests
         // reports the correlation gap instead of minting an unpollable
         // empty RunId.
         result.Should().BeOfType<PlatformResult<WorkflowRun>.Failed>()
-            .Which.Error.Should().BeOfType<PlatformError.Unknown>();
+            .Which.Error.Should().BeOfType<PlatformError.Unknown>()
+            // Epic 31 review (F-medium) — the message must carry the SHARED
+            // prefix both mediation planes special-case as
+            // success-without-a-correlated-run.
+            .Which.Reason.Should().StartWith(PlatformErrorText.DispatchAcceptedPrefix);
+    }
+
+    // ── Epic 31 review (F-medium) — a fully-qualified refs/heads/ ref
+    //    dispatches fine but the runs list's branch= filter takes a BARE
+    //    branch name: without normalization the new run NEVER correlated. ──
+
+    [Test]
+    public async Task Dispatch_qualifiedHeadsRef_NormalizesTheBranchFilter()
+    {
+        var (client, handler) = Build(probeAttempts: 1);
+        handler.EnqueueJson(HttpMethod.Post,
+            $"{Api}/repos/o/r/actions/workflows/ci.yml/dispatches",
+            HttpStatusCode.NoContent, string.Empty);
+        handler.EnqueueJson(HttpMethod.Get,
+            $"{Api}/repos/o/r/actions/workflows/ci.yml/runs",
+            HttpStatusCode.OK,
+            """
+            { "total_count": 1, "workflow_runs": [
+                { "id": 902, "status": "queued", "conclusion": null, "html_url": "u",
+                  "event": "workflow_dispatch", "head_branch": "feat/x",
+                  "created_at": "2026-08-07T10:00:05Z", "updated_at": "2026-08-07T10:00:05Z" } ] }
+            """);
+
+        var result = await client.DispatchWorkflowAsync("o", "r",
+            new WorkflowDispatchRequest("refs/heads/feat/x", "ci.yml",
+                new Dictionary<string, string>()));
+
+        result.GetValueOrDefault()!.RunId.Should().Be("902");
+        var listUrl = handler.Requests.Single(r => r.Url.Contains("/runs?")).Url;
+        listUrl.Should().Contain("branch=feat%2Fx",
+            "the runs list filter takes the bare branch name — the qualified ref never matches");
+        listUrl.Should().NotContain("refs%2Fheads");
+    }
+
+    [Test]
+    public void NormalizeBranchFilter_StripsHeadsPrefix_LeavesEverythingElse()
+    {
+        GitHubActionsPlatformClient.NormalizeBranchFilter("refs/heads/feat/x").Should().Be("feat/x");
+        GitHubActionsPlatformClient.NormalizeBranchFilter("main").Should().Be("main");
+        GitHubActionsPlatformClient.NormalizeBranchFilter("refs/tags/v1").Should().Be("refs/tags/v1",
+            "only the heads prefix is a branch — a tag ref is left for the platform to reject");
     }
 
     [Test]

@@ -121,6 +121,63 @@ public class InstallationRouterServiceTests
     }
 
     [Test]
+    public async Task HandleCallbackAsync_BridgesTheInstallation_BeforePushingSecrets()
+    {
+        // Epic 31 review (F-high) — DriverInstallationSecretsPusher resolves
+        // the GitHub driver from the tenant_platform_installations row the
+        // BRIDGE creates. The old push-then-bridge order meant a first-time
+        // App install resolved no driver and provisioned ZERO repo secrets
+        // (github_client_not_configured for every repo, nothing retried).
+        var userId = Guid.NewGuid();
+        var tenantId = Guid.NewGuid();
+
+        _userRepo.Setup(r => r.GetByIdAsync(userId))
+            .ReturnsAsync(new User { Id = userId, Email = "test@example.com", TenantId = tenantId });
+        _tenantRepo.Setup(r => r.GetByIdAsync(tenantId))
+            .ReturnsAsync(new Tenant { Id = tenantId, Name = "Acme", Slug = "acme" });
+        _installRepo.Setup(r => r.GetByInstallationIdAsync(12345L))
+            .ReturnsAsync((GitHubInstallation?)null);
+        _installRepo.Setup(r => r.CreateAsync(It.IsAny<GitHubInstallation>()))
+            .ReturnsAsync((GitHubInstallation i) => i);
+
+        var order = new List<string>();
+        var bridge = new Mock<Tamma.Api.Services.Platforms.IGitHubInstallationBridge>();
+        bridge
+            .Setup(b => b.EnsureBridgedAsync(tenantId, 12345L, It.IsAny<CancellationToken>()))
+            .Callback(() => order.Add("bridge"))
+            .ReturnsAsync(true);
+        _provisioner
+            .Setup(p => p.PushAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyList<(string, string)>>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Callback(() => order.Add("push"))
+            .ReturnsAsync((IReadOnlyList<SecretProvisionResult>)Array.Empty<SecretProvisionResult>());
+
+        var service = new InstallationRouterService(
+            _installRepo.Object,
+            _eventRepo.Object,
+            _tenantRepo.Object,
+            _userRepo.Object,
+            new MemoryCache(new MemoryCacheOptions()),
+            _gitHubApp.Object,
+            _provisioner.Object,
+            _apiKeyRepo.Object,
+            _logger.Object,
+            webhookSignals: null,
+            installationBridge: bridge.Object);
+
+        var result = await service.HandleCallbackAsync(12345L, null, userId);
+
+        result.Success.Should().BeTrue();
+        // The secrets pusher can only resolve a driver AFTER the bridge has
+        // minted the tenant_platform_installations row.
+        order.Should().Equal("bridge", "push");
+    }
+
+    [Test]
     public async Task HandleCallbackAsync_UnknownUser_ReturnsError()
     {
         var userId = Guid.NewGuid();

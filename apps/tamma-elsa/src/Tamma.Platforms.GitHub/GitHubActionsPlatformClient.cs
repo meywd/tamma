@@ -114,10 +114,17 @@ public sealed class GitHubActionsPlatformClient : IGitPlatformActionsClient
         // newest first, created at-or-after the dispatch instant
         // (60s clock-skew allowance). See type-level remarks for the
         // at-least-once semantics.
+        //
+        // Epic 31 review (F-medium) — the runs list's `branch=` filter takes
+        // a BARE branch name, while the dispatch endpoint itself accepts a
+        // fully-qualified `refs/heads/x`: without normalization a qualified
+        // ref dispatched fine but NEVER correlated (every probe filtered the
+        // new run out).
+        var branchFilter = NormalizeBranchFilter(request.Ref);
         var createdFloor = dispatchedAt.AddSeconds(-60);
         var listPath = $"/repos/{Encode(owner)}/{Encode(repoName)}" +
                        $"/actions/workflows/{Encode(request.WorkflowFileName)}/runs" +
-                       $"?branch={Encode(request.Ref)}&event=workflow_dispatch&per_page=5" +
+                       $"?branch={Encode(branchFilter)}&event=workflow_dispatch&per_page=5" +
                        $"&created={Encode(">=" + createdFloor.UtcDateTime.ToString("O"))}";
 
         for (var attempt = 1; attempt <= _dispatchProbeAttempts; attempt++)
@@ -151,10 +158,22 @@ public sealed class GitHubActionsPlatformClient : IGitPlatformActionsClient
             "GitHub workflow_dispatch for {Owner}/{Repo} {Workflow}@{Ref} was accepted (204) " +
             "but no run appeared within {Attempts} probes",
             owner, repoName, request.WorkflowFileName, request.Ref, _dispatchProbeAttempts);
+        // The PREFIX is a cross-plane contract: both mediation planes match
+        // it via PlatformErrorText.IsDispatchAcceptedCorrelationMiss and
+        // treat the answer as success-without-a-correlated-run — a
+        // correlation miss is not a dispatch failure (Epic 31 review).
         return PlatformResult<WorkflowRun>.FromError(new PlatformError.Unknown(
-            "dispatch accepted (204) but the created run could not be correlated; " +
-            "the run may still start — list workflow runs to find it"));
+            PlatformErrorText.DispatchAcceptedPrefix
+            + " but the created run could not be correlated; "
+            + "the run may still start — list workflow runs to find it"));
     }
+
+    /// <summary>The runs list's <c>branch=</c> filter takes a bare branch
+    /// name; strip a fully-qualified heads ref. Exposed for tests.</summary>
+    internal static string NormalizeBranchFilter(string reference) =>
+        reference.StartsWith("refs/heads/", StringComparison.Ordinal)
+            ? reference["refs/heads/".Length..]
+            : reference;
 
     /// <inheritdoc />
     public async Task<PlatformResult<WorkflowRun>> GetRunStatusAsync(

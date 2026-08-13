@@ -147,7 +147,40 @@ public sealed class CiMediationService : ICiMediationService
             ct).ConfigureAwait(false);
 
         if (dispatch is not PlatformResult<PModels.WorkflowRun>.Ok dispatchOk)
+        {
+            // Epic 31 review (F-medium) — a run-correlation MISS is not a
+            // dispatch failure: the platform accepted the dispatch (204) and
+            // the run is (very likely) starting. Coarsening it into
+            // TestsTriggeredFailed/PLATFORM_ERROR made the workflow
+            // re-trigger a run that was already executing (duplicate CI) or
+            // escalate spuriously. Same interpretation AgentDispatch already
+            // applies: success WITHOUT a correlated run. RunId "unknown" is
+            // DG-5's unpollable sentinel — the CI-wait poller excludes it
+            // (the webhook accelerator / the timeout SLA own that wait)
+            // instead of polling a fabricated id.
+            if (dispatch is PlatformResult<PModels.WorkflowRun>.Failed dispatchFailed
+                && PlatformErrorText.IsDispatchAcceptedCorrelationMiss(dispatchFailed.Error))
+            {
+                var accepted = new CiMediationResult
+                {
+                    Success = true,
+                    CredentialSource = cred.Source,
+                    Outcome = "Triggered",
+                    TestRun = new CiTestRunDto
+                    {
+                        RunId = "unknown",
+                        Status = "queued",
+                        TotalTests = 0,
+                    },
+                    CorrelationId = body.CorrelationId,
+                };
+                await EmitAsync(CiEventTypes.TestsTriggeredSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+                    new { branch = body.Branch, runId = "unknown", status = "queued", correlated = false }, ct).ConfigureAwait(false);
+                return accepted;
+            }
+
             return await PlatformFailAsync(tenantId, repo, op, CiEventTypes.TestsTriggeredFailed, body.CorrelationId, cred.Source, Describe(dispatch), new { branch = body.Branch }, ct).ConfigureAwait(false);
+        }
 
         var run = dispatchOk.Value;
 

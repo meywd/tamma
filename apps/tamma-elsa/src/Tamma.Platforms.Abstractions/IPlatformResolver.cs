@@ -128,6 +128,32 @@ public interface IPlatformResolver
         CancellationToken ct = default);
 
     /// <summary>
+    /// Epic 31 review (F-high) — resolve the driver for a SPECIFIC
+    /// installation of a tenant, looked up by <c>(kind, externalId)</c> and
+    /// TENANT-SCOPED: a row belonging to a different tenant answers null.
+    ///
+    /// <para>This is the per-repo resolution seam the pre-Epic-31 engine
+    /// callback / agent dispatch had (repo → App installation →
+    /// installation token): a tenant with the App on MULTIPLE installations
+    /// (personal + org, two orgs) cannot ride the tenant-primary driver for
+    /// repos of a sibling installation — GitHub App installation tokens
+    /// cannot see a sibling installation's repos (404). Callers map the
+    /// repo to its installation external id (the App-plane repo registry)
+    /// and resolve here, falling back to
+    /// <see cref="ResolveForMediationAsync"/> when no per-repo row exists.</para>
+    ///
+    /// <para>Caching note: the driver cache is keyed <c>(tenant, kind)</c>
+    /// and holds the tenant's PRIMARY row's driver — resolving a
+    /// NON-primary installation composes WITHOUT touching that cache so the
+    /// two installations' drivers can never be served for each other.</para>
+    /// </summary>
+    Task<IGitPlatformDriver?> ResolveForRepoInstallationAsync(
+        Guid tenantId,
+        PlatformKind kind,
+        string installationExternalId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Resolve a driver for a webhook delivery when the receiver has
     /// the row id directly (e.g. an admin-side replay tool). Returns
     /// null when the row id does not exist or has been soft-deleted.

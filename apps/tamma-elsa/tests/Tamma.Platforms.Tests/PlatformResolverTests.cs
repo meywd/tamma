@@ -541,4 +541,88 @@ public class PlatformResolverTests
         PlatformResolver.TryParseKind("future_platform", out _).Should().BeFalse();
         PlatformResolver.TryParseKind("", out _).Should().BeFalse();
     }
+
+    // ── Epic 31 review (F-high) — per-repo installation resolution: a
+    //    tenant with the App on multiple installations must resolve the
+    //    installation that OWNS the repo (an App installation token cannot
+    //    see a sibling installation's repos), tenant-scoped, and without
+    //    the two installations' drivers ever being served for each other
+    //    through the (tenant, kind) cache slot. ──
+
+    [Test]
+    public async Task ResolveForRepoInstallation_CrossTenantRow_ReturnsNull()
+    {
+        var (resolver, repo, _, factory, _, provider) = BuildResolver();
+        using var _p = provider;
+        var callerTenant = Guid.NewGuid();
+        var otherTenantsRow = MakeRow(Guid.NewGuid());
+        otherTenantsRow.InstallationExternalId = "999";
+        repo.Setup(r => r.GetByExternalIdAsync("github", "999", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(otherTenantsRow);
+
+        var driver = await resolver.ResolveForRepoInstallationAsync(
+            callerTenant, PlatformKind.GitHub, "999");
+
+        driver.Should().BeNull(
+            "a repo registry row pointing at another tenant's installation must never mint "
+            + "that tenant's driver for this caller");
+        factory.Calls.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task ResolveForRepoInstallation_NonPrimaryRow_ComposesThatRow_AndNeverPoisonsThePrimaryCacheSlot()
+    {
+        var (resolver, repo, _, factory, _, provider) = BuildResolver();
+        using var _p = provider;
+        var tenant = Guid.NewGuid();
+        var primaryRow = MakeRow(tenant);
+        primaryRow.InstallationExternalId = "111";
+        var siblingRow = MakeRow(tenant);
+        siblingRow.InstallationExternalId = "222";
+
+        repo.Setup(r => r.GetByExternalIdAsync("github", "222", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(siblingRow);
+        repo.Setup(r => r.GetByTenantKindAsync(tenant, "github", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(primaryRow);
+
+        var siblingDriver = await resolver.ResolveForRepoInstallationAsync(
+            tenant, PlatformKind.GitHub, "222");
+
+        siblingDriver.Should().BeOfType<StubDriver>()
+            .Which.Installation.InstallationExternalId.Should().Be("222",
+                "the repo's OWN installation must be composed — riding the primary would 404");
+
+        // The (tenant, kind) cache slot must still belong to the PRIMARY
+        // row: a tenant-kind resolve after the per-repo one composes the
+        // primary installation, never serves the sibling's driver.
+        var primaryDriver = await resolver.ResolveForTenantAsync(tenant, PlatformKind.GitHub);
+        primaryDriver.Should().BeOfType<StubDriver>()
+            .Which.Installation.InstallationExternalId.Should().Be("111",
+                "the sibling compose must not have been cached into the primary's slot");
+    }
+
+    [Test]
+    public async Task ResolveForRepoInstallation_PrimaryRow_RidesTheCache()
+    {
+        var (resolver, repo, _, factory, _, provider) = BuildResolver();
+        using var _p = provider;
+        var tenant = Guid.NewGuid();
+        var primaryRow = MakeRow(tenant);
+        primaryRow.InstallationExternalId = "111";
+
+        repo.Setup(r => r.GetByExternalIdAsync("github", "111", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(primaryRow);
+        repo.Setup(r => r.GetByTenantKindAsync(tenant, "github", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(primaryRow);
+
+        var first = await resolver.ResolveForRepoInstallationAsync(
+            tenant, PlatformKind.GitHub, "111");
+        var second = await resolver.ResolveForRepoInstallationAsync(
+            tenant, PlatformKind.GitHub, "111");
+
+        first.Should().NotBeNull();
+        second.Should().BeSameAs(first,
+            "the primary row owns the (tenant, kind) cache slot — repeat resolutions hit it");
+        factory.Calls.Should().HaveCount(1);
+    }
 }

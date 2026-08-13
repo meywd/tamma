@@ -258,6 +258,46 @@ public sealed class PlatformResolver : IPlatformResolver
     }
 
     /// <inheritdoc />
+    public async Task<IGitPlatformDriver?> ResolveForRepoInstallationAsync(
+        Guid tenantId,
+        PlatformKind kind,
+        string installationExternalId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(installationExternalId)) return null;
+
+        var row = await _repo
+            .GetByExternalIdAsync(ToWireKind(kind), installationExternalId, ct)
+            .ConfigureAwait(false);
+        if (row is null) return null;
+
+        // Tenant scoping — a repo registry row pointing at another tenant's
+        // installation must never mint that tenant's driver for this caller.
+        if (row.TenantId != tenantId)
+        {
+            _logger.LogWarning(
+                "Refusing per-repo installation resolution: row kind={Kind} externalId={ExternalId} "
+                + "belongs to tenant {RowTenant}, caller is tenant {CallerTenant}",
+                kind, installationExternalId, row.TenantId, tenantId);
+            return null;
+        }
+
+        // The (tenant, kind) cache slot holds the tenant's PRIMARY row's
+        // driver. Only that row may read/write it; any sibling installation
+        // composes uncached so the slot can never serve the wrong
+        // installation's credential (see the interface doc).
+        var primary = await _repo
+            .GetByTenantKindAsync(tenantId, ToWireKind(kind), ct)
+            .ConfigureAwait(false);
+        if (primary is not null && primary.Id == row.Id)
+        {
+            return await ResolveAsync(row, ct).ConfigureAwait(false);
+        }
+
+        return await ComposeAsync(row, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<PlatformInstallation>> ListForTenantAsync(
         Guid tenantId, CancellationToken ct = default)
     {
@@ -307,6 +347,25 @@ public sealed class PlatformResolver : IPlatformResolver
             return null;
         }
 
+        var driver = await ComposeAsync(row, ct).ConfigureAwait(false);
+        if (driver is not null)
+        {
+            _cache.Set(row.TenantId, kind, driver);
+        }
+        return driver;
+    }
+
+    /// <summary>Compose a driver for a row WITHOUT touching the cache —
+    /// the per-repo (non-primary installation) resolution path, where the
+    /// (tenant, kind) cache slot belongs to the primary row's driver.</summary>
+    private async Task<IGitPlatformDriver?> ComposeAsync(
+        TenantPlatformInstallation row, CancellationToken ct)
+    {
+        if (!TryParseKind(row.PlatformKind, out var kind))
+        {
+            return null;
+        }
+
         // Fetch plaintext via Epic 29 seam — every secret read goes
         // through ISecretStore + ISecretStoreBackend (wrapped here as
         // IPlatformCredentialReader). Plaintext lives only on the
@@ -349,12 +408,9 @@ public sealed class PlatformResolver : IPlatformResolver
         }
 
         var installation = ToInstallationRecord(row, kind);
-        var driver = await factory
+        return await factory
             .CreateAsync(installation, plaintext, ct)
             .ConfigureAwait(false);
-
-        _cache.Set(row.TenantId, kind, driver);
-        return driver;
     }
 
     /// <summary>

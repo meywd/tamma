@@ -883,6 +883,13 @@ builder.Services.AddSingleton(sp =>
         {
             options.Kind = "github";
             options.Credential = legacyToken;
+            // Epic 31 review (F-high) — carry the legacy GitHub:ApiBaseUrl
+            // too: without it a pre-P2 GHES deployment (GitHub:Token +
+            // GitHub:ApiBaseUrl) silently resolved a driver pointed at
+            // public api.github.com, failing every call AND transmitting
+            // the enterprise PAT to an unintended host. Empty/absent keeps
+            // the driver default (api.github.com), unchanged.
+            options.BaseUrl = cfg["GitHub:ApiBaseUrl"];
         }
     }
     return options;

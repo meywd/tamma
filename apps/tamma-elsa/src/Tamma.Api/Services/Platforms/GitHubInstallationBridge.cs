@@ -165,7 +165,11 @@ public sealed class GitHubInstallationBridge : IGitHubInstallationBridge
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 PlatformKind = WireKind,
-                BaseUrl = DefaultBaseUrl,
+                // Epic 31 review (F-high) — honor GitHub:ApiBaseUrl (GHES)
+                // instead of hardcoding the public API host on bridged rows.
+                BaseUrl = _configuration["GitHub:ApiBaseUrl"] is { Length: > 0 } configuredBaseUrl
+                    ? configuredBaseUrl
+                    : DefaultBaseUrl,
                 InstallationExternalId = externalId,
                 CredentialSecretScope = "tenant",
                 CredentialSecretName = secretName,

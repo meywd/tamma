@@ -199,17 +199,25 @@ public sealed class InstallationRouterService : IInstallationRouterService
         KeyIssueOutcome? keyResult = null;
         if (stored.TenantId is not null)
         {
-            keyResult = await IssueInstallationKeyAsync(stored, stored.TenantId.Value);
-
             // Epic 31 P2 (seam 14) — registry unification: an App-linked tenant
             // ALSO gets a tenant_platform_installations row so the driver plane
             // (IPlatformResolver) and the BYOK tier can see it. Idempotent;
             // failure degrades to a logged no-op (never blocks linking).
+            //
+            // Epic 31 review (F-high) — the bridge must run BEFORE the key
+            // issuance: IssueInstallationKeyAsync pushes TAMMA_API_KEY via
+            // DriverInstallationSecretsPusher, which resolves the GitHub
+            // driver from exactly the row this bridge creates. The old
+            // push-then-bridge order meant a FIRST-TIME App install resolved
+            // no driver and provisioned zero repo secrets
+            // (github_client_not_configured for every repo, nothing retried).
             if (_installationBridge is not null)
             {
                 await _installationBridge.EnsureBridgedAsync(
                     stored.TenantId.Value, installationId);
             }
+
+            keyResult = await IssueInstallationKeyAsync(stored, stored.TenantId.Value);
         }
 
         await EmitEventAsync(

@@ -127,6 +127,35 @@ public class GitHubInstallationBridgeTests
     }
 
     [Test]
+    public async Task Bridge_HonorsConfiguredGhesApiBaseUrl_OnTheRow()
+    {
+        // Epic 31 review (F-high) — a GHES deployment's bridged rows must
+        // carry GitHub:ApiBaseUrl, not the hardcoded public API host: a
+        // driver composed from the row would otherwise send the enterprise
+        // credential to api.github.com.
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["GitHub:AppId"] = "4242",
+                ["GitHub:PrivateKey"] = Pem,
+                ["GitHub:ApiBaseUrl"] = "https://ghe.corp/api/v3",
+            })
+            .Build();
+        var bridge = new GitHubInstallationBridge(
+            _installations.Object,
+            _events.Object,
+            config,
+            TimeProvider.System,
+            NullLogger<GitHubInstallationBridge>.Instance,
+            _secrets.Object);
+
+        var ok = await bridge.EnsureBridgedAsync(_tenant, InstallationId);
+
+        ok.Should().BeTrue();
+        _created.Single().BaseUrl.Should().Be("https://ghe.corp/api/v3");
+    }
+
+    [Test]
     public async Task Bridge_IsIdempotent_ExistingRowShortCircuits()
     {
         _installations
