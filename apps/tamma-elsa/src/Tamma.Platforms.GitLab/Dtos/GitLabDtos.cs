@@ -63,13 +63,51 @@ internal sealed class GitLabMergeRequest
     public string? SourceBranch { get; set; }
     public string? TargetBranch { get; set; }
     public string? State { get; set; }
-    public bool WorkInProgress { get; set; }
-    public bool Draft { get; set; }
+    /// <summary>Nullable ON PURPOSE (Epic 31 review, F-medium): "the payload
+    /// omitted the boolean" must be distinguishable from an explicit server
+    /// <c>false</c>. When either boolean is present it is authoritative —
+    /// GitLab ≥14.8 no longer treats WIP titles as drafts, so title-prefix
+    /// inference may only run when BOTH are absent (see
+    /// <see cref="GitLabDraftTitle.IsDraft"/>).</summary>
+    public bool? WorkInProgress { get; set; }
+
+    /// <inheritdoc cref="WorkInProgress"/>
+    public bool? Draft { get; set; }
     public string? WebUrl { get; set; }
     public GitLabUser? Author { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public string? Sha { get; set; }
+
+    /// <summary>Epic 31 P6 M2 — merge read-backs the merge activity depends
+    /// on (it fails loud on a missing SHA). <c>merge_commit_sha</c> is set
+    /// when a merge commit exists; squash merges report
+    /// <c>squash_commit_sha</c> instead.</summary>
+    public string? MergeCommitSha { get; set; }
+    public string? SquashCommitSha { get; set; }
+
+    /// <summary>Legacy mergeability enum (<c>can_be_merged</c> /
+    /// <c>cannot_be_merged</c> / <c>unchecked</c> / …).</summary>
+    public string? MergeStatus { get; set; }
+
+    /// <summary>Finer-grained status (15.6+): <c>mergeable</c>,
+    /// <c>broken_status</c>, <c>conflict</c>, <c>checking</c>, …</summary>
+    public string? DetailedMergeStatus { get; set; }
+
+    /// <summary>
+    /// Epic 31 P6 M1 — base/start/head SHAs of the MR's latest diff
+    /// version (single-MR GET). Empty right after MR creation (populates
+    /// asynchronously per the API doc) — callers must tolerate null.
+    /// </summary>
+    public GitLabDiffRefs? DiffRefs { get; set; }
+}
+
+/// <summary>Wire shape of <c>merge_request.diff_refs</c>.</summary>
+internal sealed class GitLabDiffRefs
+{
+    public string? BaseSha { get; set; }
+    public string? StartSha { get; set; }
+    public string? HeadSha { get; set; }
 }
 
 internal sealed class GitLabUser

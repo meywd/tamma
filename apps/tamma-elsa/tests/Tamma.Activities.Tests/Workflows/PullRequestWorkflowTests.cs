@@ -68,7 +68,12 @@ public class PullRequestWorkflowTests
     {
         HasEdge("ReadInputs", null, "GenerateDescription").Should().BeTrue();
         HasEdge("GenerateDescription", null, "CaptureDescription").Should().BeTrue();
-        HasEdge("CaptureDescription", null, "CreatePR").Should().BeTrue();
+        // Epic 31 P5 M2 (DG-3): the reviewers gate sits between the
+        // description capture and the PR step — no reviewers requested (the
+        // cycle's default) goes straight to CreatePR; a reviewer request
+        // passes the §4 check step first (see DegradationPairsTests).
+        HasEdge("CaptureDescription", null, "HasReviewers").Should().BeTrue();
+        HasEdge("HasReviewers", "False", "CreatePR").Should().BeTrue();
     }
 
     // ================================================================

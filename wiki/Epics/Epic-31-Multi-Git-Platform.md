@@ -1,6 +1,6 @@
 # Epic 31: Multi Git Platform Support
 
-**Status:** Planning (briefs authored 2026-04-21; impl plans not yet written)
+**Status:** COMPLETE (2026-08-09) — phases P0–P6 of `docs/stories/epic-31/EXECUTION-PLAN.md` all executed (the plan's status header carries the per-phase commit table). The GitHub/Gitea/GitLab drivers are fully real (Forgejo via the Gitea shim, lifecycle verbs included, version-floors feature-detected); every production plane — git mediation, CI, agent dispatch, engine callbacks, webhooks, CI secrets — resolves through `IPlatformResolver` onto the driver surfaces; the §4 check-step + alternative-step degradation pairs (DG-1..DG-7) are live in the cycle with DCB audit events; the acceptance headline (the cycle's git surface completing on Gitea with zero GitHub configuration) is green in the nightly full-stack E2E, with GitLab covered at mediation level + a nightly container driver suite (full-stack GitLab E2E deferred by owner-default). Remaining recorded follow-ups: engine-driven E2E awaits an LLM stub; `github_installations` naming for non-GitHub single-user grants.
 **Stories:** 10 core (31-1..31-10) + 2 deferred (31-11 Bitbucket, 31-12 Azure DevOps)
 **Effort:** ~220h core / ~284h with optionals
 **Layer:** Layer 4 for 31-1..31-5 + 31-7..31-10; Layer 5 for 31-6 (GitLab); deferred for 31-11/31-12

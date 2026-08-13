@@ -44,13 +44,15 @@ public sealed class PlatformResolver : IPlatformResolver
     private readonly IServiceProvider _services;
     private readonly PlatformDriverCache _cache;
     private readonly ILogger<PlatformResolver> _logger;
+    private readonly SingleUserPlatformOptions? _configPlatform;
 
     public PlatformResolver(
         ITenantPlatformInstallationRepository repo,
         IPlatformCredentialReader credentials,
         IServiceProvider services,
         PlatformDriverCache cache,
-        ILogger<PlatformResolver> logger)
+        ILogger<PlatformResolver> logger,
+        SingleUserPlatformOptions? configPlatform = null)
     {
         ArgumentNullException.ThrowIfNull(repo);
         ArgumentNullException.ThrowIfNull(credentials);
@@ -62,6 +64,7 @@ public sealed class PlatformResolver : IPlatformResolver
         _services = services;
         _cache = cache;
         _logger = logger;
+        _configPlatform = configPlatform;
     }
 
     /// <inheritdoc />
@@ -105,6 +108,125 @@ public sealed class PlatformResolver : IPlatformResolver
     }
 
     /// <inheritdoc />
+    public async Task<MediationDriverResolution?> ResolveForMediationAsync(
+        Guid? tenantId, CancellationToken ct = default)
+    {
+        // ── Tier 1 (BYOK / tenant-owned): the tenant's primary
+        //    installation row of ANY kind (SaaS scoping answer; also
+        //    covers a single-user deployment that connected via the
+        //    onboarding picker). Row-with-unreadable-credential falls
+        //    through to the config tier, mirroring the pre-P2
+        //    GitTokenResolver's BYOK→platform fallback. ──
+        if (tenantId is { } tid && tid != Guid.Empty)
+        {
+            var row = await _repo.GetByTenantPrimaryAsync(tid, ct).ConfigureAwait(false);
+            if (row is not null)
+            {
+                var driver = await ResolveAsync(row, ct).ConfigureAwait(false);
+                if (driver is not null)
+                {
+                    return new MediationDriverResolution(
+                        driver, MediationCredentialSource.TenantInstallation);
+                }
+                _logger.LogWarning(
+                    "Tenant {TenantId} has installation row {RowId} (kind={Kind}) but the driver "
+                    + "could not be composed — falling back to the Platform: config tier",
+                    tid, row.Id, row.PlatformKind);
+            }
+        }
+
+        // ── Tier 2 (config-backed source — single-user scoping answer,
+        //    and the SaaS deployment-level system tier): synthesize an
+        //    in-memory installation from the Platform: section. Never
+        //    persisted (no config↔DB drift; idempotent). ──
+        var configDriver = await ResolveFromConfigAsync(tenantId, ct).ConfigureAwait(false);
+        if (configDriver is not null)
+        {
+            return new MediationDriverResolution(
+                configDriver, MediationCredentialSource.PlatformDefault);
+        }
+
+        // ── Tier 3: nothing — the mediation fails closed. ──
+        return null;
+    }
+
+    /// <summary>
+    /// Compose (and cache) a driver from the <c>Platform:</c> config
+    /// section. Cached per (tenantId-or-empty, kind) through the same
+    /// <see cref="PlatformDriverCache"/> as DB-backed drivers, so the
+    /// event-driven invalidation and TTL self-heal apply uniformly.
+    /// </summary>
+    private async Task<IGitPlatformDriver?> ResolveFromConfigAsync(
+        Guid? tenantId, CancellationToken ct)
+    {
+        var options = _configPlatform;
+        if (options is null || !options.IsConfigured)
+        {
+            return null;
+        }
+        if (!TryParseKind(options.Kind!.Trim().ToLowerInvariant(), out var kind))
+        {
+            _logger.LogWarning(
+                "Platform: config section names unknown kind '{Kind}' — ignoring the config tier",
+                options.Kind);
+            return null;
+        }
+
+        var cacheTenant = tenantId ?? Guid.Empty;
+        if (_cache.TryGet(cacheTenant, kind, out var cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        // Credential: inline env/config plaintext wins; else the
+        // secret cabinet (scope defaults to "platform" — a deployment-
+        // level secret with no tenant owner).
+        var plaintext = options.Credential;
+        if (string.IsNullOrWhiteSpace(plaintext)
+            && !string.IsNullOrWhiteSpace(options.CredentialSecretName))
+        {
+            var scope = string.IsNullOrWhiteSpace(options.CredentialSecretScope)
+                ? "platform"
+                : options.CredentialSecretScope;
+            plaintext = await _credentials
+                .ReadActivePlaintextAsync(
+                    scope,
+                    scope == "tenant" ? tenantId : null,
+                    options.CredentialSecretName!,
+                    ct)
+                .ConfigureAwait(false);
+        }
+        if (string.IsNullOrWhiteSpace(plaintext))
+        {
+            _logger.LogWarning(
+                "Platform: config section is active (kind={Kind}) but no credential could be "
+                + "resolved (neither Platform:Credential nor Platform:CredentialSecretName "
+                + "produced plaintext)", kind);
+            return null;
+        }
+
+        var factory = _services.GetKeyedService<IGitPlatformDriverFactory>(kind)
+            ?? throw new InvalidOperationException(
+                $"Platform: config names kind {kind} but no IGitPlatformDriverFactory is "
+                + "registered for it.");
+
+        // The synthesized, never-persisted installation. Id is derived
+        // deterministically from the kind so repeated resolutions are
+        // stable for diagnostics; TenantId carries the caller's tenant
+        // (or Guid.Empty in single-user mode).
+        var installation = new PlatformInstallation(
+            Id: Guid.Empty,
+            TenantId: cacheTenant,
+            Kind: kind,
+            BaseUrl: options.BaseUrl ?? string.Empty,
+            InstallationExternalId: options.InstallationExternalId);
+
+        var driver = await factory.CreateAsync(installation, plaintext!, ct).ConfigureAwait(false);
+        _cache.Set(cacheTenant, kind, driver);
+        return driver;
+    }
+
+    /// <inheritdoc />
     public async Task<IGitPlatformDriver?> ResolveForWebhookAsync(
         PlatformKind kind,
         string installationExternalId,
@@ -133,6 +255,46 @@ public sealed class PlatformResolver : IPlatformResolver
         var row = await _repo.GetByIdAsync(installationRowId, ct).ConfigureAwait(false);
         if (row is null) return null;
         return await ResolveAsync(row, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IGitPlatformDriver?> ResolveForRepoInstallationAsync(
+        Guid tenantId,
+        PlatformKind kind,
+        string installationExternalId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(installationExternalId)) return null;
+
+        var row = await _repo
+            .GetByExternalIdAsync(ToWireKind(kind), installationExternalId, ct)
+            .ConfigureAwait(false);
+        if (row is null) return null;
+
+        // Tenant scoping — a repo registry row pointing at another tenant's
+        // installation must never mint that tenant's driver for this caller.
+        if (row.TenantId != tenantId)
+        {
+            _logger.LogWarning(
+                "Refusing per-repo installation resolution: row kind={Kind} externalId={ExternalId} "
+                + "belongs to tenant {RowTenant}, caller is tenant {CallerTenant}",
+                kind, installationExternalId, row.TenantId, tenantId);
+            return null;
+        }
+
+        // The (tenant, kind) cache slot holds the tenant's PRIMARY row's
+        // driver. Only that row may read/write it; any sibling installation
+        // composes uncached so the slot can never serve the wrong
+        // installation's credential (see the interface doc).
+        var primary = await _repo
+            .GetByTenantKindAsync(tenantId, ToWireKind(kind), ct)
+            .ConfigureAwait(false);
+        if (primary is not null && primary.Id == row.Id)
+        {
+            return await ResolveAsync(row, ct).ConfigureAwait(false);
+        }
+
+        return await ComposeAsync(row, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -185,6 +347,25 @@ public sealed class PlatformResolver : IPlatformResolver
             return null;
         }
 
+        var driver = await ComposeAsync(row, ct).ConfigureAwait(false);
+        if (driver is not null)
+        {
+            _cache.Set(row.TenantId, kind, driver);
+        }
+        return driver;
+    }
+
+    /// <summary>Compose a driver for a row WITHOUT touching the cache —
+    /// the per-repo (non-primary installation) resolution path, where the
+    /// (tenant, kind) cache slot belongs to the primary row's driver.</summary>
+    private async Task<IGitPlatformDriver?> ComposeAsync(
+        TenantPlatformInstallation row, CancellationToken ct)
+    {
+        if (!TryParseKind(row.PlatformKind, out var kind))
+        {
+            return null;
+        }
+
         // Fetch plaintext via Epic 29 seam — every secret read goes
         // through ISecretStore + ISecretStoreBackend (wrapped here as
         // IPlatformCredentialReader). Plaintext lives only on the
@@ -227,12 +408,9 @@ public sealed class PlatformResolver : IPlatformResolver
         }
 
         var installation = ToInstallationRecord(row, kind);
-        var driver = await factory
+        return await factory
             .CreateAsync(installation, plaintext, ct)
             .ConfigureAwait(false);
-
-        _cache.Set(row.TenantId, kind, driver);
-        return driver;
     }
 
     /// <summary>

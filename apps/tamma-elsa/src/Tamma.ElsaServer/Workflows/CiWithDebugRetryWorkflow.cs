@@ -25,7 +25,7 @@ namespace Tamma.ElsaServer.Workflows;
 ///       NO  -> finish(passed=false, errorMessage, ciRetryCount)
 ///       YES -> incrementCiRetry -> dispatchCiDebugging -> (loop to testingPipeline)
 ///
-/// Inputs:  repository, branchName, issueNumber, skillLevel
+/// Inputs:  repository, branchName, issueNumber, skillLevel, tenantId (optional)
 /// Outputs: passed (bool), errorMessage (string), ciRetryCount (int)
 ///
 /// ciRetryCount is always reset to 0 on entry so that each invocation
@@ -48,6 +48,13 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
         var branchName = builder.WithVariable<string>("BranchName", "");
         var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
         var skillLevel = builder.WithVariable<int>("SkillLevel", 5);
+        // Epic 31 review (F-high) — the cycle passes tenantId into this gate
+        // (SingleIssueCycleWorkflow / MergeApprovalWorkflow both send it) and
+        // this workflow used to DROP it, so the whole CI plane below ran
+        // platform-scoped in SaaS. Named "TenantId" per the MediatedLlmText
+        // ambient convention so EventPersistenceMiddleware tags this
+        // instance's events with the tenant too.
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
         // ciRetryCount is always reset to 0 on workflow entry (see initInputs below)
         // so each invocation gets the full retry budget regardless of prior history.
         //
@@ -80,6 +87,10 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 if (issue > 0) issueNumber.Set(ctx, issue);
                 var skill = ctx.GetInput<int>("skillLevel");
                 if (skill > 0) skillLevel.Set(ctx, skill);
+                // Tenant scope for the testing/debugging dispatches (empty in
+                // single-user mode — platform scope).
+                var tenant = ctx.GetInput<string>("tenantId");
+                if (!string.IsNullOrWhiteSpace(tenant)) tenantIdVar.Set(ctx, tenant);
                 // Always reset ciRetryCount to 0 on entry so each invocation
                 // (including re-entries from review-fix or merge re-test) gets full retry budget.
                 // Verified correct per Story 12-5e investigation — no bug present.
@@ -104,7 +115,11 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 ["SessionId"] = Guid.NewGuid(),
                 ["Repository"] = repository.Get(ctx),
                 ["Branch"] = branchName.Get(ctx),
-                ["SkillLevel"] = skillLevel.Get(ctx)
+                ["SkillLevel"] = skillLevel.Get(ctx),
+                // Epic 31 review (F-high) — TriggerCI/WaitForCIResults inside
+                // testing-pipeline resolve tenant ambiently; without this the
+                // CI trigger + the DG-5 poller run platform-scoped in SaaS.
+                ["tenantId"] = tenantIdVar.Get(ctx)
             }),
             WaitForCompletion = new(true),
             Result = new(testResult)
@@ -123,6 +138,37 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
         })
         { Id = "TestsPassed", Name = "Tests Passed?" };
         testsPassed.SetDisplayText("Tests Passed?");
+
+        // ================================================================
+        // Epic 31 P3 (§4.3) — CI-unsupported check BEFORE the retry guard: a
+        // typed capability_unsupported from the testing pipeline means the
+        // platform cannot dispatch CI at all — retrying (and burning LLM debug
+        // budget) would answer identically. Propagate ciUnsupported=true up to
+        // the cycle, which routes it to the §4 alternative step
+        // (CI.WORKFLOW_DISPATCH.SKIPPED → the human merge-approval path).
+        // ================================================================
+        var ciUnsupportedCheck = new FlowDecision(ctx =>
+        {
+            var result = testResult.Get(ctx);
+            return result != null && result.TryGetValue("ciUnsupported", out var u)
+                && (u is true || string.Equals(u?.ToString(), "True", StringComparison.OrdinalIgnoreCase));
+        })
+        { Id = "CiUnsupportedCheck", Name = "CI Dispatch Unsupported?" };
+        ciUnsupportedCheck.SetDisplayText("CI Dispatch Unsupported?");
+
+        var finishUnsupportedOutputs = new Sequence
+        {
+            Id = "CiRetryFinishUnsupported",
+            Name = "Finish Unsupported",
+            Activities =
+            {
+                WithLabel(new SetOutput { Id = "SetCiRetryUnsupportedFailed", Name = "Set Failed", OutputName = new("passed"), OutputValue = new(_ => (object)false) }, "Set Failed"),
+                WithLabel(new SetOutput { Id = "SetCiRetryUnsupportedFlag", Name = "Set CI Unsupported", OutputName = new("ciUnsupported"), OutputValue = new(_ => (object)true) }, "Set CI Unsupported"),
+                WithLabel(new SetOutput { Id = "SetCiRetryUnsupportedError", Name = "Set Error Message", OutputName = new("errorMessage"), OutputValue = new(_ => (object)"capability_unsupported: the platform cannot dispatch CI workflows") }, "Set Error Message"),
+                WithLabel(new SetOutput { Id = "SetCiRetryCountUnsupported", Name = "Set CI Retry Count", OutputName = new("ciRetryCount"), OutputValue = new(ctx => (object)ciRetryCount.Get(ctx)) }, "Set CI Retry Count")
+            }
+        };
+        finishUnsupportedOutputs.SetDisplayText("Finish Unsupported");
 
         // ================================================================
         // CI retry guard (< 3 retries)
@@ -160,6 +206,9 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 ["repositoryUrl"] = repository.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
                 ["skillLevel"] = skillLevel.Get(ctx),
+                // Epic 31 review (F-high) — the debugging workflow's mediated
+                // LLM/testing dispatches resolve tenant from this input.
+                ["tenantId"] = tenantIdVar.Get(ctx),
                 // Story 39-15 (D4) — capture the prior attempt's typed diagnosis id (additive
                 // debugging output) so a re-diagnosis supersedes the previous one.
                 ["priorDiagnosisDocumentId"] = ReadDiagnosisDocumentId(debugResult.Get(ctx)),
@@ -215,9 +264,9 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
             Activities =
             {
                 initInputs,
-                testingPipeline, testsPassed, ciRetryGuard,
+                testingPipeline, testsPassed, ciUnsupportedCheck, ciRetryGuard,
                 incrementCiRetry, dispatchCiDebugging,
-                finishPassOutputs, finishFailOutputs, finish
+                finishPassOutputs, finishFailOutputs, finishUnsupportedOutputs, finish
             },
             Connections =
             {
@@ -230,8 +279,10 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 // Tests passed -> finish pass
                 ConnectOutcome(testsPassed, "True", finishPassOutputs),
 
-                // Tests failed -> retry guard
-                ConnectOutcome(testsPassed, "False", ciRetryGuard),
+                // Tests failed -> §4.3 unsupported check FIRST, then retry guard
+                ConnectOutcome(testsPassed, "False", ciUnsupportedCheck),
+                ConnectOutcome(ciUnsupportedCheck, "True", finishUnsupportedOutputs),
+                ConnectOutcome(ciUnsupportedCheck, "False", ciRetryGuard),
 
                 // Retries remaining -> increment + debug
                 ConnectOutcome(ciRetryGuard, "True", incrementCiRetry),
@@ -241,9 +292,10 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 Connect(incrementCiRetry, dispatchCiDebugging),
                 Connect(dispatchCiDebugging, testingPipeline),
 
-                // Both finish outputs -> terminal
+                // All finish outputs -> terminal
                 Connect(finishPassOutputs, finish),
-                Connect(finishFailOutputs, finish)
+                Connect(finishFailOutputs, finish),
+                Connect(finishUnsupportedOutputs, finish)
             }
         };
     }

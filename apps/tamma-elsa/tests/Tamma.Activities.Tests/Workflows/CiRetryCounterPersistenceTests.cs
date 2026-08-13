@@ -95,9 +95,15 @@ public class CiRetryCounterPersistenceTests
             c.Source.Activity.Id == "DispatchTestingPipeline" &&
             c.Target.Activity.Id == "TestsPassed");
 
-        // TestsPassed False -> CiRetryGuard
+        // Epic 31 P3 — TestsPassed False routes through the §4.3
+        // CiUnsupportedCheck FIRST (a typed capability_unsupported must not
+        // burn debug retries), then the retry guard.
         var toGuard = _flowchart.Connections.Any(c =>
             c.Source.Activity.Id == "TestsPassed" &&
+            c.Source.Port == "False" &&
+            c.Target.Activity.Id == "CiUnsupportedCheck")
+        && _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "CiUnsupportedCheck" &&
             c.Source.Port == "False" &&
             c.Target.Activity.Id == "CiRetryGuard");
 

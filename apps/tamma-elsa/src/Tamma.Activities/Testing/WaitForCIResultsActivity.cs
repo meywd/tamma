@@ -42,6 +42,14 @@ namespace Tamma.Activities.Testing;
 [FlowNode("Received", "Timeout")]
 public class WaitForCIResultsActivity : Activity
 {
+    /// <summary>
+    /// Epic 31 P3 (DG-5) — the COMMON stimulus name every CI-result wait
+    /// bookmark is registered under, so the CI completion poller can discover
+    /// all suspended CI waits with one <c>BookmarkFilter.Name</c> query
+    /// (individual waits are then identified by their payload + bookmark id).
+    /// </summary>
+    public const string CiWaitStimulusName = "ci-result-wait";
+
     private readonly ILogger<WaitForCIResultsActivity>? _logger;
 
     /// <summary>Mentorship session ID</summary>
@@ -51,6 +59,11 @@ public class WaitForCIResultsActivity : Activity
     /// <summary>CI run ID returned by TriggerCIActivity</summary>
     [Input(Description = "CI pipeline run ID")]
     public Input<string> RunId { get; set; } = default!;
+
+    /// <summary>Repository (owner/repo) the run belongs to — carried on the
+    /// bookmark payload so the completion poller can poll the run (DG-5).</summary>
+    [Input(Description = "Repository (owner/repo) the CI run belongs to")]
+    public Input<string?> Repository { get; set; } = default!;
 
     /// <summary>Timeout in minutes for waiting</summary>
     [Input(Description = "Timeout in minutes", DefaultValue = 30)]
@@ -76,15 +89,27 @@ public class WaitForCIResultsActivity : Activity
         var sessionId = SessionId.Get(context);
         var runId = RunId.Get(context);
         var timeoutMinutes = TimeoutMinutes.Get(context);
+        var repository = Repository.GetOrDefault(context);
+        var tenantId = ResolveTenantId(context);
 
-        var bookmarkPayload = new CIResultBookmarkPayload(sessionId, runId);
+        var bookmarkPayload = new CIResultBookmarkPayload(sessionId, runId, repository, tenantId);
 
         _logger?.LogInformation(
-            "Creating bookmark for CI results: {BookmarkId} (session={SessionId}, run={RunId}, timeout={TimeoutMinutes}m)",
-            bookmarkPayload.BookmarkId, sessionId, runId, timeoutMinutes);
+            "Creating bookmark for CI results: {BookmarkId} (session={SessionId}, run={RunId}, repo={Repository}, timeout={TimeoutMinutes}m)",
+            bookmarkPayload.BookmarkId, sessionId, runId, repository ?? "<none>", timeoutMinutes);
 
-        // 1) CI-result bookmark — resumed by the external CI webhook.
-        context.CreateBookmark(bookmarkPayload, OnResumeAsync);
+        // 1) CI-result bookmark — resumed by the CI completion poller (DG-5)
+        //    or, in P4, the workflow_run webhook accelerator. Registered under
+        //    the COMMON stimulus name so the poller can enumerate CI waits;
+        //    the payload identifies the specific run + repo + tenant.
+        context.CreateBookmark(new CreateBookmarkArgs
+        {
+            BookmarkName = CiWaitStimulusName,
+            Stimulus = bookmarkPayload,
+            Callback = OnResumeAsync,
+            AutoBurn = true,
+            IncludeActivityInstanceId = false,
+        });
 
         // 2) Durable timeout bookmark — the bookmark scheduler resumes it at the deadline.
         //    A non-positive timeout disables the deadline (wait indefinitely) — the caller
@@ -178,6 +203,20 @@ public class WaitForCIResultsActivity : Activity
 
         Results.Set(context, sentinel);
         await context.CompleteActivityWithOutcomesAsync("Timeout");
+    }
+
+    /// <summary>Ambient tenant scope — the MediatedLlmText convention (a Guid or
+    /// string workflow variable; anything else ⇒ platform scope).</summary>
+    private static string? ResolveTenantId(ActivityExecutionContext context)
+    {
+        var raw = context.GetVariable<object?>("TenantId")
+                  ?? context.GetVariable<object?>("AccountId");
+        return raw switch
+        {
+            Guid g when g != Guid.Empty => g.ToString(),
+            string s when Guid.TryParse(s, out var p) && p != Guid.Empty => p.ToString(),
+            _ => null,
+        };
     }
 
     private static CIResultsPayload CreateDefaultResults(string runId)

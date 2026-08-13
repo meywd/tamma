@@ -309,12 +309,16 @@ builder.Services.AddSingleton(sp =>
 // Keep existing mentorship repos/services for backward compat
 builder.Services.AddScoped<IMentorshipSessionRepository, MentorshipSessionRepository>();
 builder.Services.AddScoped<IMentorshipService, MentorshipService>();
+// Slack stays registered — OutboxSlackSender resolves ISlackIntegrationService.
 builder.Services.AddScoped<ISlackIntegrationService, SlackIntegrationService>();
-builder.Services.AddScoped<IGitHubIntegrationService, GitHubIntegrationService>();
-builder.Services.AddScoped<IJiraIntegrationService, JiraIntegrationService>();
-builder.Services.AddScoped<ICIIntegrationService, CIIntegrationService>();
-builder.Services.AddScoped<IEmailIntegrationService, EmailIntegrationService>();
-builder.Services.AddScoped<IIntegrationService, IntegrationService>();
+// Epic 31 P1 (stage 1, seam 12) — the legacy scoped registrations of the
+// static-token integration services (IGitHubIntegrationService,
+// IJiraIntegrationService, ICIIntegrationService, IEmailIntegrationService and
+// the IIntegrationService facade over them) are REMOVED: zero injection sites
+// existed (the mediation planes mint token-bound instances through
+// IGitHubClientFactory / ICiClientFactory instead), so resolving one from DI
+// was a latent bypass of the per-tenant token resolution. The classes stay
+// until P2/P3 absorb their bodies into the platform drivers.
 builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
 builder.Services.AddScoped<IElsaWorkflowService, ElsaWorkflowService>();
 builder.Services.AddHostedService<WorkflowSyncService>();
@@ -663,22 +667,27 @@ builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IBudgetGuard,
 builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.ILlmCallResponseMapper,
     Tamma.Api.Services.Agents.LlmCallResponseMapper>();
 
-// Story 38-1 (Epic 38) — git-platform step mediation (Class A). The engine's
-// thin ADL git activities (CreateBranch / CreatePullRequest / MergePullRequest /
-// UpdateIssueStatus / AnalyzeReview) POST to /api/v1/git/{owner}/{repo}/... here
-// instead of resolving the co-hosted IGitHubIntegrationService. The API holds the
-// per-tenant token: it authorizes tenant↔repo FIRST (the cross-tenant guard),
-// resolves the token BYOK→platform, performs the platform call with THAT token,
-// and emits one terminal GIT.* DCB event. IGitHubIntegrationService stays
-// API-only; the GitHubClientFactory mints a token-bound instance per request.
+// Story 38-1 (Epic 38) / Epic 31 P2 — git-platform step mediation (Class A).
+// The engine's thin ADL git activities (CreateBranch / CreatePullRequest /
+// MergePullRequest / UpdateIssueStatus / AnalyzeReview) POST to
+// /api/v1/git/{owner}/{repo}/... here. The API authorizes tenant↔repo FIRST
+// (the cross-tenant guard), resolves the tenant's PLATFORM DRIVER through
+// IPlatformResolver (tenant installation → Platform: config tier), performs the
+// platform call through the driver's IGitPlatformClient, and emits one terminal
+// GIT.* DCB event. The P2 swap deleted the IGitHubClientFactory chokepoint —
+// credentials live inside the resolved driver, never in mediation.
+// IGitTokenResolver remains registered for the CI mediation plane (P3) and
+// raw-git clone/push credential resolution.
 builder.Services.AddScoped<Tamma.Api.Services.Git.IGitRepoAuthorizer,
     Tamma.Api.Services.Git.GitRepoAuthorizer>();
 builder.Services.AddScoped<Tamma.Api.Services.Git.IGitTokenResolver,
     Tamma.Api.Services.Git.GitTokenResolver>();
-builder.Services.AddSingleton<Tamma.Api.Services.Git.IGitHubClientFactory,
-    Tamma.Api.Services.Git.GitHubClientFactory>();
 builder.Services.AddScoped<Tamma.Api.Services.Git.IGitMediationService,
     Tamma.Api.Services.Git.GitMediationService>();
+// Epic 31 P2 — the read-only capability probe behind
+// GET /api/v1/git/{owner}/{repo}/capabilities (the §4 check-step's surface).
+builder.Services.AddScoped<Tamma.Api.Services.Git.IGitPlatformCapabilityService,
+    Tamma.Api.Services.Git.GitPlatformCapabilityService>();
 // Story 43-12 — the merge route's per-request key selector (multi-binding: it picks
 // git.merge.dev|qa|main from the PR base branch, failing closed to git.merge.main).
 // Registered as itself; the enforcement seam resolves it by the type the route's
@@ -687,13 +696,12 @@ builder.Services.AddScoped<Tamma.Api.Services.Git.MergeTargetActionKeySelector>(
 
 // ── Story 38 (Phase 1) — CI / JIRA / email step mediation ──
 // CI (GitHub Actions) reuses the git guard + token resolver (CI runs on the same
-// per-tenant git token); the CiClientFactory mints a token-bound CIIntegrationService
+// per-tenant git token); Epic 31 P3 retired the CiClientFactory/CIIntegrationService
+// pair — CI mediation resolves the platform driver's Actions surface instead.
 // per request. JIRA + email are NOT repo-scoped (like Slack): they run the existing
 // config-credentialed IJiraIntegrationService / outbox-backed IEmailService under the
 // caller's tenant context. In every case the credential stays in Tamma.Api; the
 // engine holds nothing.
-builder.Services.AddSingleton<Tamma.Api.Services.Ci.ICiClientFactory,
-    Tamma.Api.Services.Ci.CiClientFactory>();
 builder.Services.AddScoped<Tamma.Api.Services.Ci.ICiMediationService,
     Tamma.Api.Services.Ci.CiMediationService>();
 builder.Services.AddScoped<Tamma.Api.Services.Jira.IJiraMediationService,
@@ -858,12 +866,61 @@ else
         Tamma.Platforms.Abstractions.IPlatformCredentialReader,
         Tamma.Api.Services.Platforms.NullPlatformCredentialReader>();
 }
+// Epic 31 P2 — the Platform: config section (single-user activation; the SaaS
+// deployment-level system tier). Bound once at startup; when the section is
+// absent but a legacy GitHub:Token is configured, the options synthesize a
+// github-kind PAT tier so pre-P2 single-user deployments keep resolving a
+// working driver with zero config changes.
+builder.Services.AddSingleton(sp =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var options = new Tamma.Platforms.SingleUserPlatformOptions();
+    cfg.GetSection(Tamma.Platforms.SingleUserPlatformOptions.SectionName).Bind(options);
+    if (!options.IsConfigured)
+    {
+        var legacyToken = cfg["GitHub:Token"];
+        if (!string.IsNullOrWhiteSpace(legacyToken))
+        {
+            options.Kind = "github";
+            options.Credential = legacyToken;
+            // Epic 31 review (F-high) — carry the legacy GitHub:ApiBaseUrl
+            // too: without it a pre-P2 GHES deployment (GitHub:Token +
+            // GitHub:ApiBaseUrl) silently resolved a driver pointed at
+            // public api.github.com, failing every call AND transmitting
+            // the enterprise PAT to an unintended host. Empty/absent keeps
+            // the driver default (api.github.com), unchanged.
+            options.BaseUrl = cfg["GitHub:ApiBaseUrl"];
+        }
+    }
+    return options;
+});
 builder.Services.AddScoped<
     Tamma.Platforms.Abstractions.IPlatformResolver,
     Tamma.Platforms.PlatformResolver>();
+// Epic 31 P2 — the emitter's post-append hook publishes each installation
+// lifecycle event onto the in-process platform event bus so the driver-cache
+// invalidator (below) evicts immediately instead of waiting out the TTL.
 builder.Services.AddScoped<
-    Tamma.Platforms.IPlatformInstallationEventEmitter,
-    Tamma.Platforms.PlatformInstallationEventEmitter>();
+    Tamma.Platforms.IPlatformInstallationEventEmitter>(sp =>
+    new Tamma.Platforms.PlatformInstallationEventEmitter(
+        sp.GetRequiredService<Tamma.Data.Repositories.IPlatformEventRepository>(),
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<
+            Tamma.Platforms.PlatformInstallationEventEmitter>>(),
+        (evt, ct) => sp.GetRequiredService<
+            Tamma.Api.Services.PlatformEvents.IPlatformEventBus>().PublishAsync(evt, ct)));
+// Epic 31 P2 — the never-built 31-2 subscriber: CREDENTIAL_ROTATED /
+// DISCONNECTED / SWITCH_ORG evict the tenant's cached drivers.
+builder.Services.AddHostedService<
+    Tamma.Api.Services.Platforms.PlatformDriverCacheInvalidator>();
+
+// Epic 31 P3 (DG-5) — the CI completion poller: enumerates suspended CI-result
+// waits from the engine, polls each run's status through the tenant's resolved
+// platform driver (driver.Actions), and resumes the bookmark on completion.
+// Before this service the CI wait could only END BY TIMEOUT (30m), GitHub
+// included. Registered unconditionally; Ci:CompletionPoll:Enabled=false turns
+// the loop off without unregistering the catalogued actor.
+builder.Services.AddHostedService<
+    Tamma.Api.Services.Ci.CiCompletionPollerService>();
 
 // Story 31-9 — onboarding platform picker connect service. Composes
 // the secret-cabinet (29-1/29-3 reveal-on-create), the 31-2 platform
@@ -944,56 +1001,28 @@ builder.Services.AddScoped<Tamma.Api.Services.Engine.IExecuteTaskService,
 // Scoped: reads through the request-scoped tenant EventRepository.
 builder.Services.AddScoped<Tamma.Api.Services.Engine.Replay.IReplayService,
     Tamma.Api.Services.Engine.Replay.ReplayService>();
-if (builder.Configuration.GetValue<long?>("GitHub:AppId") is long appId && appId > 0
-    && !string.IsNullOrWhiteSpace(builder.Configuration["GitHub:PrivateKey"]))
-{
-    // The resolver is scoped (takes a scoped repository); wrap the service
-    // itself as scoped so the resolver flow works.
-    builder.Services.AddScoped<Tamma.Api.Services.Engine.IRepoInstallationResolver,
-        Tamma.Api.Services.Engine.InstallationRepoResolver>();
-    builder.Services.AddScoped<Tamma.Api.Services.Engine.IGitHubEngineCallbackService,
-        Tamma.Api.Services.Engine.OctokitGitHubEngineCallbackService>();
-}
-else
-{
-    builder.Services.AddSingleton<Tamma.Api.Services.Engine.IGitHubEngineCallbackService,
-        Tamma.Api.Services.Engine.NullGitHubEngineCallbackService>();
-}
+// Epic 31 P3 (seam 5) — the PLATFORM-AGNOSTIC engine-callback service the
+// /api/engine/* git-proxy handlers consume (IPlatformResolver → driver.Client).
+// The GitHub-only IGitHubEngineCallbackService (Octokit + Null impls) and its
+// App-conditional registration were DELETED in P3's final stage.
+builder.Services.AddScoped<Tamma.Api.Services.Engine.IEngineGitCallbackService,
+    Tamma.Api.Services.Engine.PlatformEngineCallbackService>();
 // Engine registry (audit finding 013). Until TammaEngine ports, the
 // in-memory impl materialises synthetic per-tenant entries from the
 // workflow store so the dashboard /engines tile is not blank.
 builder.Services.AddSingleton<Tamma.Api.Services.Engine.IEngineRegistry,
     Tamma.Api.Services.Engine.InMemoryEngineRegistry>();
 
-// ─── Epic 19 / Story 38-2: Agent dispatch (Class-C mediation) ──────────
+// ─── Epic 19 / Story 38-2 / Epic 31 P3: Agent dispatch (Class-C mediation) ──
 //
-// IGitHubActionsClient — Octokit-backed when the GitHub App is wired,
-// otherwise the Null impl that reports NotConfigured. After the Story 38-2
-// cutover this client is API-ONLY: it is consumed by the new
-// AgentDispatchMediationService + ActionsResultAggregator behind the
-// /api/v1/agent-dispatch endpoints (which mint the per-repo installation
-// token internally), NOT by the engine phase services (those are now thin
-// TammaApiClient clients). The engine's NullGitHubActionsClient registration
-// was removed from ElsaServer/Program.cs.
-if (builder.Configuration.GetValue<long?>("GitHub:AppId") is long actionsAppId && actionsAppId > 0
-    && !string.IsNullOrWhiteSpace(builder.Configuration["GitHub:PrivateKey"]))
-{
-    // Scoped because IRepoInstallationResolver depends on a scoped
-    // installation repository. Matches the engine-callback pattern
-    // above.
-    builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
-        Tamma.Api.Services.GitHub.OctokitGitHubActionsClient>();
-}
-else
-{
-    builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
-        Tamma.Activities.AgentDispatch.NullGitHubActionsClient>();
-}
-
+// Epic 31 P3 (4/4): the GitHub-only Actions seam (Octokit + Null impls and the
+// App-conditional registration) was DELETED — the mediation service resolves
+// the tenant's platform driver (IPlatformResolver → driver.Actions) per call.
 // Story 38-2 — the managed agent-dispatch execution layer behind
 // /api/v1/agent-dispatch/{owner}/{repo}/... . The mediation service composes the
-// Story 38-1 cross-tenant guard (IGitRepoAuthorizer) → IGitHubActionsClient →
-// one DCB event; the aggregator does the collect multi-read server-side.
+// Story 38-1 cross-tenant guard (IGitRepoAuthorizer) → the resolved driver's
+// Actions surface → one DCB event; the aggregator does the collect multi-read
+// server-side over the same driver.
 builder.Services.AddScoped<Tamma.Api.Services.AgentDispatch.IActionsResultAggregator,
     Tamma.Api.Services.AgentDispatch.ActionsResultAggregator>();
 builder.Services.AddScoped<Tamma.Api.Services.AgentDispatch.IAgentDispatchMediationService,
@@ -3350,14 +3379,16 @@ documents.MapPost("/escalations/{escalationId}/resolve", DocumentDecisionEndpoin
 var github = app.MapGroup("/api/github");
 github.MapGet("/callback", GitHubEndpoints.Callback)
     .RequireRateLimiting("OAuthStart");
-// Legacy GitHub-specific webhook path. Story 31-7 generalises the
-// receiver to /api/webhooks/{platform}; the old path stays active
-// (with the GitHub-specific install-linking logic) for the deprecation
-// window so in-flight GitHub deliveries during a deploy don't change
-// shape. New deployments wire downstream platforms (Gitea, Forgejo,
-// GitLab) through the new path; the next epic story will port the
-// install-linking handler into a neutral IWebhookHandler and retire
-// the legacy path.
+// Legacy GitHub-specific webhook path — DEPRECATED (Epic 31 P4 M4, the
+// promised window). The 31-7 receiver (/api/webhooks/github) now carries
+// real handlers for everything this route processes: install linking
+// (GitHubInstallationWebhookHandler ports the SAME router logic), CI-run
+// wake, and merged-PR resume. This route stays mapped for the dual-route
+// window only, advertising `Deprecation: true` + a successor Link header,
+// and gates processing on the SAME platform_webhook_deliveries idempotency
+// row as the new path so one GitHub delivery id hitting both routes
+// processes exactly once. Point the GitHub App webhook URL at
+// /api/webhooks/github; delete this mapping when the window closes.
 github.MapPost("/webhooks", GitHubEndpoints.Webhooks)
     .RequireRateLimiting("GitHubWebhook");
 
@@ -3497,6 +3528,15 @@ app.MapGet("/api/v1/git/{owner}/{repo}/commits", GitEndpoints.GetCommits)
 app.MapGet("/api/v1/git/{owner}/{repo}/file-changes", GitEndpoints.GetFileChanges)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitGetFileChanges");
+// Epic 31 P2 (plan §4) — the READ-ONLY capability probe consumed by the engine's
+// CheckPlatformCapabilityActivity before each capability-gated action step. A GET
+// (no mutation) on the same engine-only plane as the mediation reads above — it
+// mints no catalog member and carries no .Governs binding for the same reason
+// the other GET reads don't: it is the QUESTION, not the act (the KnownUngoverned-
+// Endpoints sweep scopes mutating endpoints only, so no baseline entry either).
+app.MapGet("/api/v1/git/{owner}/{repo}/capabilities", GitEndpoints.GetCapabilities)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitGetCapabilities");
 app.MapDelete("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.DeleteBranch)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitDeleteBranch")

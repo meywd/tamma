@@ -19,7 +19,12 @@
     <PackageReference Include="Moq" Version="4.20.70" />
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+    <!-- Epic 31 P2 — the config-tier integration test builds the real GitHub
+         driver factory over a named HttpClient with a scripted handler. -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <!-- 9.0.11 (not 8.0.0): Tamma.Platforms.GitHub → Tamma.Activities pins
+         Logging.Abstractions 9.x; the lower version fails CS1705 at compile. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.0">
       <PrivateAssets>all</PrivateAssets>
@@ -31,6 +36,11 @@
     <ProjectReference Include="..\..\src\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\Tamma.Platforms\Tamma.Platforms.csproj" />
     <ProjectReference Include="..\..\src\Tamma.Data\Tamma.Data.csproj" />
+    <!-- Epic 31 P1 stage 1 — the cross-driver capability contract test needs
+         every shipped driver in one place. -->
+    <ProjectReference Include="..\..\src\Tamma.Platforms.Gitea\Tamma.Platforms.Gitea.csproj" />
+    <ProjectReference Include="..\..\src\Tamma.Platforms.GitLab\Tamma.Platforms.GitLab.csproj" />
+    <ProjectReference Include="..\..\src\Tamma.Platforms.GitHub\Tamma.Platforms.GitHub.csproj" />
   </ItemGroup>
 
 </Project>

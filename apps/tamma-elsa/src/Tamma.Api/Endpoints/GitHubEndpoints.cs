@@ -114,15 +114,35 @@ public static class GitHubEndpoints
     /// <summary>
     /// GitHub webhook receiver. Verifies HMAC-SHA256 signature before dispatch.
     /// Ported from the deleted TypeScript webhook handler.
+    ///
+    /// <para><b>DEPRECATED (Epic 31 P4 M4)</b> — the promised deprecation
+    /// window is open: the 31-7 receiver (<c>POST /api/webhooks/github</c>)
+    /// now carries real handlers for everything this route processes
+    /// (install linking via <c>GitHubInstallationWebhookHandler</c>, CI wake,
+    /// merged-PR resume). Every response from this route advertises
+    /// <c>Deprecation: true</c> plus a successor <c>Link</c>. During the
+    /// dual-route window BOTH routes gate processing on the SAME
+    /// platform-delivery idempotency row (<c>platform_webhook_deliveries</c>,
+    /// kind=github), so one GitHub delivery id reaching both routes — e.g. a
+    /// redelivery replayed after the App webhook URL flips to the new path —
+    /// processes exactly once. The legacy <c>github_webhook_deliveries</c>
+    /// table keeps recording for observability parity until the route is
+    /// deleted.</para>
     /// </summary>
     public static async Task<IResult> Webhooks(
         HttpContext context,
         [FromServices] IConfiguration config,
         [FromServices] IInstallationRouterService router,
         [FromServices] IGitHubWebhookDeliveryRepository deliveryRepo,
+        [FromServices] IPlatformWebhookDeliveryRepository platformDeliveryRepo,
         [FromServices] ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("GitHubEndpoints.Webhooks");
+
+        // Epic 31 P4 M4 — deprecation advertisement (RFC 8594 style).
+        context.Response.Headers["Deprecation"] = "true";
+        context.Response.Headers["Link"] =
+            "</api/webhooks/github>; rel=\"successor-version\"";
 
         // ── 1. Signature verification ──────────────────────────────────────
         var signature = context.Request.Headers["X-Hub-Signature-256"].FirstOrDefault();
@@ -199,6 +219,32 @@ public static class GitHubEndpoints
             {
                 logger.LogInformation(
                     "Webhook {Event} delivery {DeliveryId} skipped (duplicate)",
+                    LogSanitizer.Clean(eventType), parsedDeliveryId);
+                return Results.Ok(new
+                {
+                    received = true,
+                    @event = eventType,
+                    skipped = true,
+                    reason = "duplicate_delivery"
+                });
+            }
+
+            // Epic 31 P4 M4 — CROSS-ROUTE idempotency: the platform-delivery
+            // table is the shared gate for the dual-route window. If the SAME
+            // delivery id already processed through /api/webhooks/github (or
+            // this insert loses a race against it), skip here — one delivery
+            // processes once, whichever route it hits.
+            var platformInserted = await platformDeliveryRepo.TryRecordAsync(
+                Tamma.Platforms.Abstractions.PlatformKind.GitHub,
+                parsedDeliveryId.ToString(),
+                eventType,
+                installationId?.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                context.RequestAborted);
+            if (!platformInserted)
+            {
+                logger.LogInformation(
+                    "Webhook {Event} delivery {DeliveryId} skipped (already processed via /api/webhooks/github)",
                     LogSanitizer.Clean(eventType), parsedDeliveryId);
                 return Results.Ok(new
                 {

@@ -54,6 +54,25 @@ public sealed class NullGitPlatformDriver : IGitPlatformDriver
             CreateBranchRequest request, CancellationToken ct = default) =>
             Task.FromResult(PlatformResult<Branch>.FromServiceUnavailable());
 
+        // Epic 31 P2 core-verb additions — same not-wired stub as the
+        // other core verbs.
+        public Task<PlatformResult<Branch>> GetBranchAsync(
+            string owner, string repoName, string branchName, CancellationToken ct = default) =>
+            Task.FromResult(PlatformResult<Branch>.FromServiceUnavailable());
+
+        public Task<PlatformResult<bool>> DeleteBranchAsync(
+            string owner, string repoName, string branchName, CancellationToken ct = default) =>
+            Task.FromResult(PlatformResult<bool>.FromServiceUnavailable());
+
+        public Task<PlatformResult<IReadOnlyList<PullRequest>>> ListOpenPullRequestsForBranchAsync(
+            string owner, string repoName, string sourceBranch, string targetBranch,
+            CancellationToken ct = default) =>
+            Task.FromResult(PlatformResult<IReadOnlyList<PullRequest>>.FromServiceUnavailable());
+
+        public Task<PlatformResult<PullRequest>> UpdatePullRequestAsync(
+            UpdatePullRequestRequest request, CancellationToken ct = default) =>
+            Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());
+
         public Task<PlatformResult<PullRequest>> OpenPullRequestAsync(
             OpenPullRequestRequest request, CancellationToken ct = default) =>
             Task.FromResult(PlatformResult<PullRequest>.FromServiceUnavailable());
@@ -106,8 +125,67 @@ public sealed class NullGitPlatformDriver : IGitPlatformDriver
             SetPullRequestDraftRequest request, CancellationToken ct = default) =>
             PrLifecycleUnsupported();
 
+        // Epic 31 P1 (stage 1) — the loop verbs are capability-gated like the
+        // 31-13 lifecycle set; the null driver advertises none of the gating
+        // capabilities, so per the interface contract these return typed
+        // capability_unsupported (never throw, never ServiceUnavailable —
+        // "unsupported by this driver" and "driver not wired" are different
+        // answers).
+        private static Task<PlatformResult<T>> CapabilityUnsupported<T>() =>
+            Task.FromResult(PlatformResult<T>.FromError(
+                new PlatformError.InvalidRequest("capability_unsupported",
+                    "the null git platform driver does not implement this capability-gated verb")));
+
+        public Task<PlatformResult<Issue>> CloseIssueAsync(
+            string owner, string repoName, string issueNumber, string? comment = null,
+            CancellationToken ct = default) =>
+            CapabilityUnsupported<Issue>();
+
+        public Task<PlatformResult<IReadOnlyList<string>>> AddIssueLabelsAsync(
+            AddIssueLabelsRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<string>>();
+
+        public Task<PlatformResult<IReadOnlyList<string>>> RemoveIssueLabelAsync(
+            string owner, string repoName, string issueNumber, string label,
+            CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<string>>();
+
+        public Task<PlatformResult<Release>> CreateReleaseAsync(
+            CreateReleaseRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<Release>();
+
+        public Task<PlatformResult<IReadOnlyList<PullRequestReviewComment>>> ListPullRequestReviewCommentsAsync(
+            string owner, string repoName, string prNumber, CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<PullRequestReviewComment>>();
+
+        public Task<PlatformResult<IReadOnlyList<Commit>>> ListCommitsAsync(
+            ListCommitsRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<Commit>>();
+
+        public Task<PlatformResult<IReadOnlyList<PrFile>>> ListBranchFileChangesAsync(
+            ListBranchFileChangesRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<PrFile>>();
+
+        // Epic 31 P3 (seam 5) — the engine-callback verbs follow the same rule.
+        public Task<PlatformResult<IReadOnlyList<Issue>>> ListIssuesAsync(
+            ListIssuesRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<IReadOnlyList<Issue>>();
+
+        public Task<PlatformResult<Issue>> CreateIssueAsync(
+            CreateIssueRequest request, CancellationToken ct = default) =>
+            CapabilityUnsupported<Issue>();
+
+        public Task<PlatformResult<SecurityAlerts>> ListSecurityAlertsAsync(
+            string owner, string repoName, string alertType, CancellationToken ct = default) =>
+            CapabilityUnsupported<SecurityAlerts>();
+
         public Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
             string owner, string repoName, string issueOrPrNumber, string body,
+            CancellationToken ct = default) =>
+            Task.FromResult(PlatformResult<IssueComment>.FromServiceUnavailable());
+
+        public Task<PlatformResult<IssueComment>> CreatePullRequestCommentAsync(
+            string owner, string repoName, string prNumber, string body,
             CancellationToken ct = default) =>
             Task.FromResult(PlatformResult<IssueComment>.FromServiceUnavailable());
 

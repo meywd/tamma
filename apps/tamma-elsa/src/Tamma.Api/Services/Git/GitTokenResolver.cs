@@ -25,8 +25,6 @@ namespace Tamma.Api.Services.Git;
 /// </summary>
 public sealed class GitTokenResolver : IGitTokenResolver
 {
-    private const string GitHubPlatformKind = "github";
-
     private readonly ITenantPlatformInstallationRepository _installations;
     private readonly IPlatformCredentialReader _credentialReader;
     private readonly IConfiguration _configuration;
@@ -72,8 +70,16 @@ public sealed class GitTokenResolver : IGitTokenResolver
 
     private async Task<string?> TryResolveByokAsync(Guid tenantId, CancellationToken ct)
     {
+        // Epic 31 P2 — the BYOK tier resolves the tenant's PRIMARY
+        // installation of ANY kind (the old hardcoded "github" filter made
+        // every non-GitHub tenant invisible to raw-git/CI credential
+        // resolution). The credential plaintext is whatever the driver
+        // wire-format stores — a PAT for raw-git use, or a JSON credential
+        // reference the raw-git job cannot use directly (callers that need
+        // clone/push credentials must tolerate a null here and fall to the
+        // platform tier).
         var installation = await _installations
-            .GetByTenantKindAsync(tenantId, GitHubPlatformKind, ct)
+            .GetByTenantPrimaryAsync(tenantId, ct)
             .ConfigureAwait(false);
         if (installation is null || string.IsNullOrWhiteSpace(installation.CredentialSecretName))
         {
@@ -88,6 +94,17 @@ public sealed class GitTokenResolver : IGitTokenResolver
                 ct)
             .ConfigureAwait(false);
 
-        return string.IsNullOrWhiteSpace(token) ? null : token;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return null;
+        }
+
+        // A JSON credential (e.g. the P2 registry bridge's
+        // {"kind":"app",...} App-installation reference) is a DRIVER wire
+        // format, not a bearer token — using it as one would send a JSON
+        // blob as an Authorization header. Raw-git/CI consumers fall back
+        // to the platform tier; the driver plane resolves the same row
+        // properly through IPlatformResolver.
+        return token.TrimStart().StartsWith('{') ? null : token;
     }
 }

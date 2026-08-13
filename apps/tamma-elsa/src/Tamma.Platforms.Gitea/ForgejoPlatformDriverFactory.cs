@@ -109,7 +109,8 @@ public sealed class ForgejoPlatformDriverFactory : IGitPlatformDriverFactory
         var client = new GiteaPlatformClient(
             giteaHttp,
             host,
-            _loggerFactory.CreateLogger<GiteaPlatformClient>());
+            _loggerFactory.CreateLogger<GiteaPlatformClient>(),
+            detected);
 
         IGitPlatformActionsClient? actions = null;
         if (capabilities.Contains(PlatformCapability.Actions))
@@ -120,10 +121,42 @@ public sealed class ForgejoPlatformDriverFactory : IGitPlatformDriverFactory
                 _configuration);
         }
 
+        // Epic 31 P4 M4 — mount the CI-secrets provisioner (Forgejo keeps the
+        // Gitea secrets API; results stamp the Forgejo kind via the wrapper).
+        ICiSecretsProvisioner? ciSecrets = null;
+        if (capabilities.Contains(PlatformCapability.Secrets))
+        {
+            var installationId = installation.Id;
+            var authRef = auth;
+            var cacheRef = _tokenCache;
+            ciSecrets = new ForgejoCiSecretsProvisioner(
+                http,
+                installation.BaseUrl,
+                (req, _) =>
+                {
+                    switch (authRef)
+                    {
+                        case GiteaAuth.BotToken bot:
+                            req.Headers.Authorization =
+                                new System.Net.Http.Headers.AuthenticationHeaderValue("token", bot.Token);
+                            return Task.FromResult(true);
+                        case GiteaAuth.OAuth2:
+                            var cached = cacheRef.TryGet(installationId);
+                            if (string.IsNullOrEmpty(cached)) return Task.FromResult(false);
+                            req.Headers.Authorization =
+                                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", cached);
+                            return Task.FromResult(true);
+                        default:
+                            return Task.FromResult(false);
+                    }
+                },
+                _loggerFactory.CreateLogger<GiteaCiSecretsProvisioner>());
+        }
+
         // Compose: build the inner Gitea driver (its Kind reports
         // Gitea, intentionally — only the wrapper exposes
         // PlatformKind.Forgejo to the resolver), then wrap.
-        var inner = new GiteaPlatformDriver(client, actions, capabilities, detected);
+        var inner = new GiteaPlatformDriver(client, actions, capabilities, detected, ciSecrets);
         return new ForgejoPlatformDriver(inner);
     }
 

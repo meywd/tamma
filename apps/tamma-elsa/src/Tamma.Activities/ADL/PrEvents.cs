@@ -30,6 +30,12 @@ public static class PrEvents
     public const string CreatedFailed = "PR.CREATED.FAILED";
     public const string MarkedReadySuccess = "PR.MARKED_READY.SUCCESS";
 
+    /// <summary>Epic 31 P5 M2 (DG-3) — the reviewer request was skipped
+    /// because the platform cannot perform it (check-step Unsupported edge)
+    /// or refused it (safety net). Same vocabulary as the mediation-side
+    /// audit event so the trail reads as one story.</summary>
+    public const string ReviewersSkipped = "GIT.PR_REVIEWERS.SKIPPED";
+
     /// <summary>
     /// Parse a tenant id from the loose string form threaded through the
     /// workflow inputs. Returns <c>null</c> for empty / single-user / unparseable

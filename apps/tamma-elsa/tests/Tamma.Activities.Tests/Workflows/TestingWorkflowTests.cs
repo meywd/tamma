@@ -258,7 +258,8 @@ public class TestingWorkflowTests
     [Test]
     public void EveryActivity_RoutesToATerminal_NoDanglingEdge()
     {
-        var terminals = new[] { "FinishPass", "FinishFail", "FinishRetryPass" };
+        // Epic 31 P3 — + FinishCiUnsupported (the §4.3 typed-unsupported terminal).
+        var terminals = new[] { "FinishPass", "FinishFail", "FinishRetryPass", "FinishCiUnsupported" };
         var allIds = _flowchart.Activities.Select(a => a.Id!).ToHashSet();
         var sources = _flowchart.Connections.Select(c => c.Source.Activity.Id!).ToHashSet();
 

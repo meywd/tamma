@@ -141,6 +141,36 @@ public sealed class GiteaActionsPlatformClient : IGitPlatformActionsClient
     }
 
     /// <inheritdoc />
+    public async Task<PlatformResult<IReadOnlyList<WorkflowRun>>> ListRunsAsync(
+        string owner, string repoName,
+        ListWorkflowRunsRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var limit = Math.Clamp(request.PerPage, 1, 50);
+        var path = $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}" +
+                   $"/actions/runs?page=1&limit={limit}";
+        if (!string.IsNullOrWhiteSpace(request.Branch))
+        {
+            path += $"&branch={Encode(request.Branch)}";
+        }
+
+        var result = await _http
+            .GetJsonAsync<GiteaWorkflowRunsListDto>(path, ct)
+            .ConfigureAwait(false);
+        return result.Map(list =>
+        {
+            IReadOnlyList<WorkflowRun> runs = (list.WorkflowRuns ?? new List<GiteaWorkflowRunDto>())
+                .Select(MapRun)
+                .ToList();
+            return runs;
+        });
+    }
+
+    /// <inheritdoc />
     public async Task<PlatformResult<IReadOnlyList<WorkflowJob>>> ListRunJobsAsync(
         string owner, string repoName, string runId,
         CancellationToken ct = default)
@@ -165,6 +195,34 @@ public sealed class GiteaActionsPlatformClient : IGitPlatformActionsClient
                     RawMetadata: null))
                 .ToList();
             return jobs;
+        });
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<IReadOnlyList<Artifact>>> ListRunArtifactsAsync(
+        string owner, string repoName, string runId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runId);
+
+        // Gitea 1.22+ mirrors GitHub's per-run artifacts listing shape.
+        var path = $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}" +
+                   $"/actions/runs/{Encode(runId)}/artifacts";
+        var result = await _http
+            .GetJsonAsync<GiteaArtifactsListDto>(path, ct)
+            .ConfigureAwait(false);
+        return result.Map(list =>
+        {
+            IReadOnlyList<Artifact> artifacts = (list.Artifacts ?? new List<GiteaArtifactDto>())
+                .Select(a => new Artifact(
+                    Id: a.Id.ToString(),
+                    Name: a.Name ?? string.Empty,
+                    SizeBytes: a.Expired ? 0 : a.SizeInBytes,
+                    DownloadUrl: a.Expired ? string.Empty : a.ArchiveDownloadUrl ?? string.Empty))
+                .ToList();
+            return artifacts;
         });
     }
 

@@ -24,17 +24,32 @@ public class MachineryInventoryTests
     /// <summary>
     /// THE 42 — Story 43-11 "Machinery inventory (audited, never dial-gated)",
     /// transcribed 2026-08-03. Do not edit without a 43-11 amendment.
+    /// AMENDED 2026-08-07 (Epic 31 P2): + automation:platform-driver-cache-
+    /// invalidator (Story 31-2's designed cache-invalidation subscriber, built
+    /// in P2) and + automation:github-installation-bridge-backfill (the seam-14
+    /// registry-unification startup sweep) — 42 → 44; Epic 31 P3 (2026-08-08)
+    /// + automation:ci-completion-poller (DG-5) — 44 → 45. All are background
+    /// services with no human in the loop, the exact class this inventory
+    /// exists for; neither is a new dial-gated capability.
     /// </summary>
     private static readonly string[] MachineryInventory =
     {
-        // ── Effects fired only by plumbing (5) ─────────────────────────────
+        // ── Effects fired only by plumbing (6) ─────────────────────────────
         "effect:secret.reveal",
         "effect:engine.events.append",
         "effect:engine.platform-events.append",
         "effect:engine.document.persist",
         "effect:engine.document.set-status",
+        // Epic 31 P4 M3 (2026-08-08): git.webhook.register RESERVED → LIVE.
+        // Its first caller is provisioning plumbing (the server-initiated
+        // WebhookRegistrationService at platform connect / single-user
+        // startup), so per the catalog row's own 43-12 note it joins the
+        // machinery inventory rather than binding an LLM route. The gated
+        // decision is the human's connect action; the registration is the
+        // deterministic write executing it, audited via GIT.WEBHOOK_REGISTER.*.
+        "effect:git.webhook.register",
 
-        // ── Background services — all 29 automation:* ─────────────────────
+        // ── Background services — all 32 automation:* ─────────────────────
         "automation:action-catalog-startup-validator",
         "automation:governance-policy-snapshot-priming-service",
         "automation:provider-settings-store-priming-service",
@@ -64,6 +79,14 @@ public class MachineryInventoryTests
         "automation:secret-auto-rotation-scheduler",
         "automation:tenant-cleanup-requested-trigger",
         "automation:tenant-delete-requested-trigger",
+        "automation:platform-driver-cache-invalidator",
+        "automation:github-installation-bridge-backfill",
+        // Epic 31 P3 (2026-08-08, DG-5): the CI completion poller — a
+        // background service with no human in the loop (44 → 45).
+        "automation:ci-completion-poller",
+        // Epic 31 P4 M3 (2026-08-08): the single-user startup webhook
+        // registration pass — background service, machinery by class.
+        "automation:webhook-registration-startup",
 
         // ── Task handlers — all 8 platform-task:* ──────────────────────────
         "platform-task:RETIRE_SECRET_VERSION",
@@ -114,7 +137,7 @@ public class MachineryInventoryTests
             .ToHashSet(StringComparer.Ordinal);
         var fixture = MachineryInventory.ToHashSet(StringComparer.Ordinal);
 
-        MachineryInventory.Should().HaveCount(42, "5 + 29 + 8 = 42 (43-11's count check)");
+        MachineryInventory.Should().HaveCount(47, "6 + 33 + 8 = 47 (43-11's count check, amended by Epic 31 P2: +2 automation; Epic 31 P3 2026-08-08: +1 automation, the DG-5 CI completion poller; Epic 31 P4 M3 2026-08-08: +1 effect — git.webhook.register live as provisioning machinery per its 43-12 note — and +1 automation, the startup registration pass)");
         MachineryInventory.Should().OnlyHaveUniqueItems();
 
         flagged.Except(fixture).Should().BeEmpty(

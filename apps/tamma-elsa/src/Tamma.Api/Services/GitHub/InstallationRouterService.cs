@@ -3,14 +3,12 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using Tamma.Activities.AgentDispatch;
-using Tamma.Api.Services.TaskQueue;
 using Tamma.Core.Logging;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
+using Tamma.Platforms.GitHub;
 
 namespace Tamma.Api.Services.GitHub;
-
-#pragma warning disable CS0618 // Story 31-8: transitional consumer of obsolete IGitHubSecretsProvisioner.
 
 /// <summary>
 /// Concrete <see cref="IInstallationRouterService"/> implementation.
@@ -38,23 +36,22 @@ public sealed class InstallationRouterService : IInstallationRouterService
     private readonly IEventRepository _events;
     private readonly ITenantRepository _tenants;
     private readonly IUserRepository _users;
-    private readonly ITaskQueue? _taskQueue;
-    private readonly IPlatformQueuedTaskRepository? _platformTasks;
     private readonly IMemoryCache _cache;
-    private readonly IGitHubAppClient _gitHubApp;
-    private readonly IGitHubSecretsProvisioner _provisioner;
+    private readonly IGitHubAppInstallationReader _gitHubApp;
+    private readonly IInstallationSecretsPusher _secretsPusher;
     private readonly IApiKeyRepository _apiKeys;
     private readonly IWebhookSignalRegistry? _webhookSignals;
+    private readonly Tamma.Api.Services.Platforms.IGitHubInstallationBridge? _installationBridge;
     private readonly ILogger<InstallationRouterService> _logger;
 
     /// <summary>
-    /// Story 28-1 PR B — webhook deferral now routes by tenancy:
-    /// tenant-bound webhooks (installation has a TenantId) go to the
-    /// per-tenant queue via <see cref="ITaskQueue"/>; orphan webhooks
-    /// (no TenantId on the installation row) go to the platform queue
-    /// via <see cref="IPlatformQueuedTaskRepository"/>. Both repos are
-    /// optional so the existing test fixtures that wire only one of
-    /// them keep working.
+    /// Epic 31 P4 M2 — the Story 28-1 deferred-task write (push / issues /
+    /// pull_request → <c>github.*</c> queue rows) was DELETED: no
+    /// <c>ITaskHandler</c> / platform-task handler ever consumed those task
+    /// types, and the plan (§6) chose the webhook-handler route for the
+    /// merged-PR resume — keeping the dead enqueue would double-resume the
+    /// moment someone implemented it. The <c>taskQueue</c> /
+    /// <c>platformTasks</c> constructor seams went with it.
     /// </summary>
     public InstallationRouterService(
         IInstallationRepository installations,
@@ -62,42 +59,28 @@ public sealed class InstallationRouterService : IInstallationRouterService
         ITenantRepository tenants,
         IUserRepository users,
         IMemoryCache cache,
-        IGitHubAppClient gitHubApp,
-        IGitHubSecretsProvisioner provisioner,
+        IGitHubAppInstallationReader gitHubApp,
+        IInstallationSecretsPusher secretsPusher,
         IApiKeyRepository apiKeys,
         ILogger<InstallationRouterService> logger,
-        ITaskQueue? taskQueue = null,
-        IPlatformQueuedTaskRepository? platformTasks = null,
-        IWebhookSignalRegistry? webhookSignals = null)
+        IWebhookSignalRegistry? webhookSignals = null,
+        Tamma.Api.Services.Platforms.IGitHubInstallationBridge? installationBridge = null)
     {
+        _installationBridge = installationBridge;
         _installations = installations;
         _events = events;
         _tenants = tenants;
         _users = users;
         _cache = cache;
         _gitHubApp = gitHubApp;
-        _provisioner = provisioner;
+        _secretsPusher = secretsPusher;
         _apiKeys = apiKeys;
-        _taskQueue = taskQueue;
-        _platformTasks = platformTasks;
         _webhookSignals = webhookSignals;
         _logger = logger;
     }
 
     private static string CacheKeyForInstallation(long installationId) =>
         $"install:{installationId}";
-
-    private async Task<GitHubInstallation?> GetInstallationCachedAsync(long installationId)
-    {
-        // 60-second TTL — short enough to surface install/uninstall/suspend
-        // state changes without a process restart, long enough to amortise
-        // the steady-state webhook flood.
-        return await _cache.GetOrCreateAsync(CacheKeyForInstallation(installationId), entry =>
-        {
-            entry.AbsoluteExpirationRelativeToNow = InstallationCacheTtl;
-            return _installations.GetByInstallationIdAsync(installationId);
-        });
-    }
 
     private void InvalidateInstallationCache(long installationId)
     {
@@ -151,7 +134,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
         // still links to the tenant so the Marketplace + onboarding-redirect
         // flows keep working with degraded fidelity.
         var installFetch = await _gitHubApp.GetInstallationAsync(installationId);
-        GitHubInstallationDetails? details = installFetch.ServiceUnavailable
+        GitHubAppInstallationDetails? details = installFetch.ServiceUnavailable
             ? null
             : installFetch.Result;
 
@@ -216,6 +199,24 @@ public sealed class InstallationRouterService : IInstallationRouterService
         KeyIssueOutcome? keyResult = null;
         if (stored.TenantId is not null)
         {
+            // Epic 31 P2 (seam 14) — registry unification: an App-linked tenant
+            // ALSO gets a tenant_platform_installations row so the driver plane
+            // (IPlatformResolver) and the BYOK tier can see it. Idempotent;
+            // failure degrades to a logged no-op (never blocks linking).
+            //
+            // Epic 31 review (F-high) — the bridge must run BEFORE the key
+            // issuance: IssueInstallationKeyAsync pushes TAMMA_API_KEY via
+            // DriverInstallationSecretsPusher, which resolves the GitHub
+            // driver from exactly the row this bridge creates. The old
+            // push-then-bridge order meant a FIRST-TIME App install resolved
+            // no driver and provisioned zero repo secrets
+            // (github_client_not_configured for every repo, nothing retried).
+            if (_installationBridge is not null)
+            {
+                await _installationBridge.EnsureBridgedAsync(
+                    stored.TenantId.Value, installationId);
+            }
+
             keyResult = await IssueInstallationKeyAsync(stored, stored.TenantId.Value);
         }
 
@@ -292,9 +293,8 @@ public sealed class InstallationRouterService : IInstallationRouterService
             TenantId = tenantId
         });
 
-        // Provision to every active repo. The Null provisioner returns
-        // `github_client_not_configured` per-repo until the real impl lands;
-        // either way we record the summary in the linked event.
+        // Provision to every active repo; the summary is recorded in the
+        // linked event either way.
         var repos = await _installations.ListReposAsync(install.Id);
         var repoTuples = (IReadOnlyList<(string Owner, string Repo)>)repos
             .Where(r => r.IsActive
@@ -303,8 +303,13 @@ public sealed class InstallationRouterService : IInstallationRouterService
             .Select(r => (r.Owner, r.Name))
             .ToList();
 
-        var provisionResults = await _provisioner.ProvisionSecretAsync(
-            install.InstallationId, repoTuples, "TAMMA_API_KEY", plaintext);
+        // Epic 31 P4 M4 — provisioning rides the driver plane now:
+        // the tenant's resolved GitHub driver exposes ICiSecretsProvisioner
+        // (per-installation credential, App token or BYOK PAT). No driver /
+        // secrets surface degrades to per-repo github_client_not_configured
+        // entries — the retired seam's exact degraded mode.
+        var provisionResults = await _secretsPusher.PushAsync(
+            tenantId, repoTuples, "TAMMA_API_KEY", plaintext);
 
         var ok = provisionResults.Count(r => r.Success);
         var failed = provisionResults.Count - ok;
@@ -349,13 +354,14 @@ public sealed class InstallationRouterService : IInstallationRouterService
             case "workflow_run":
                 return HandleWorkflowRunEvent(payload, action);
 
-            // Deferred events — enqueue for async processing so the webhook
-            // handler can return quickly. Ported from the TS queueing path.
-            case "push":
-            case "issues":
-            case "pull_request":
-                return await EnqueueDeferredEventAsync(eventType, action, payload);
-
+            // Epic 31 P4 M2 — push / issues / pull_request are NO LONGER
+            // deferred to the task queue: the enqueue was a dead write (no
+            // handler ever consumed github.* task types) and the merged-PR
+            // resume now rides the 31-7 webhook-handler route
+            // (PrMergedWebhookHandler → PrMergedResumeEndpoint). Deleting the
+            // enqueue — rather than implementing it — prevents a future
+            // double-resume (plan §6). These events now fall through to
+            // Skipped like every other unhandled type.
             default:
                 _logger.LogDebug(
                     "Webhook event {Event} (action={Action}) skipped (not handled)",
@@ -504,102 +510,6 @@ public sealed class InstallationRouterService : IInstallationRouterService
             return dt;
         }
         return null;
-    }
-
-    /// <summary>
-    /// Push/issues/pull_request events are deferred to the task queue so the
-    /// webhook handler returns fast. When the task queue is not wired (tests
-    /// that only register the installation router) the event falls through to
-    /// <c>skipped = true</c> so old behaviour remains observable.
-    ///
-    /// <para>Story 28-1 PR B — routing splits by tenancy:
-    /// <list type="bullet">
-    ///   <item><description>installation has a TenantId → tenant queue
-    ///     (<see cref="ITaskQueue"/>). Per-tenant DB drains via the
-    ///     <c>TaskQueueProcessor</c>.</description></item>
-    ///   <item><description>orphan installation (TenantId is null) →
-    ///     platform queue (<see cref="IPlatformQueuedTaskRepository"/>).
-    ///     Drained by the <c>PlatformTaskWorker</c>. Without a tenant DB
-    ///     the per-tenant queue can't accept the row, so the platform
-    ///     queue is the only viable home.</description></item>
-    /// </list></para>
-    /// </summary>
-    private async Task<WebhookResult> EnqueueDeferredEventAsync(
-        string eventType, string? action, JsonElement payload)
-    {
-        if (_taskQueue is null && _platformTasks is null)
-        {
-            _logger.LogDebug(
-                "Webhook event {Event} (action={Action}) skipped: no task queue registered",
-                LogSanitizer.Clean(eventType), LogSanitizer.Clean(action));
-            return new WebhookResult(eventType, action, Skipped: true);
-        }
-
-        long? installationId = null;
-        if (payload.TryGetProperty("installation", out var installationEl))
-        {
-            installationId = GetInstallationId(installationEl);
-        }
-
-        // Bind to the tenant that owns this installation (if any). Unknown
-        // installations are still enqueued with a null tenant — callers can
-        // decide at handler-time whether to drop them.
-        // (Audit finding 029) cache lookup avoids DB roundtrip on hot path.
-        Guid? tenantId = null;
-        if (installationId is not null)
-        {
-            var install = await GetInstallationCachedAsync(installationId.Value);
-            tenantId = install?.TenantId;
-        }
-
-        var taskType = string.IsNullOrEmpty(action)
-            ? $"github.{eventType}"
-            : $"github.{eventType}.{action}";
-
-        Guid taskId;
-        string scope;
-        if (tenantId is Guid tid && tid != Guid.Empty && _taskQueue is not null)
-        {
-            var task = await _taskQueue.EnqueueAsync(
-                type: taskType,
-                payloadJson: payload.GetRawText(),
-                installationId: installationId,
-                tenantIdOverride: tid);
-            taskId = task.Id;
-            scope = "tenant";
-        }
-        else if (_platformTasks is not null)
-        {
-            // Orphan webhook (no installation→tenant mapping yet) OR the
-            // per-tenant queue isn't wired. Fall back to the platform
-            // queue — handlers can decide at dispatch time whether to
-            // process or drop.
-            var pt = await _platformTasks.EnqueueAsync(new Tamma.Data.Entities.PlatformQueuedTask
-            {
-                Type = taskType,
-                TenantId = tenantId,
-                InstallationId = installationId,
-                Payload = payload.GetRawText(),
-            });
-            taskId = pt.Id;
-            scope = "platform";
-        }
-        else
-        {
-            // _taskQueue is null and we'd want a tenant-scope enqueue —
-            // there's no orphan-tolerant fallback. Skip.
-            _logger.LogDebug(
-                "Webhook event {Event} (action={Action}) skipped: tenant queue unavailable",
-                LogSanitizer.Clean(eventType), LogSanitizer.Clean(action));
-            return new WebhookResult(eventType, action, Skipped: true);
-        }
-
-        _logger.LogInformation(
-            "Webhook {Event} (action={Action}) queued as task {TaskId} (installation={InstallationId}, tenant={TenantId}, scope={Scope})",
-            LogSanitizer.Clean(eventType), LogSanitizer.Clean(action),
-            taskId, installationId, tenantId, scope);
-
-        return new WebhookResult(eventType, action, Skipped: false, TaskId: taskId);
     }
 
     private async Task<WebhookResult> HandleInstallationEventAsync(

@@ -567,6 +567,38 @@ app.MapPost("/elsa/api/documents/input/resume",
     Tamma.ElsaServer.Endpoints.DocumentInputResumeEndpoint.Resume)
     .RequireAuthorization();
 
+// Epic 31 P3 (DG-5) — the engine-side half of the CI completion poller.
+// Tamma.Api's CiCompletionPollerService enumerates suspended CI-result waits
+// here (the WaitForCIResultsActivity bookmark under the common
+// "ci-result-wait" stimulus name), polls each run's status through the
+// tenant's resolved platform driver API-side, and posts the terminal result
+// back to the resume endpoint, which runs the owning instance from the exact
+// bookmark id. A burned bookmark (timeout won the race) answers 404 — a late
+// resume can never double-advance. Same engine-control-surface /
+// RequireAuthorization rationale as the merge/deploy/blocker resume seams.
+app.MapGet("/elsa/api/ci/waits",
+    Tamma.ElsaServer.Endpoints.CiWaitEndpoints.ListWaits)
+    .RequireAuthorization();
+app.MapPost("/elsa/api/ci/waits/resume",
+    Tamma.ElsaServer.Endpoints.CiWaitEndpoints.Resume)
+    .RequireAuthorization();
+
+// Epic 31 P4 M2 (DG-6) — merged-PR webhook resume: Tamma.Api's platform
+// webhook handlers (GitHub pull_request.closed(merged=true), Gitea/Forgejo
+// equivalent, GitLab merge_request action=merge) forward here to resume the
+// cycle's WaitForPRMerged wait on the Merged edge with the mergeSha. The 12h
+// TimedOut SLA stays as the exception path. Bookmark lookup is tenant+repo-
+// qualified (the merge-approval C1/C2 convention) with a legacy unqualified
+// fallback bounded by the 12h SLA transition window; ambiguity refuses (409).
+// Same engine-control-surface / RequireAuthorization rationale — and the same
+// ungoverned-route accounting — as the merge/deploy/CI resume seams: this is
+// engine-internal surface reached only over the authenticated Tamma.Api→engine
+// hop, outside the Tamma.Api host the coverage sweep pins (its declared
+// engine-HTTP blind spot, GovernanceHostFixture docs; accounted 2026-08-08).
+app.MapPost("/elsa/api/adl/pr-merged/resume",
+    Tamma.ElsaServer.Endpoints.PrMergedResumeEndpoint.Resume)
+    .RequireAuthorization();
+
 app.UseSerilogRequestLogging();
 
 Log.Information("Tamma ELSA Server starting up...");

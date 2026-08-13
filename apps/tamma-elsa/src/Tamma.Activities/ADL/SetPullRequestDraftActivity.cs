@@ -34,7 +34,7 @@ namespace Tamma.Activities.ADL;
     "Marks a pull request ready-for-review (or back to draft)",
     Kind = ActivityKind.Task
 )]
-[FlowNode("DraftSet", "Error")]
+[FlowNode("DraftSet", "Error", "Unsupported")]
 public class SetPullRequestDraftActivity : Activity
 {
     /// <summary>Headline DCB event type on the draft-set success path.</summary>
@@ -42,6 +42,14 @@ public class SetPullRequestDraftActivity : Activity
 
     /// <summary>Headline DCB event type on the draft-set failure path.</summary>
     public const string FailedEventType = "GIT.PR_DRAFT_SET.FAILED";
+
+    /// <summary>
+    /// Epic 31 P2 (plan §4.3) — the mediation's first-class capability
+    /// refusal. EXACT-code match only: anything else stays on the Error
+    /// edge (mis-classifying a real failure as "unsupported" would
+    /// silently skip a gate).
+    /// </summary>
+    public const string CapabilityUnsupportedCode = "capability_unsupported";
 
     private readonly ILogger<SetPullRequestDraftActivity>? _logger;
     private readonly TammaApiClient? _apiClient;
@@ -133,7 +141,12 @@ public class SetPullRequestDraftActivity : Activity
                     ["failureCode"] = outcome.FailureCode,
                 },
             });
-            await context.CompleteActivityWithOutcomesAsync("Error");
+
+            // §4.3 defense in depth: the typed capability refusal routes to
+            // the SAME alternative step the check step uses — the safety net
+            // for a stale or lying probe. Exact-code match only.
+            await context.CompleteActivityWithOutcomesAsync(
+                outcome.Unsupported ? "Unsupported" : "Error");
         }
     }
 
@@ -166,6 +179,14 @@ public sealed class PrDraftOutcome
     public bool? IsDraft { get; init; }
     public string? FailureCode { get; init; }
     public string? Error { get; init; }
+
+    /// <summary>Epic 31 P2 (§4.3) — true iff the failure is the EXACT
+    /// first-class capability refusal; routed to the Unsupported edge
+    /// (the same alternative step as the check step), never to Error.</summary>
+    public bool Unsupported =>
+        !Success
+        && string.Equals(FailureCode, SetPullRequestDraftActivity.CapabilityUnsupportedCode,
+            StringComparison.Ordinal);
 
     public static PrDraftOutcome Ok(bool? isDraft) => new() { Success = true, IsDraft = isDraft };
 

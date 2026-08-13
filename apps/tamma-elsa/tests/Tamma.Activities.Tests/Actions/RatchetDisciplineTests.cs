@@ -122,7 +122,10 @@ public class RatchetDisciplineTests
             MediationClientEffectSweepTests.ExceptionRatchetClassifies,
             MediationClientEffectSweepTests.ExceptionRatchetCount,
             MediationClientEffectSweepTests.NonEffectExceptionPinHistory,
-            1),
+            // RE-SEEDED 1 → 2 (Epic 31 P2, 2026-08-07): GetGitPlatformCapabilitiesAsync
+            // admitted with a written circularity argument. The two-file edit this
+            // line is half of IS the visibility the D17 rule demands.
+            2),
     ];
 
     /// <summary>
@@ -331,7 +334,8 @@ public class RatchetDisciplineTests
                 ["KnownNonEffectClientMethods"] = 19,
                 ["UnattributedActivities"] = 9,
                 ["NotDiRegisteredTools"] = 1,
-                ["KnownNonEffectClientMethods.ReviewedExceptions"] = 1,
+                // 1 → 2 (Epic 31 P2, 2026-08-07): GetGitPlatformCapabilitiesAsync admitted.
+                ["KnownNonEffectClientMethods.ReviewedExceptions"] = 2,
             },
             "these are the values the four pins were SEEDED at. Changing one is a re-seed and must "
             + "be argued for in the diff, never a silent literal edit.");

@@ -16,7 +16,11 @@ namespace Tamma.Platforms.GitLab.Mapping;
 ///         have a separate concept.</item>
 ///   <item><b>Draft flag</b>: GitLab uses both <c>draft</c> (newer) and
 ///         <c>work_in_progress</c> (legacy). Either being true sets
-///         <see cref="PullRequest.IsDraft"/>.</item>
+///         <see cref="PullRequest.IsDraft"/>; Epic 31 P6 M1 also infers
+///         draft from the <c>Draft:</c>/<c>[Draft]</c>/<c>(Draft)</c> (and
+///         legacy <c>WIP</c>) title prefixes via
+///         <see cref="GitLabDraftTitle"/> for payloads that omit the
+///         booleans.</item>
 ///   <item><b>Number</b>: GitLab MRs have two ids — <c>id</c>
 ///         (global) and <c>iid</c> (per-project). Callers always
 ///         address by <c>iid</c>, so the mapper surfaces that.</item>
@@ -35,11 +39,61 @@ internal static class MrToPullRequestMapper
             SourceBranch: mr.SourceBranch ?? string.Empty,
             TargetBranch: mr.TargetBranch ?? string.Empty,
             State: MapState(mr.State),
-            IsDraft: mr.Draft || mr.WorkInProgress,
+            // Booleans-first (Epic 31 review, F-medium): prefix inference only
+            // when the payload omits both booleans — see GitLabDraftTitle.IsDraft.
+            IsDraft: GitLabDraftTitle.IsDraft(mr.Draft, mr.WorkInProgress, mr.Title),
             HtmlUrl: mr.WebUrl ?? string.Empty,
             AuthorLogin: mr.Author?.Username ?? mr.Author?.Name ?? string.Empty,
             CreatedAt: mr.CreatedAt,
-            UpdatedAt: mr.UpdatedAt);
+            UpdatedAt: mr.UpdatedAt)
+        {
+            // Epic 31 P6 M2 — merge read-backs. The merge activity fails loud
+            // on a missing SHA, so ALL THREE merge shapes are covered: a merge
+            // commit reports merge_commit_sha; a squash merge reports
+            // squash_commit_sha (merge_commit_sha can be null there); and a
+            // FAST-FORWARD merge (project merge method "ff", no squash) sets
+            // NEITHER — the merged head is only in `sha` (diff_head_sha, which
+            // IS the new target-branch tip after an ff merge). Without the
+            // third fallback a successful ff merge was reported as
+            // MergeOutcome.Failed("api_error") (Epic 31 review, F-medium;
+            // verified against gitlab-org/gitlab merge_strategies/
+            // from_source_branch.rb — the fast_forward path returns only
+            // commit_sha). Gated on state=merged so an OPEN MR's head SHA
+            // never masquerades as a merge SHA.
+            MergeCommitSha = mr.MergeCommitSha
+                ?? mr.SquashCommitSha
+                ?? (string.Equals(mr.State, "merged", StringComparison.OrdinalIgnoreCase)
+                    ? mr.Sha
+                    : null),
+            Mergeable = MapMergeable(mr),
+            MergeableState = mr.DetailedMergeStatus ?? mr.MergeStatus,
+        };
+    }
+
+    /// <summary>
+    /// Platform-computed mergeability. Only POSITIVE confirmations map:
+    /// <c>can_be_merged</c>/<c>mergeable</c> → true; the CONFIRMED conflict
+    /// shapes (<c>cannot_be_merged</c> legacy, <c>conflict</c> detailed) →
+    /// false; anything else (unchecked / checking / absent / the
+    /// non-conflict blocked reasons like <c>draft_status</c>) → null so the
+    /// merge activity's conflict gate never fires on a still-computing or
+    /// merely-blocked MR.
+    /// </summary>
+    public static bool? MapMergeable(GitLabMergeRequest mr)
+    {
+        ArgumentNullException.ThrowIfNull(mr);
+        if (string.Equals(mr.DetailedMergeStatus, "mergeable", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mr.MergeStatus, "can_be_merged", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (string.Equals(mr.DetailedMergeStatus, "conflict", StringComparison.OrdinalIgnoreCase)
+            || (mr.DetailedMergeStatus is null
+                && string.Equals(mr.MergeStatus, "cannot_be_merged", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+        return null;
     }
 
     public static PullRequestState MapState(string? state) => state switch

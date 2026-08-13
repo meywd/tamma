@@ -389,14 +389,22 @@ public static partial class ActionCatalog
         Effect(ExternalEffect.GitChecksBypass, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Bypass required checks", "Bypass the required-status-checks gate on a merge. RESERVED (Story 43-12): zone level 50, no action in the tree performs it — the key is reserved before anything does so the first caller cannot ship ungoverned.",
             "RESERVED (Story 43-12) — no performer in the tree: nothing bypasses required checks yet", reversible: false, min: 50),
         // git.webhook.register → SourceControlWrite, Mutating, reversible:true (a
-        // webhook can be deleted). DUAL-dormant (Story 43-13 pointer): drivers
-        // implement IGitPlatformClient.RegisterWebhookAsync but no caller exists;
-        // classification is DUAL (admin setup by hand, or an LLM onboarding flow) and
-        // per Story 43-13 the level binds only an LLM path. If the first real caller
-        // turns out to be provisioning plumbing, this row moves to the machinery
-        // inventory in the wiring PR.
-        Effect(ExternalEffect.GitWebhookRegister, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Register webhook", "Register a repo webhook, minting a durable ingress path (the level-85 'create infrastructure' zone). RESERVED / DUAL-dormant (Story 43-12): drivers implement RegisterWebhookAsync but no caller exists; classification is DUAL and per Story 43-13 the level binds only an LLM path. If the first caller is provisioning plumbing, this row moves to the machinery inventory in the wiring PR.",
-            "RESERVED (Story 43-12) — no performer in the tree: IGitPlatformClient.RegisterWebhookAsync is implemented by drivers but has no production caller", min: 85),
+        // webhook can be deleted). LIVE as of Epic 31 P4 M3 (2026-08-08): the first
+        // production caller landed and it is PROVISIONING PLUMBING — the
+        // WebhookRegistrationService invoked server-side at platform connect (SaaS)
+        // and by the single-user startup validator; no LLM path performs it. Per this
+        // row's own 43-12/43-13 note ("if the first caller is provisioning plumbing,
+        // this row moves to the machinery inventory in the wiring PR") it is now
+        // machinery: a deterministic write executing a decision gated elsewhere (the
+        // human's platform-connect action / the operator's Platform: config), off the
+        // dial, audited via GIT.WEBHOOK_REGISTER.* DCB events. Like every machinery
+        // row it carries no level semantics (min = AutonomyDial.Min — the evaluator
+        // invariants require DefaultMinAutonomy == Min for machinery); the recorded
+        // create-infrastructure zone (85) lives in the 43-12 history should an LLM
+        // path ever bind it — that binding would be a reclassification back onto the
+        // dial, reviewed here.
+        Effect(ExternalEffect.GitWebhookRegister, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Register webhook", "Register a repo webhook, minting a durable ingress path. LIVE (Epic 31 P4 M3): performed by the server-initiated WebhookRegistrationService at platform connect / single-user startup — provisioning machinery, off the dial per the Story 43-12 note; every registration (and every skip) emits a GIT.WEBHOOK_REGISTER.* audit event.",
+            "Tamma.Api.Services.Webhooks.Registration.WebhookRegistrationService — server-initiated at platform connect + single-user startup validation", machinery: true),
         // Story 31-13 — PR operations (source-control-write). Enforceable-but-unbound:
         // the routes named in each SiteKey do not exist yet (no .Governs binding), the
         // same green pattern effect:secret.read used when first minted. review-comment
@@ -720,6 +728,24 @@ public static partial class ActionCatalog
             "Tamma.Api.Services.Actions.GovernancePolicySnapshotPrimingService"),
         Automation(BackgroundActor.PlatformTaskWorker, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Platform task worker", "Drains the platform task queue (one task at a time per process; RunOnStartup ships false).",
             "Tamma.Api.Services.PlatformTasks.PlatformTaskWorker"),
+        // Epic 31 P2 — the two platform-plane hosted services the P2 swap added.
+        // ReadOnly: the invalidator only evicts a process-local in-memory cache
+        // (the ProviderSettingsStorePrimingService risk-honesty precedent).
+        Automation(BackgroundActor.PlatformDriverCacheInvalidator, ActionGroup.PlatformAutomation, ActionRisk.ReadOnly, "Platform driver-cache invalidator", "Evicts cached platform drivers on CREDENTIAL_ROTATED / DISCONNECTED / SWITCH_ORG platform events (Story 31-2's designed subscriber, built in Epic 31 P2). Process-local in-memory eviction only.",
+            "Tamma.Api.Services.Platforms.PlatformDriverCacheInvalidator"),
+        Automation(BackgroundActor.GitHubInstallationBridgeBackfill, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "GitHub installation bridge backfill", "One-shot startup sweep bridging tenant-linked github_installations rows into tenant_platform_installations (Epic 31 P2 seam-14 registry unification); idempotent, so re-runs are no-ops.",
+            "Tamma.Api.Services.Platforms.GitHubInstallationBridgeBackfillService"),
+        // Epic 31 P3 (DG-5) — the CI completion poller. Mutating: it resumes
+        // suspended workflow instances (idempotent — a burned bookmark 404s).
+        Automation(BackgroundActor.CiCompletionPoller, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "CI completion poller", "Polls suspended CI-result waits' run status through the resolved platform driver and resumes the bookmark on completion (Epic 31 P3 DG-5); before it only the 30m timeout ended a CI wait. Idempotent against the timeout race.",
+            "Tamma.Api.Services.Ci.CiCompletionPollerService"),
+        // Epic 31 P4 M3 — single-user startup validation for webhook ingress
+        // (the git.webhook.register caller in config-tier mode). Mutating: it
+        // registers repo webhooks; degradation (no public URL / no secret /
+        // capability unsupported) is a GIT.WEBHOOK_REGISTER.SKIPPED audit
+        // event, never a startup failure.
+        Automation(BackgroundActor.WebhookRegistrationStartup, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Webhook registration startup validator", "Single-user-mode startup pass that registers the platform webhook (Tamma:PublicBaseUrl + configured secret) on the config-tier installation's accessible repos; skips-with-audit when registration cannot proceed (Epic 31 P4 M3).",
+            "Tamma.Api.Services.Webhooks.Registration.WebhookRegistrationStartupService"),
 
         // ── platform-task (8) — all platform-automation ──────────────────────
 

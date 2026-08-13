@@ -9,32 +9,40 @@
     <Version>1.0.0</Version>
     <Authors>Tamma Team</Authors>
     <Description>
-      Story 31-3: GitHub git platform driver. Composes the existing
-      Octokit-backed IGitHubActionsClient (Tamma.Activities) and
-      IGitHubAppClient (Tamma.Api) behind the IGitPlatformDriver
-      surface so GitHub matches the Gitea / GitLab driver pattern.
-      No Octokit calls live here — this project is the seam between
-      the platform-neutral abstraction and Tamma's existing GitHub
-      clients.
+      Epic 31 P1 stage 2: GitHub git platform driver. Implements
+      IGitPlatformDriver directly against the GitHub REST v3 + GraphQL
+      v4 APIs — repo/branch/PR/issue/label/release/commit endpoints,
+      the six 31-13 PR lifecycle verbs (draft toggle via GraphQL,
+      GHES-aware endpoint), Actions dispatch + run monitor with
+      pollable-run-id correlation, and webhook registration. Two
+      credential modes through the factory seam: PAT/BYOK plaintext
+      tokens and GitHub App installation-token minting (RS256 App JWT,
+      absorbed from Tamma.Api's OctokitGitHubAppClient). No Octokit,
+      no Tamma.Api/Tamma.Activities dependency — the absorb-don't-wrap
+      decision of the Epic 31 execution plan.
     </Description>
   </PropertyGroup>
 
-  <!-- Microsoft.Extensions.DependencyInjection.Abstractions and
-       Microsoft.Extensions.Logging.Abstractions flow transitively from
-       Tamma.Activities (Elsa 3.5.3 → 9.0.11). Explicit references here
-       at older versions trigger NU1605 (package downgrade) outside the
-       Directory.Build.props scope (e.g., the Tamma.Api docker build
-       context which is one directory deeper than the props file). -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+    <PackageReference Include="System.Text.Json" Version="8.0.6" />
+    <!-- Epic 31 P4 M4: sealed-box CI-secret encryption moved down from Tamma.Api with the provisioner. -->
+    <PackageReference Include="Sodium.Core" Version="1.4.0" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
-    <!-- Tamma.Activities exposes IGitHubActionsClient — the narrow
-         GitHub Actions surface we wrap. Activities does NOT depend
-         on Tamma.Api so referencing it does not introduce a cycle. -->
-    <ProjectReference Include="..\Tamma.Activities\Tamma.Activities.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Tamma.Platforms.GitHub.Tests" />
+    <!-- Epic 31 P1 — PlatformCapabilityContractTests constructs the
+         internal-ctor client to pin capability-flag ⇔ verb agreement. -->
+    <InternalsVisibleTo Include="Tamma.Platforms.Tests" />
+    <!-- Story 31-10 — the integration suite builds GitHubHttpClient
+         internals for env-gated live-API runs. -->
+    <InternalsVisibleTo Include="Tamma.Platforms.IntegrationTests" />
   </ItemGroup>
 
 </Project>

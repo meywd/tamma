@@ -95,6 +95,28 @@ public static class GitEventTypes
 
     public const string PrDraftSetSuccess = "GIT.PR_DRAFT_SET.SUCCESS";
     public const string PrDraftSetFailed = "GIT.PR_DRAFT_SET.FAILED";
+
+    // ── Epic 31 P5 M2 — §4 degradation audit events (silent skips are
+    //    forbidden; every alternative-step trip is on the record). These are
+    //    ADDITIONAL audit rows next to the op's exactly-one TERMINAL event,
+    //    per the execution plan's §5 ("event-type additions, not
+    //    route/catalog changes").
+
+    /// <summary>DG-3 — a reviewer request was skipped (capability
+    /// unsupported / unresolvable reviewer / platform refusal) and the PR
+    /// step proceeded without reviewers, labeled for a human.</summary>
+    public const string PrReviewersSkipped = "GIT.PR_REVIEWERS.SKIPPED";
+
+    /// <summary>DG-2 — a line-anchored review comment could not be
+    /// anchored (capability unsupported or the platform rejected the
+    /// anchor) and was downgraded to a plain PR comment carrying
+    /// file:line in the body. The feedback is never dropped.</summary>
+    public const string PrReviewCommentDowngraded = "GIT.PR_REVIEW_COMMENT.DOWNGRADED";
+
+    /// <summary>DG-4 — the requested merge method was refused with the
+    /// exact typed <c>merge_method_unsupported</c> code and the merge
+    /// auto-fell back along the fixed order rebase→squash→merge.</summary>
+    public const string PrMergeMethodFallback = "GIT.PR_MERGE.METHOD_FALLBACK";
 }
 
 /// <summary>
@@ -121,6 +143,15 @@ public static class GitFailureCodes
 
     /// <summary>The per-tenant git token could not be resolved (fail-closed, AC3/AC6).</summary>
     public const string TokenUnavailable = "GIT_TOKEN_UNAVAILABLE";
+
+    /// <summary>
+    /// Epic 31 P2 (plan §4) — the resolved driver's platform cannot perform the
+    /// requested verb. Surfaced FIRST-CLASS (exact code, lower-case, matching the
+    /// driver contract's <c>PlatformError.InvalidRequest</c> code) so the
+    /// workflow's capability check step / <c>Unsupported</c> safety-net outcome
+    /// can branch on it. Never coarsened into <see cref="PlatformError"/>.
+    /// </summary>
+    public const string CapabilityUnsupported = "capability_unsupported";
 }
 
 /// <summary>The credential-source LABEL surfaced on the audit event + response —

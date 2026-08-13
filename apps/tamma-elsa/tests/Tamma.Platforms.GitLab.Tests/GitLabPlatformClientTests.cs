@@ -370,6 +370,31 @@ public sealed class GitLabPlatformClientTests
         ((PlatformResult<IssueComment>.Ok)result).Value.Id.Should().Be("99");
     }
 
+    // ── Epic 31 review (F-high) — GitLab issue iids and MR iids are SEPARATE
+    //    per-project sequences: a PR comment routed through the issues notes
+    //    endpoint lands on an unrelated issue (or 404s). The PR-comment verb
+    //    must hit the MR notes surface and never touch /issues/. ──
+
+    [Test]
+    public async Task CreatePullRequestCommentAsync_posts_to_MERGE_REQUEST_notes_never_issues()
+    {
+        var (client, handler) = TestFactory.BuildClient();
+        handler.AddRoute(HttpMethod.Post, "/merge_requests/12/notes", _ =>
+            FakeHttpMessageHandler.Json(HttpStatusCode.Created,
+                """{"id":42,"body":"review feedback","author":{"username":"bot"},"created_at":"2026-01-01T00:00:00Z"}"""));
+
+        var result = await client.CreatePullRequestCommentAsync("g", "p", "12", "review feedback");
+
+        result.Should().BeOfType<PlatformResult<IssueComment>.Ok>()
+            .Which.Value.Id.Should().Be("42");
+        handler.Requests.Should().ContainSingle()
+            .Which.RequestUri.AbsolutePath.Should().Contain("/merge_requests/12/notes",
+                "the comment must land on the MR's own discussion thread");
+        handler.Requests.Should().NotContain(r => r.RequestUri.AbsolutePath.Contains("/issues/"),
+            "posting a PR number to the issues surface misdelivers to an unrelated issue "
+            + "— the exact DG-2 downgrade misdelivery the review confirmed");
+    }
+
     [Test]
     public async Task RegisterWebhookAsync_maps_event_array_to_boolean_flags()
     {

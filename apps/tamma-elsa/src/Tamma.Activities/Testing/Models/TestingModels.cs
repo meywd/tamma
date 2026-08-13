@@ -16,6 +16,16 @@ public class CITriggerResult
     public string PipelineUrl { get; set; } = string.Empty;
     public string? Error { get; set; }
     public DateTime TriggeredAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Epic 31 P3 (plan §4.3) — the typed SAFETY-NET outcome: true ONLY when
+    /// the mediation plane answered the exact <c>capability_unsupported</c>
+    /// failure code (the resolved platform cannot dispatch CI at all). The
+    /// workflows route this to the SAME alternative step as the §4 check step
+    /// (CI.WORKFLOW_DISPATCH.SKIPPED → human merge-approval path) — never
+    /// into the debug-retry loop, and never as a plain error.
+    /// </summary>
+    public bool Unsupported { get; set; }
 }
 
 /// <summary>
@@ -315,20 +325,36 @@ public class CommitFixResult
 /// <summary>
 /// Bookmark payload for WaitForCIResults activity.
 /// The bookmark ID follows the pattern: ci-result-{sessionId}-{runId}
+///
+/// <para><b>Epic 31 P3 (DG-5).</b> The payload now also carries the
+/// <see cref="Repository"/> (<c>owner/repo</c>) and the ambient
+/// <see cref="TenantId"/>, so the CI completion poller can resolve the
+/// tenant's platform driver and poll THIS run's status without any
+/// out-of-band state. In-flight bookmarks serialized before this change
+/// simply deserialize with an empty repository — the poller skips them
+/// (they end via the timeout edge exactly as before; rollout-safe).</para>
 /// </summary>
 public class CIResultBookmarkPayload
 {
     [JsonConstructor]
     public CIResultBookmarkPayload() { }
 
-    public CIResultBookmarkPayload(Guid sessionId, string runId)
+    public CIResultBookmarkPayload(Guid sessionId, string runId, string? repository = null, string? tenantId = null)
     {
         SessionId = sessionId;
         RunId = runId;
         BookmarkId = $"ci-result-{sessionId}-{runId}";
+        Repository = repository ?? string.Empty;
+        TenantId = tenantId;
     }
 
     public Guid SessionId { get; set; }
     public string RunId { get; set; } = string.Empty;
     public string BookmarkId { get; set; } = string.Empty;
+
+    /// <summary>The <c>owner/repo</c> full name the run belongs to (poller scope).</summary>
+    public string Repository { get; set; } = string.Empty;
+
+    /// <summary>The acting tenant (Guid string) or null in single-user/platform scope.</summary>
+    public string? TenantId { get; set; }
 }

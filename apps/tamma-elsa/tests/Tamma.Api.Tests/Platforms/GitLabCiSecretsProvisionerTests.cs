@@ -2,7 +2,7 @@ using System.Net;
 using System.Text.Json;
 using FluentAssertions;
 using NUnit.Framework;
-using Tamma.Api.Services.Platforms;
+using Tamma.Platforms.GitLab;
 using Tamma.Platforms.Abstractions;
 
 namespace Tamma.Api.Tests.Platforms;
@@ -17,6 +17,12 @@ namespace Tamma.Api.Tests.Platforms;
 [TestFixture]
 public sealed class GitLabCiSecretsProvisionerTests
 {
+    private static Task<bool> TestAuth(HttpRequestMessage req, CancellationToken ct)
+    {
+        req.Headers.TryAddWithoutValidation("PRIVATE-TOKEN", "test-token");
+        return Task.FromResult(true);
+    }
+
     private static (HttpClient http, CiSecretsProvisionerTestHandler handler) BuildClient()
     {
         var handler = new CiSecretsProvisionerTestHandler();
@@ -33,7 +39,7 @@ public sealed class GitLabCiSecretsProvisionerTests
     public async Task ProvisionSecret_RepoScope_SendsExpectedPayload()
     {
         var (http, handler) = BuildClient();
-        var prov = new GitLabCiSecretsProvisioner(http);
+        var prov = new GitLabCiSecretsProvisioner(http, "https://gitlab.example.com", TestAuth);
 
         handler.EnqueueStatus("POST", "/api/v4/projects/acme%2Fapp/variables",
             HttpStatusCode.Created);
@@ -62,7 +68,7 @@ public sealed class GitLabCiSecretsProvisionerTests
     public async Task ProvisionSecret_ProtectedAndMasked_FlagsAppearInPayload()
     {
         var (http, handler) = BuildClient();
-        var prov = new GitLabCiSecretsProvisioner(http);
+        var prov = new GitLabCiSecretsProvisioner(http, "https://gitlab.example.com", TestAuth);
 
         handler.EnqueueStatus("POST", "/api/v4/projects/acme%2Fapp/variables",
             HttpStatusCode.Created);
@@ -87,7 +93,7 @@ public sealed class GitLabCiSecretsProvisionerTests
     public async Task ProvisionSecret_EnvironmentScope_PopulatesEnvironmentScope()
     {
         var (http, handler) = BuildClient();
-        var prov = new GitLabCiSecretsProvisioner(http);
+        var prov = new GitLabCiSecretsProvisioner(http, "https://gitlab.example.com", TestAuth);
 
         handler.EnqueueStatus("POST", "/api/v4/projects/acme%2Fapp/variables",
             HttpStatusCode.Created);
@@ -110,7 +116,7 @@ public sealed class GitLabCiSecretsProvisionerTests
     public async Task ProvisionSecret_OrgScope_HitsGroupEndpoint()
     {
         var (http, handler) = BuildClient();
-        var prov = new GitLabCiSecretsProvisioner(http);
+        var prov = new GitLabCiSecretsProvisioner(http, "https://gitlab.example.com", TestAuth);
 
         handler.EnqueueStatus("POST", "/api/v4/groups/myteam/variables",
             HttpStatusCode.Created);
@@ -129,7 +135,7 @@ public sealed class GitLabCiSecretsProvisionerTests
     public async Task ProvisionSecret_UserScope_ReturnsNotSupported()
     {
         var (http, _) = BuildClient();
-        var prov = new GitLabCiSecretsProvisioner(http);
+        var prov = new GitLabCiSecretsProvisioner(http, "https://gitlab.example.com", TestAuth);
 
         var results = await prov.ProvisionSecretAsync(
             CiSecretScope.User,
@@ -143,7 +149,7 @@ public sealed class GitLabCiSecretsProvisionerTests
     public async Task ProvisionSecret_GlobalScope_ReturnsNotSupported()
     {
         var (http, _) = BuildClient();
-        var prov = new GitLabCiSecretsProvisioner(http);
+        var prov = new GitLabCiSecretsProvisioner(http, "https://gitlab.example.com", TestAuth);
 
         var results = await prov.ProvisionSecretAsync(
             CiSecretScope.Global,
@@ -159,7 +165,7 @@ public sealed class GitLabCiSecretsProvisionerTests
     public async Task ProvisionSecret_MaskedShortValue_FailsBeforeNetwork()
     {
         var (http, handler) = BuildClient();
-        var prov = new GitLabCiSecretsProvisioner(http);
+        var prov = new GitLabCiSecretsProvisioner(http, "https://gitlab.example.com", TestAuth);
 
         var results = await prov.ProvisionSecretAsync(
             CiSecretScope.Repo,
@@ -178,7 +184,7 @@ public sealed class GitLabCiSecretsProvisionerTests
     public async Task ProvisionSecret_MaskedNewlineValue_FailsValidation()
     {
         var (http, _) = BuildClient();
-        var prov = new GitLabCiSecretsProvisioner(http);
+        var prov = new GitLabCiSecretsProvisioner(http, "https://gitlab.example.com", TestAuth);
 
         var results = await prov.ProvisionSecretAsync(
             CiSecretScope.Repo,
@@ -194,7 +200,7 @@ public sealed class GitLabCiSecretsProvisionerTests
     public async Task ProvisionSecret_MaskedDisallowedChars_FailsValidation()
     {
         var (http, _) = BuildClient();
-        var prov = new GitLabCiSecretsProvisioner(http);
+        var prov = new GitLabCiSecretsProvisioner(http, "https://gitlab.example.com", TestAuth);
 
         var results = await prov.ProvisionSecretAsync(
             CiSecretScope.Repo,
@@ -245,7 +251,7 @@ public sealed class GitLabCiSecretsProvisionerTests
     public async Task DeleteSecret_404_TreatedAsSuccess()
     {
         var (http, handler) = BuildClient();
-        var prov = new GitLabCiSecretsProvisioner(http);
+        var prov = new GitLabCiSecretsProvisioner(http, "https://gitlab.example.com", TestAuth);
 
         handler.EnqueueStatus("DELETE", "/api/v4/projects/o%2Fr/variables/K",
             HttpStatusCode.NotFound);
@@ -264,7 +270,7 @@ public sealed class GitLabCiSecretsProvisionerTests
     public async Task ProvisionSecret_OneTargetFails_OtherSucceeds()
     {
         var (http, handler) = BuildClient();
-        var prov = new GitLabCiSecretsProvisioner(http);
+        var prov = new GitLabCiSecretsProvisioner(http, "https://gitlab.example.com", TestAuth);
 
         handler.EnqueueStatus("POST", "/api/v4/projects/o%2Fa/variables",
             HttpStatusCode.Created);

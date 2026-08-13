@@ -148,6 +148,45 @@ public enum BackgroundActor
     /// <c>AddHostedService&lt;&gt;</c> line — catalogued explicitly so it is not
     /// invisible to a registration grep.</summary>
     [Wire("platform-task-worker")] PlatformTaskWorker,
+
+    // ── Epic 31 P2 — the platform-plane subscribers/sweeps ──
+
+    /// <summary><c>Tamma.Api.Services.Platforms.PlatformDriverCacheInvalidator</c>
+    /// — the Story 31-2-designed cache-invalidation subscriber (built in Epic
+    /// 31 P2): CREDENTIAL_ROTATED / DISCONNECTED / SWITCH_ORG platform events
+    /// evict the tenant's cached drivers immediately. Process-local, in-memory
+    /// eviction only — it touches no external system.</summary>
+    [Wire("platform-driver-cache-invalidator")] PlatformDriverCacheInvalidator,
+
+    /// <summary><c>Tamma.Api.Services.Platforms.GitHubInstallationBridgeBackfillService</c>
+    /// — Epic 31 P2 (seam 14) one-shot startup backfill: every tenant-linked
+    /// <c>github_installations</c> row is idempotently bridged into
+    /// <c>tenant_platform_installations</c> so App-installed tenants are
+    /// visible to the driver plane. Re-runs are no-ops by construction.</summary>
+    [Wire("github-installation-bridge-backfill")] GitHubInstallationBridgeBackfill,
+
+    // ── Epic 31 P3 — the CI completion vehicle (DG-5) ──
+
+    /// <summary><c>Tamma.Api.Services.Ci.CiCompletionPollerService</c> —
+    /// Epic 31 P3 (DG-5): the durable CI completion poller. Enumerates the
+    /// engine's suspended CI-result waits, polls each run's status through
+    /// the tenant's resolved platform driver (<c>driver.Actions</c>), and
+    /// resumes the bookmark with the terminal result — before it, only the
+    /// 30-minute timeout ended a CI wait, on every platform. Mutating: it
+    /// advances suspended workflow instances (idempotent against the timeout
+    /// race — a burned bookmark 404s, never double-advances).</summary>
+    [Wire("ci-completion-poller")] CiCompletionPoller,
+
+    /// <summary><c>Tamma.Api.Services.Webhooks.Registration.WebhookRegistrationStartupService</c>
+    /// — Epic 31 P4 M3: single-user-mode startup validation for webhook
+    /// ingress. When the <c>Platform:</c> config tier is active and
+    /// <c>Tamma:PublicBaseUrl</c> + a configured webhook secret exist, it
+    /// registers the platform webhook on the accessible repos through
+    /// <c>driver.Client.RegisterWebhookAsync</c> (effect:git.webhook.register,
+    /// machinery). No public URL / no secret / unsupported capability degrade
+    /// to a GIT.WEBHOOK_REGISTER.SKIPPED audit event (the §4 alternative
+    /// step), never a startup failure.</summary>
+    [Wire("webhook-registration-startup")] WebhookRegistrationStartup,
 }
 
 /// <summary><see cref="BackgroundActor"/> wire helper.</summary>

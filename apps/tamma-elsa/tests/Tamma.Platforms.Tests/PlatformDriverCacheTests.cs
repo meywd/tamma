@@ -60,6 +60,46 @@ public class PlatformDriverCacheTests
         cached.Should().BeSameAs(second);
     }
 
+    // ── Epic 31 review (F-medium) — the ABSOLUTE bound. Sliding
+    //    expiration renews on every hit, so a hot tenant (the CI poller
+    //    resolves every 30s) kept a stale driver — and its compose-time
+    //    credential — alive forever. The absolute TTL is the hard cap
+    //    regardless of hit rate. ──
+
+    [Test]
+    public async Task HotEntry_ContinuouslyTouched_StillExpiresAtTheAbsoluteBound()
+    {
+        using var cache = new PlatformDriverCache(new PlatformDriverCacheOptions
+        {
+            // Sliding shorter than absolute so each touch renews it —
+            // exactly the pattern that used to keep the entry alive forever.
+            SlidingTtl = TimeSpan.FromMilliseconds(150),
+            AbsoluteTtl = TimeSpan.FromMilliseconds(300),
+        });
+        var tenantId = Guid.NewGuid();
+        cache.Set(tenantId, PlatformKind.GitHub, MakeDriver());
+
+        // Touch the entry well inside the sliding window, past the
+        // absolute bound. Generous deadline so a slow CI runner can't
+        // flake this: the entry MUST be gone within 5s.
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        var expired = false;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (!cache.TryGet(tenantId, PlatformKind.GitHub, out _))
+            {
+                expired = true;
+                break;
+            }
+            await Task.Delay(50);
+        }
+
+        expired.Should().BeTrue(
+            "sliding expiration alone renews on every hit — the absolute TTL is what makes "
+            + "'a missed invalidation event self-heals within the window' actually true for "
+            + "a tenant with sustained traffic");
+    }
+
     [Test]
     public void DifferentKinds_DontCollide_OnSameTenant()
     {

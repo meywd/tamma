@@ -655,6 +655,46 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         };
         markPrReady.SetDisplayText("Mark PR Ready For Review");
 
+        // ── Epic 31 P2 — the §4 IS-SUPPORTED CHECK STEP for the un-draft edge
+        // (the plan's first instance of the owner-decided mechanism). The check
+        // consults the resolved driver's live capabilities BEFORE the action:
+        // supported → run markPrReady exactly as today; unsupported → the
+        // DG-1 alternative step (mark-satisfied-with-audit-event) and proceed
+        // straight to the merge gate — the gate itself is preserved, only the
+        // "not mergeable while cooking" guard is lost, and only on platforms
+        // that cannot express it. Without this branch, every cycle on a
+        // platform without SetDraft would perma-fail at this node (§4's "why
+        // this is not optional").
+        var checkUndraftSupported = new CheckPlatformCapabilityActivity
+        {
+            Id = "CheckUndraftSupported",
+            Name = "Un-draft Supported?",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            Capability = new Input<string>("PrLifecycle"),
+            TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
+        };
+        checkUndraftSupported.SetDisplayText("Un-draft Supported?");
+
+        // DG-1's alternative step — the un-draft is MARKED SATISFIED with a
+        // loud audit row (silent skips are forbidden, §4.4); the cycle then
+        // opens the merge gate. Shared by BOTH the check step's Unsupported
+        // edge (the designed path) and markPrReady's Unsupported outcome (the
+        // §4.3 safety net for a stale/lying probe).
+        var markDraftSkipped = new EmitCycleEventActivity
+        {
+            Id = "MarkDraftSkipped",
+            Name = "Emit GIT.PR_DRAFT_SET.SKIPPED",
+            EventType = new Input<string>(_ => "GIT.PR_DRAFT_SET.SKIPPED"),
+            IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
+            Repository = new Input<string?>(ctx => repository.Get(ctx)),
+            TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
+            StepId = new Input<string?>("MarkPrReadyForReview"),
+            ErrorDetail = new Input<string?>(
+                "capability_unsupported: platform cannot toggle PR draft state; "
+                + "un-draft marked satisfied per DG-1 and the cycle proceeds to the merge gate"),
+        };
+        markDraftSkipped.SetDisplayText("Emit GIT.PR_DRAFT_SET.SKIPPED");
+
         var mergeApprovalGate = new DispatchWorkflow
         {
             Id = "MergeApprovalGate",
@@ -729,6 +769,10 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Name = "Wait for PR Merged",
             Repository = new Input<string>(ctx => repository.Get(ctx)),
             PRNumber = new Input<int>(ctx => prNumber.Get(ctx)),
+            // Epic 31 P4 M2 — the bookmark name folds tenant + repo in (the
+            // merge-approval gate's SECURITY C2 convention) so the webhook
+            // resume seam is tenant-scoped.
+            TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
             MergeSha = new Output<string?>(mergeSha),
         };
         waitForMerged.SetDisplayText("Wait for PR Merged");
@@ -1022,6 +1066,59 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         };
         ciGate.SetDisplayText("CI Gate (ci-with-debug-retry)");
 
+        // ── Epic 31 P3 — the §4 IS-SUPPORTED CHECK STEP for the CI action
+        // (owner mechanism, second instance after P2's un-draft edge). The
+        // check consults the resolved driver's live capabilities BEFORE the CI
+        // gate dispatches: supported → run ci-with-debug-retry exactly as
+        // today; unsupported → the DG-7 alternative step below. Without this
+        // branch a platform without CI dispatch would burn the full debug-retry
+        // budget before failing the cycle.
+        var checkCiSupported = new CheckPlatformCapabilityActivity
+        {
+            Id = "CheckCiSupported",
+            Name = "CI Dispatch Supported?",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            Capability = new Input<string>("Actions"),
+            TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
+        };
+        checkCiSupported.SetDisplayText("CI Dispatch Supported?");
+
+        // DG-7's alternative step — the CI gate is SKIPPED with a loud audit
+        // row (silent skips are forbidden, §4.4) and the cycle routes to code
+        // review + the HUMAN merge-approval gate: with the CI gate unsatisfied
+        // the cycle can NEVER auto-merge — a human decides the merge, with the
+        // CI.WORKFLOW_DISPATCH.SKIPPED event on the record. Shared by BOTH the
+        // check step's Unsupported edge (the designed path) and the CI gate's
+        // typed ciUnsupported result (the §4.3 safety net for a stale probe).
+        var markCiSkipped = new EmitCycleEventActivity
+        {
+            Id = "MarkCiSkipped",
+            Name = "Emit CI.WORKFLOW_DISPATCH.SKIPPED",
+            EventType = new Input<string>(_ => "CI.WORKFLOW_DISPATCH.SKIPPED"),
+            IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
+            Repository = new Input<string?>(ctx => repository.Get(ctx)),
+            TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
+            StepId = new Input<string?>("CiGate"),
+            ErrorDetail = new Input<string?>(
+                "capability_unsupported: platform cannot dispatch CI workflows; "
+                + "CI gate skipped per DG-7 — the cycle proceeds to code review and the HUMAN "
+                + "merge-approval gate (never an auto-merge without CI)"),
+        };
+        markCiSkipped.SetDisplayText("Emit CI.WORKFLOW_DISPATCH.SKIPPED");
+
+        // §4.3 safety net — the CI gate's result can carry ciUnsupported=true
+        // (typed capability_unsupported observed INSIDE ci-with-debug-retry
+        // when the check step's probe was stale/lying). Routes to the SAME
+        // alternative step; only then does the pass/fail gate run.
+        var ciUnsupportedRouter = new FlowDecision(ctx =>
+        {
+            var result = subResult.Get(ctx);
+            return result != null && result.TryGetValue("ciUnsupported", out var u)
+                && (u is true || string.Equals(u?.ToString(), "True", StringComparison.OrdinalIgnoreCase));
+        })
+        { Id = "CiUnsupportedRouter", Name = "CI Unsupported?" };
+        ciUnsupportedRouter.SetDisplayText("CI Unsupported?");
+
         var ciOk = StepGate("CiOk", "CI Passed?",
             ctx =>
             {
@@ -1059,8 +1156,8 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 createTestCases,
                 initTaskLoop, hasMoreTasks, extractCurrentTask, tddForTask, incrementTask,
                 dispatchTddRetry, tddRetryOk, notifyTddRetry, notifyTddFailed,
-                ciGate, ciOk, notifyCiPassed,
-                dispatchCodeReview, markPrReady, mergeApprovalGate,
+                checkCiSupported, markCiSkipped, ciGate, ciUnsupportedRouter, ciOk, notifyCiPassed,
+                dispatchCodeReview, checkUndraftSupported, markPrReady, markDraftSkipped, mergeApprovalGate,
                 extractGateOutcome, gateOutcomeSwitch,
                 notifyMergeRejected, notifyMergeEscalated, notifyMergeTimeout,
                 waitForMerged, closeIssue, deploymentPipeline, deployOk,
@@ -1219,19 +1316,44 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 // debug-retry; only a PASS proceeds to code review + the merge gate.
                 // A CI failure fails the cycle LOUD (no merge of red CI).
                 ConnectOutcome(hasMoreTasks, "False", notifyTddDone),
-                ConnectOutcome(hasMoreTasks, "False", ciGate),
-                Connect(ciGate, ciOk),
+                // Epic 31 P3 — §4 CHECK STEP before the CI action: supported →
+                // the CI gate exactly as today; unsupported → the DG-7
+                // alternative step (skip-with-audit → code review + the HUMAN
+                // merge gate; never an auto-merge without CI).
+                ConnectOutcome(hasMoreTasks, "False", checkCiSupported),
+                ConnectOutcome(checkCiSupported, "Supported", ciGate),
+                ConnectOutcome(checkCiSupported, "Unsupported", markCiSkipped),
+                // The CI gate's result routes through the §4.3 safety net
+                // (typed ciUnsupported from inside ci-with-debug-retry) before
+                // the pass/fail gate.
+                Connect(ciGate, ciUnsupportedRouter),
+                ConnectOutcome(ciUnsupportedRouter, "True", markCiSkipped),
+                ConnectOutcome(ciUnsupportedRouter, "False", ciOk),
                 ConnectOutcome(ciOk, "False", emitStepFailed),
+                // DG-7 alternative step → code review + the un-draft check →
+                // the HUMAN merge-approval gate (skips the false "CI passed"
+                // milestone notification).
+                Connect(markCiSkipped, dispatchCodeReview),
+                Connect(markCiSkipped, checkUndraftSupported),
                 // CI passed → notify + dispatch code review + merge-approval gate.
                 ConnectOutcome(ciOk, "True", notifyCiPassed),
                 ConnectOutcome(ciOk, "True", dispatchCodeReview),
-                // CI passed → mark the PR ready (it was opened as a draft, and GitHub
-                // cannot merge a draft) and only THEN open the merge gate. A failed
-                // un-draft fails the cycle loud rather than gating a merge that
-                // could never complete.
-                ConnectOutcome(ciOk, "True", markPrReady),
+                // CI passed → §4 CHECK STEP → mark the PR ready (it was opened as a
+                // draft, and GitHub cannot merge a draft) and only THEN open the
+                // merge gate. A failed un-draft fails the cycle loud rather than
+                // gating a merge that could never complete. Epic 31 P2: the check
+                // step decides support BEFORE the action; unsupported routes to the
+                // DG-1 alternative step (mark-satisfied-with-audit-event →
+                // merge gate) instead of perma-failing the cycle. markPrReady's own
+                // Unsupported outcome (exact capability_unsupported code) is the
+                // §4.3 safety net onto the SAME alternative step.
+                ConnectOutcome(ciOk, "True", checkUndraftSupported),
+                ConnectOutcome(checkUndraftSupported, "Supported", markPrReady),
+                ConnectOutcome(checkUndraftSupported, "Unsupported", markDraftSkipped),
                 ConnectOutcome(markPrReady, "DraftSet", mergeApprovalGate),
                 ConnectOutcome(markPrReady, "Error", emitStepFailed),
+                ConnectOutcome(markPrReady, "Unsupported", markDraftSkipped),
+                Connect(markDraftSkipped, mergeApprovalGate),
 
                 // 11b-12. Merge-Approval Gate (human merge/test/reject + acts on it)
                 //         → branch on the gate `outcome`. ONLY merge → WaitForPRMerged.

@@ -38,6 +38,8 @@ public class SecretQueryEndpointsTests
 
     private Mock<ISecretQueryService> _queryService = null!;
     private Mock<ISecretRevealService> _revealService = null!;
+    private Mock<Tamma.Data.Repositories.ITenantPlatformInstallationRepository> _installations = null!;
+    private Mock<Tamma.Platforms.IPlatformInstallationEventEmitter> _installationEvents = null!;
     private ClaimsPrincipal _user = null!;
 
     [SetUp]
@@ -45,6 +47,11 @@ public class SecretQueryEndpointsTests
     {
         _queryService = new Mock<ISecretQueryService>();
         _revealService = new Mock<ISecretRevealService>();
+        _installations = new Mock<Tamma.Data.Repositories.ITenantPlatformInstallationRepository>();
+        _installations
+            .Setup(i => i.ListByTenantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<Tamma.Data.Entities.TenantPlatformInstallation>());
+        _installationEvents = new Mock<Tamma.Platforms.IPlatformInstallationEventEmitter>();
         _user = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim("sub", "11111111-1111-1111-1111-111111111111"),
@@ -266,7 +273,8 @@ public class SecretQueryEndpointsTests
 
         var result = await SecretEndpoints.RotateTenantSecret(
             TenantA, SecretId, body, _user,
-            _revealService.Object, _queryService.Object, http);
+            _revealService.Object, _queryService.Object,
+            _installations.Object, _installationEvents.Object, http);
 
         ExtractStatusCode(result).Should().Be(StatusCodes.Status403Forbidden);
         _revealService.VerifyNoOtherCalls();
@@ -288,7 +296,8 @@ public class SecretQueryEndpointsTests
 
         var result = await SecretEndpoints.RotateTenantSecret(
             TenantA, SecretId, body, _user,
-            _revealService.Object, _queryService.Object, http);
+            _revealService.Object, _queryService.Object,
+            _installations.Object, _installationEvents.Object, http);
 
         ExtractStatusCode(result).Should().Be(StatusCodes.Status404NotFound);
         _revealService.Verify(r => r.IssueRotateAsync(
@@ -314,12 +323,123 @@ public class SecretQueryEndpointsTests
 
         var result = await SecretEndpoints.RotateTenantSecret(
             TenantA, SecretId, body, _user,
-            _revealService.Object, _queryService.Object, http);
+            _revealService.Object, _queryService.Object,
+            _installations.Object, _installationEvents.Object, http);
 
         ExtractStatusCode(result).Should().Be(StatusCodes.Status200OK);
         var json = SerializeBody(result);
         json.Should().Contain("\"revealToken\":\"NEW-TOK\"");
         json.Should().NotContain("valid-new-value");
+    }
+
+    // ── Epic 31 review (F-medium) — rotating a tenant secret that backs a
+    //    platform installation credential must emit CREDENTIAL_ROTATED so
+    //    the driver-cache invalidator evicts the stale composed driver. ──
+
+    [Test]
+    public async Task RotateTenant_SecretBacksInstallationCredential_EmitsCredentialRotated()
+    {
+        var http = WithTenantRole(TenantRoleHierarchy.Admin);
+        var existing = FakeMetadata("gitea/install-20260101000000", SecretScope.Tenant, TenantA);
+        _queryService.Setup(q => q.GetAsync(
+                SecretId, SecretScope.Tenant, TenantA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+        _revealService.Setup(r => r.IssueRotateAsync(
+                SecretId, It.IsAny<string>(), It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RevealTokenIssueResult(
+                existing, "NEW-TOK", DateTimeOffset.UtcNow.AddSeconds(60)));
+
+        var backedRow = Guid.NewGuid();
+        _installations.Setup(i => i.ListByTenantAsync(TenantA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new Tamma.Data.Entities.TenantPlatformInstallation
+                {
+                    Id = backedRow,
+                    TenantId = TenantA,
+                    PlatformKind = "gitea",
+                    CredentialSecretScope = "tenant",
+                    CredentialSecretName = "gitea/install-20260101000000",
+                },
+                // A row backed by a DIFFERENT secret must not be touched.
+                new Tamma.Data.Entities.TenantPlatformInstallation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantA,
+                    PlatformKind = "github",
+                    CredentialSecretScope = "tenant",
+                    CredentialSecretName = "github/install-20250101000000",
+                },
+            });
+
+        var body = new SecretEndpoints.RotateSecretRequestBody("valid-new-value");
+        var result = await SecretEndpoints.RotateTenantSecret(
+            TenantA, SecretId, body, _user,
+            _revealService.Object, _queryService.Object,
+            _installations.Object, _installationEvents.Object, http);
+
+        ExtractStatusCode(result).Should().Be(StatusCodes.Status200OK);
+        _installationEvents.Verify(e => e.EmitCredentialRotatedAsync(
+            TenantA, Tamma.Platforms.Abstractions.PlatformKind.Gitea, backedRow,
+            It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once,
+            "the driver cache is serving a driver composed from the OLD plaintext — "
+            + "without this event nothing evicts it before the absolute TTL");
+        _installationEvents.Verify(e => e.EmitCredentialRotatedAsync(
+            It.IsAny<Guid>(), It.IsAny<Tamma.Platforms.Abstractions.PlatformKind>(),
+            It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task RotateTenant_UnrelatedSecret_EmitsNoInstallationEvent()
+    {
+        var http = WithTenantRole(TenantRoleHierarchy.Admin);
+        var existing = FakeMetadata("db/role", SecretScope.Tenant, TenantA);
+        _queryService.Setup(q => q.GetAsync(
+                SecretId, SecretScope.Tenant, TenantA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+        _revealService.Setup(r => r.IssueRotateAsync(
+                SecretId, It.IsAny<string>(), It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RevealTokenIssueResult(
+                existing, "NEW-TOK", DateTimeOffset.UtcNow.AddSeconds(60)));
+
+        var body = new SecretEndpoints.RotateSecretRequestBody("valid-new-value");
+        var result = await SecretEndpoints.RotateTenantSecret(
+            TenantA, SecretId, body, _user,
+            _revealService.Object, _queryService.Object,
+            _installations.Object, _installationEvents.Object, http);
+
+        ExtractStatusCode(result).Should().Be(StatusCodes.Status200OK);
+        _installationEvents.VerifyNoOtherCalls();
+    }
+
+    [Test]
+    public async Task RotateTenant_InstallationLookupFails_RotationStillSucceeds()
+    {
+        // The bridge is best-effort by design: the rotation already
+        // happened, and the driver cache's absolute TTL bounds staleness.
+        var http = WithTenantRole(TenantRoleHierarchy.Admin);
+        var existing = FakeMetadata("gitea/install-20260101000000", SecretScope.Tenant, TenantA);
+        _queryService.Setup(q => q.GetAsync(
+                SecretId, SecretScope.Tenant, TenantA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+        _revealService.Setup(r => r.IssueRotateAsync(
+                SecretId, It.IsAny<string>(), It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RevealTokenIssueResult(
+                existing, "NEW-TOK", DateTimeOffset.UtcNow.AddSeconds(60)));
+        _installations.Setup(i => i.ListByTenantAsync(TenantA, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("db down"));
+
+        var body = new SecretEndpoints.RotateSecretRequestBody("valid-new-value");
+        var result = await SecretEndpoints.RotateTenantSecret(
+            TenantA, SecretId, body, _user,
+            _revealService.Object, _queryService.Object,
+            _installations.Object, _installationEvents.Object, http);
+
+        ExtractStatusCode(result).Should().Be(StatusCodes.Status200OK,
+            "a failed cache-invalidation bridge must never fail the completed rotation");
     }
 
     // ── helpers ────────────────────────────────────────────────────

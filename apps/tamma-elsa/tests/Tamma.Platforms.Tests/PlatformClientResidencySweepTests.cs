@@ -1,0 +1,310 @@
+using FluentAssertions;
+using NUnit.Framework;
+
+namespace Tamma.Platforms.Tests;
+
+/// <summary>
+/// Epic 31 P1 (stage 1) — THE INVARIANT RATCHET (execution plan §2): <i>no
+/// production code path may reference a platform-specific client type outside
+/// that platform's driver project.</i> Made mechanical in the
+/// <c>ActionGovernanceResidencyTests</c> / <c>CallerKindResidencyTests</c>
+/// source-scan shape (reading source in a test is justified where the
+/// invariant has no reflectable surface) with the
+/// <c>KnownUngovernedEndpoints</c> ratchet discipline: a pinned baseline that
+/// enumerates today's violations exactly, a count pin whose history may only
+/// shrink, and staleness both ways.
+///
+/// <para><b>Scope.</b> The scan covers <c>src/</c> of the four production
+/// projects (Tamma.Api, Tamma.Activities, Tamma.ElsaServer, Tamma.Core) —
+/// not tests, and not the <c>Tamma.Platforms.*</c> driver projects, which are
+/// exactly where platform-specific types are SUPPOSED to live. Comment-only
+/// lines are ignored so prose about a type ("no IGitHubIntegrationService
+/// here") doesn't count as a reference.</para>
+///
+/// <para><b>How the baseline drains.</b> P2 swaps GitMediationService /
+/// GitTokenResolver onto the driver plane (seams 1-2, 7, 14); P3 reroutes
+/// CI, agent dispatch and the engine callbacks and deletes the then-empty
+/// delegator classes (seams 3-6); P4 takes webhooks + CI secrets (seams
+/// 8-11). Each phase DELETES entries here and appends the shrunk count to
+/// <see cref="PinHistory"/>. Seams 12 (latent DI registrations) and 13 (the
+/// three orphaned engine activities) were removed outright in this stage, so
+/// they never enter the baseline.</para>
+/// </summary>
+[TestFixture]
+public class PlatformClientResidencySweepTests
+{
+    // ====================================================================
+    // Scan machinery (the CallerKindResidencyTests repo-root shape).
+    // ====================================================================
+
+    private static string RepoRoot()
+    {
+        var dir = TestContext.CurrentContext.TestDirectory;
+        while (dir is not null && !File.Exists(Path.Combine(dir, "Tamma.sln")))
+        {
+            dir = Path.GetDirectoryName(dir);
+        }
+        dir.Should().NotBeNull("the sweep must locate the repo root to read source files");
+        return dir!;
+    }
+
+    /// <summary>The four production projects the invariant governs.</summary>
+    private static readonly string[] ScannedProjects =
+    [
+        "Tamma.Api",
+        "Tamma.Activities",
+        "Tamma.ElsaServer",
+        "Tamma.Core",
+    ];
+
+    /// <summary>
+    /// The platform-specific client tokens (plan §2's type list, plus the
+    /// factory chokepoint and the unregistered named-HttpClient bypass the
+    /// same types ride on). Substring match on non-comment lines, ordinal —
+    /// "GitHubIntegrationService" also catches the I-prefixed interface, and
+    /// "Octokit" catches both the package namespace and the Octokit* client
+    /// class names.
+    /// </summary>
+    private static readonly string[] PlatformClientTokens =
+    [
+        "GitHubIntegrationService",
+        "CIIntegrationService",
+        "IGitHubActionsClient",
+        "IGitHubEngineCallbackService",
+        "IGitHubAppClient",
+        "IGitHubClientFactory",
+        "Octokit",
+        "GiteaHttpClient",
+        "GitLabHttpClient",
+        "CreateClient(\"github\")",
+    ];
+
+    private static IEnumerable<string> SourceFiles() =>
+        ScannedProjects
+            .SelectMany(p => Directory.GetFiles(
+                Path.Combine(RepoRoot(), "src", p), "*.cs", SearchOption.AllDirectories))
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                     && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"));
+
+    private static string Rel(string absolute) =>
+        Path.GetRelativePath(RepoRoot(), absolute).Replace('\\', '/');
+
+    /// <summary>
+    /// Tokens referenced by a file on non-comment lines; empty when clean.
+    /// </summary>
+    private static string[] TokensReferencedBy(string file)
+    {
+        var codeLines = File.ReadLines(file)
+            .Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal))
+            .ToArray();
+        return PlatformClientTokens
+            .Where(t => codeLines.Any(l => l.Contains(t, StringComparison.Ordinal)))
+            .ToArray();
+    }
+
+    // ====================================================================
+    // The baseline — today's violations, EXACTLY, each carrying the seam it
+    // belongs to (plan §1's seam table) and the phase that deletes it.
+    // Ordinal-sorted by path; asserted below.
+    // ====================================================================
+
+    /// <summary>One baselined file.</summary>
+    /// <param name="Path">Repo-root-relative path, '/' separators.</param>
+    /// <param name="Reason">Which seam this file is, and which phase (P2/P3/P4) deletes the entry.</param>
+    internal sealed record Entry(string Path, string Reason);
+
+    internal static readonly IReadOnlyList<Entry> Baseline =
+    [
+        // P2 (2026-08-07) DELETED five entries — the ratchet's first turn after
+        // seeding: the three ADL ExecuteCoreAsync helpers (retyped onto
+        // IGitPlatformClient), GitMediationService.cs (17 op cores swapped onto
+        // IPlatformResolver → driver.Client), and IGitHubClientFactory.cs (the
+        // chokepoint, deleted outright). Pin 26 → 21.
+        // P3 milestone 3 (2026-08-08) DELETED three entries (21 → 18): the engine
+        // git-proxy handlers + agent-dispatch mediation/aggregation swapped onto the
+        // driver plane. P3 milestone 4 (2026-08-08) DELETED twelve more (18 → 6):
+        // GitHubIntegrationService / CIIntegrationService / IntegrationService /
+        // CiClientFactory / the IGitHubEngineCallbackService seam (interface + Octokit
+        // + Null impls) / the IGitHubActionsClient seam (interface + Octokit + Null
+        // impls) were DELETED outright; Core's IIntegrationService.cs lost its
+        // GitHub/CI/composite interfaces (wire DTOs remain); Program.cs dropped every
+        // dead registration.
+        //
+        // P4 milestone 4 (2026-08-08) DELETED the LAST SIX (6 → 0) — the plan's
+        // invariant holds tree-wide: the [Obsolete] IGitHubSecretsProvisioner seam
+        // (interface + Libsodium + Null impls) was deleted, install-time
+        // TAMMA_API_KEY provisioning migrated onto the driver plane
+        // (DriverInstallationSecretsPusher → resolved driver.CiSecrets); the
+        // IGitHubAppClient seam (interface + Octokit + Null impls) was deleted,
+        // its two App-metadata reads absorbed into Tamma.Platforms.GitHub as
+        // plain REST (RestGitHubAppInstallationReader — no Octokit, no JWT
+        // packages); InstallationRouterService + the DI extension retyped onto
+        // the driver-project surfaces; the Octokit + Sodium.Core package refs
+        // left Tamma.Api. The baseline is EMPTY: any platform-client token in a
+        // production project outside its driver is now a red build with no
+        // allowlist to hide in.
+    ];
+
+    /// <summary>
+    /// The count pin. SEEDED 2026-08-07 (Epic 31 P1 stage 1) from the sweep
+    /// itself: 26 files. Stage 1 already turned the ratchet before seeding —
+    /// the three orphaned engine activities (seam 13: ContextGatheringActivity,
+    /// FetchFileContentsActivity, FetchSimilarPatternsActivity — direct GitHub
+    /// REST through the unregistered "github" named client) were DELETED, and
+    /// the latent DI registrations (seam 12, Program.cs:313-317) removed, so
+    /// neither appears in the baseline at all. May only go DOWN; every
+    /// decrement ships with the deleted entries in the same diff.
+    /// </summary>
+    internal const int PinnedCount = 0;
+
+    /// <summary>
+    /// The pin's recorded history, oldest first; every element after the seed
+    /// must be strictly LESS than its predecessor (the
+    /// <c>KnownUngovernedEndpoints.PinHistory</c> shape — moves shrink-only
+    /// from prose into a diffable literal). Raising the pin requires
+    /// appending a value that makes this fixture RED.
+    /// </summary>
+    /// <para><b>26 → 21 (2026-08-07, Epic 31 P2).</b> The mediation swap:
+    /// GitMediationService.cs + IGitHubClientFactory.cs (deleted) + the three
+    /// ADL ExecuteCoreAsync helpers (retyped onto IGitPlatformClient) left the
+    /// baseline in the same diff.</para>
+    /// <para><b>21 → 18 (2026-08-08, Epic 31 P3 milestone 3).</b> The engine
+    /// git-proxy handlers + the agent-dispatch mediation/aggregation swapped
+    /// onto the driver plane; their three entries left the baseline in the
+    /// same diff.</para>
+    /// <para><b>18 → 6 (2026-08-08, Epic 31 P3 milestone 4).</b> The superseded
+    /// GitHub-only surfaces were deleted (see the baseline note); the six
+    /// remaining entries are exactly P4's webhook/secrets seams (8-11): the
+    /// GitHub App client (token minting for install-time provisioning +
+    /// libsodium CI-secrets) and the installation router.</para>
+    /// <para><b>6 → 0 (2026-08-08, Epic 31 P4 milestone 4).</b> CI secrets
+    /// un-severed + the App plane absorbed: the last six files left the
+    /// baseline (see the baseline note). The invariant is now total — no
+    /// production project references any platform-client token outside its
+    /// driver project.</para>
+    internal static readonly int[] PinHistory = [26, 21, 18, 6, 0];
+
+    // ====================================================================
+    // The sweep against reality.
+    // ====================================================================
+
+    [Test]
+    public void TheScan_ActuallySeesTheProductionTree()
+    {
+        // Anti-no-op tripwire: if repo-root discovery or the project globs
+        // break, every assertion below passes vacuously on an empty list.
+        // The four projects hold ~1,278 source files today.
+        SourceFiles().Count().Should().BeGreaterThan(800,
+            "a tiny scan means the source discovery broke, not that the tree shrank");
+    }
+
+    [Test]
+    public void PlatformClientReferences_MatchThePinnedBaseline()
+    {
+        var found = SourceFiles()
+            .Select(f => (Path: Rel(f), Tokens: TokensReferencedBy(f)))
+            .Where(f => f.Tokens.Length > 0)
+            .OrderBy(f => f.Path, StringComparer.Ordinal)
+            .ToArray();
+
+        var baselinePaths = Baseline.Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
+
+        // Direction 1 — a NEW violating file is a red build, with the fix
+        // named. This is the invariant doing its job: route the call through
+        // the resolved driver's IGitPlatformClient / IGitPlatformActionsClient
+        // instead of a platform-typed client.
+        var newViolations = found
+            .Where(f => !baselinePaths.Contains(f.Path))
+            .Select(f => $"  {f.Path}: references [{string.Join(", ", f.Tokens)}]")
+            .ToList();
+        newViolations.Should().BeEmpty(
+            "no production code path may reference a platform-specific client type outside that "
+            + "platform's driver project (Epic 31 plan §2). Route the operation through the "
+            + "resolved IGitPlatformDriver instead. This baseline may only SHRINK — do not add "
+            + "an entry:" + Environment.NewLine + string.Join(Environment.NewLine, newViolations));
+
+        // Direction 2 — staleness: an entry whose file is clean (or gone) has
+        // been FIXED; the baseline drains instead of rotting.
+        var foundPaths = found.Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
+        var stale = Baseline
+            .Where(e => !foundPaths.Contains(e.Path))
+            .Select(e => $"  {e.Path}")
+            .ToList();
+        stale.Should().BeEmpty(
+            "these baselined files no longer reference any platform-client token (or no longer "
+            + "exist) — the ratchet turned! DELETE their entries and append the shrunk count to "
+            + "PinHistory in the same diff:" + Environment.NewLine + string.Join(Environment.NewLine, stale));
+    }
+
+    [Test]
+    public void Baseline_IsOrdinallySortedAndDistinct()
+    {
+        var paths = Baseline.Select(e => e.Path).ToArray();
+        paths.Should().BeInAscendingOrder(StringComparer.Ordinal,
+            "a sorted baseline keeps diffs reviewable (the pinned-sweep convention)");
+        paths.Should().OnlyHaveUniqueItems();
+    }
+
+    [Test]
+    public void Baseline_EveryEntryNamesItsSeamAndItsExit()
+    {
+        // A placeholder cannot buy an entry: each must tie back to the plan's
+        // seam table AND name the phase (or stage) that deletes it.
+        var unclassified = Baseline
+            .Where(e => !e.Reason.Contains("seam", StringComparison.OrdinalIgnoreCase)
+                     || !(e.Reason.Contains("P2", StringComparison.Ordinal)
+                       || e.Reason.Contains("P3", StringComparison.Ordinal)
+                       || e.Reason.Contains("P4", StringComparison.Ordinal)))
+            .Select(e => $"  {e.Path}: {e.Reason}")
+            .ToList();
+        unclassified.Should().BeEmpty(
+            "every baseline entry must name its seam (plan §1) and the phase that deletes it:"
+            + Environment.NewLine + string.Join(Environment.NewLine, unclassified));
+    }
+
+    [Test]
+    public void Baseline_CountIsPinned()
+    {
+        Baseline.Should().HaveCount(PinnedCount,
+            "the platform-client baseline may only SHRINK. If this fails because you added an "
+            + "entry, that is the ratchet working: the new reference should go through the "
+            + "driver plane instead");
+        PinnedCount.Should().Be(PinHistory[^1],
+            "the pin is the last element of its recorded history — change both together");
+    }
+
+    [Test]
+    public void TheRatchetPin_IsMechanicallyShrinkOnly()
+    {
+        PinHistory.Should().NotBeEmpty();
+        PinHistory[0].Should().Be(26,
+            "seeded 2026-08-07 from the stage-1 sweep (after the seam-12/13 deletions)");
+        for (var i = 1; i < PinHistory.Length; i++)
+        {
+            PinHistory[i].Should().BeLessThan(PinHistory[i - 1],
+                $"pin history entry #{i} ({PinHistory[i]}) must be strictly smaller than "
+                + $"#{i - 1} ({PinHistory[i - 1]}): a file leaves this baseline by moving onto "
+                + "the driver plane, never by the baseline growing to fit it");
+        }
+    }
+
+    [Test]
+    public void TheOrphanedEngineActivities_StayDeleted()
+    {
+        // Seam 13's exit was DELETION (the three activities made direct
+        // GitHub REST calls through an unregistered named client — the calls
+        // could only throw). Pin the absence so they cannot quietly return.
+        string[] deleted =
+        [
+            "src/Tamma.Activities/AI/ContextGatheringActivity.cs",
+            "src/Tamma.Activities/Context/FetchFileContentsActivity.cs",
+            "src/Tamma.Activities/Context/FetchSimilarPatternsActivity.cs",
+        ];
+        foreach (var path in deleted)
+        {
+            File.Exists(Path.Combine(RepoRoot(), path)).Should().BeFalse(
+                $"{path} was deleted by Epic 31 P1 stage 1 (orphaned, direct GitHub REST via an "
+                + "unregistered named HttpClient); a platform call belongs behind IGitPlatformClient");
+        }
+    }
+}

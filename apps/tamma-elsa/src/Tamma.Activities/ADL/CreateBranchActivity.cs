@@ -9,7 +9,8 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Models;
-using Tamma.Core.Interfaces;
+using Tamma.Platforms.Abstractions;
+using Tamma.Platforms.Abstractions.Models;
 
 namespace Tamma.Activities.ADL;
 
@@ -174,12 +175,15 @@ public class CreateBranchActivity : Activity
     /// idempotent conflict resolution → base-branch-aware create → post-create
     /// validation, with typed error classification. Returns a typed outcome so the
     /// happy / idempotency / failure / validation paths are unit-testable against a
-    /// mocked <see cref="IGitHubIntegrationService"/>. NEVER throws — exceptions
-    /// become an <c>Error</c> outcome (no silent success); a transient existence
-    /// lookup failure is an Error too (never mistaken for "absent → free to create").
+    /// mocked <see cref="IGitPlatformClient"/> (Epic 31 P2 — retyped from the
+    /// GitHub-specific client onto the platform abstraction; the coarse error
+    /// classes are preserved via <see cref="PlatformErrorText.ToLegacyString"/>).
+    /// NEVER throws — exceptions become an <c>Error</c> outcome (no silent
+    /// success); a transient existence lookup failure is an Error too (never
+    /// mistaken for "absent → free to create").
     /// </summary>
     public static async Task<BranchCreationOutcome> ExecuteCoreAsync(
-        IGitHubIntegrationService github,
+        IGitPlatformClient client,
         string repository,
         int issueNumber,
         string candidateName,
@@ -189,6 +193,8 @@ public class CreateBranchActivity : Activity
     {
         try
         {
+            var (owner, repoName) = GitRepoName.Split(repository);
+
             // ── Ref-name injection hardening (cap #11) ──
             if (!IsValidRefName(candidateName))
             {
@@ -197,32 +203,59 @@ public class CreateBranchActivity : Activity
             }
 
             // ── Idempotent conflict resolution (AC3) ──
-            var resolved = await ResolveConflictAsync(github, repository, candidateName, conflictStrategy, logger);
+            var resolved = await ResolveConflictAsync(client, owner, repoName, candidateName, conflictStrategy, logger);
             if (!resolved.Success)
                 return BranchCreationOutcome.Failed(resolved.ErrorCode!, resolved.Error!);
 
             var finalName = resolved.FinalName!;
             var conflictResolved = resolved.ConflictResolved;
 
-            // ── Base-branch-aware create (AC2 / AC4) ──
-            var create = await github.CreateGitHubBranchAsync(repository, finalName, baseBranch);
-            if (!create.Success)
+            // ── Base-branch resolution + create (AC2 / AC4). The live path's
+            //    CreateGitHubBranchAsync resolved the base ref internally and
+            //    surfaced a "base_branch_not_found: …" sentinel on a missing
+            //    base; the abstraction takes a SHA, so the base read happens
+            //    here with the same sentinel. ──
+            var baseRead = await client.GetBranchAsync(owner, repoName, baseBranch);
+            if (baseRead is PlatformResult<Tamma.Platforms.Abstractions.Models.Branch>.Failed baseFailed)
             {
-                var code = ClassifyError(create.Error);
-                logger?.LogError("Failed to create branch {Branch} from {Base}: {Error}", finalName, baseBranch, create.Error);
-                return BranchCreationOutcome.Failed(code, create.Error ?? "branch creation failed");
+                if (baseFailed.Error is PlatformError.NotFound)
+                {
+                    logger?.LogError("Base branch {Base} not found in {Repo}", baseBranch, repository);
+                    return BranchCreationOutcome.Failed(
+                        "base_branch_not_found", $"base_branch_not_found: base branch {baseBranch} not found");
+                }
+                var baseError = PlatformErrorText.ToLegacyString(baseFailed.Error);
+                logger?.LogError("Base branch {Base} lookup failed: {Error}", baseBranch, baseError);
+                return BranchCreationOutcome.Failed(ClassifyError(baseError), baseError);
             }
+            if (baseRead is not PlatformResult<Tamma.Platforms.Abstractions.Models.Branch>.Ok baseOk)
+            {
+                return BranchCreationOutcome.Failed("transient", "503: platform unavailable");
+            }
+            var baseSha = baseOk.Value.Sha;
 
-            var baseSha = create.Data?.BaseSha;
+            var create = await client.CreateBranchAsync(
+                new CreateBranchRequest(owner, repoName, finalName, baseSha));
+            if (create is PlatformResult<Tamma.Platforms.Abstractions.Models.Branch>.Failed createFailed)
+            {
+                var error = PlatformErrorText.ToLegacyString(createFailed.Error);
+                var code = ClassifyError(error);
+                logger?.LogError("Failed to create branch {Branch} from {Base}: {Error}", finalName, baseBranch, error);
+                return BranchCreationOutcome.Failed(code, error);
+            }
+            if (create is not PlatformResult<Tamma.Platforms.Abstractions.Models.Branch>.Ok)
+            {
+                return BranchCreationOutcome.Failed("transient", "503: platform unavailable");
+            }
 
             // ── Post-create validation (AC5) — confirm the ref actually exists. ──
-            var verify = await github.BranchExistsAsync(repository, finalName);
-            if (!verify.Success)
+            var verify = await BranchExistsAsync(client, owner, repoName, finalName);
+            if (verify.Error is not null)
             {
                 logger?.LogError("Post-create validation lookup failed for {Branch}: {Error}", finalName, verify.Error);
-                return BranchCreationOutcome.Failed(ClassifyError(verify.Error), verify.Error ?? "validation lookup failed");
+                return BranchCreationOutcome.Failed(ClassifyError(verify.Error), verify.Error);
             }
-            if (!verify.Data)
+            if (!verify.Exists)
             {
                 logger?.LogError("Branch {Branch} not found after create — validation failed", finalName);
                 return BranchCreationOutcome.Failed("validation_failed", $"branch {finalName} not found after create");
@@ -241,22 +274,43 @@ public class CreateBranchActivity : Activity
     }
 
     /// <summary>
+    /// Existence probe over the abstraction's single-branch read:
+    /// Ok → exists; NotFound → absent; anything else → a legacy-string
+    /// error (never mistaken for "absent").
+    /// </summary>
+    private static async Task<(bool Exists, string? Error)> BranchExistsAsync(
+        IGitPlatformClient client, string owner, string repoName, string branchName)
+    {
+        var result = await client.GetBranchAsync(owner, repoName, branchName);
+        return result switch
+        {
+            PlatformResult<Tamma.Platforms.Abstractions.Models.Branch>.Ok => (true, null),
+            PlatformResult<Tamma.Platforms.Abstractions.Models.Branch>.Failed f
+                when f.Error is PlatformError.NotFound => (false, null),
+            PlatformResult<Tamma.Platforms.Abstractions.Models.Branch>.Failed f =>
+                (false, PlatformErrorText.ToLegacyString(f.Error)),
+            _ => (false, "503: platform unavailable"),
+        };
+    }
+
+    /// <summary>
     /// Resolve a branch-name conflict per the strategy. Returns the name to create
     /// (the original when free, a suffixed/timestamped name when occupied) or a
     /// failure. A transient existence-lookup failure surfaces as an Error rather
     /// than being treated as "absent → create" (no false success).
     /// </summary>
     private static async Task<ConflictResolution> ResolveConflictAsync(
-        IGitHubIntegrationService github,
-        string repository,
+        IGitPlatformClient client,
+        string owner,
+        string repoName,
         string candidate,
         string strategy,
         ILogger? logger)
     {
-        var exists = await github.BranchExistsAsync(repository, candidate);
-        if (!exists.Success)
-            return ConflictResolution.Fail(ClassifyError(exists.Error), exists.Error ?? "existence lookup failed");
-        if (!exists.Data)
+        var exists = await BranchExistsAsync(client, owner, repoName, candidate);
+        if (exists.Error is not null)
+            return ConflictResolution.Fail(ClassifyError(exists.Error), exists.Error);
+        if (!exists.Exists)
             return ConflictResolution.Ok(candidate, conflictResolved: false);
 
         switch (strategy.ToLowerInvariant())
@@ -268,10 +322,10 @@ public class CreateBranchActivity : Activity
             case "timestamp":
             {
                 var stamped = $"{candidate}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
-                var stampedExists = await github.BranchExistsAsync(repository, stamped);
-                if (!stampedExists.Success)
-                    return ConflictResolution.Fail(ClassifyError(stampedExists.Error), stampedExists.Error ?? "existence lookup failed");
-                if (stampedExists.Data)
+                var stampedExists = await BranchExistsAsync(client, owner, repoName, stamped);
+                if (stampedExists.Error is not null)
+                    return ConflictResolution.Fail(ClassifyError(stampedExists.Error), stampedExists.Error);
+                if (stampedExists.Exists)
                     return ConflictResolution.Fail("conflict_exhausted", $"timestamped branch {stamped} already exists");
                 logger?.LogWarning("Branch {Base} exists; timestamp strategy → {Final}", candidate, stamped);
                 return ConflictResolution.Ok(stamped, conflictResolved: true);
@@ -282,10 +336,10 @@ public class CreateBranchActivity : Activity
                 for (var i = 2; i <= MaxConflictSuffix; i++)
                 {
                     var suffixed = $"{candidate}-{i}";
-                    var suffixedExists = await github.BranchExistsAsync(repository, suffixed);
-                    if (!suffixedExists.Success)
-                        return ConflictResolution.Fail(ClassifyError(suffixedExists.Error), suffixedExists.Error ?? "existence lookup failed");
-                    if (!suffixedExists.Data)
+                    var suffixedExists = await BranchExistsAsync(client, owner, repoName, suffixed);
+                    if (suffixedExists.Error is not null)
+                        return ConflictResolution.Fail(ClassifyError(suffixedExists.Error), suffixedExists.Error);
+                    if (!suffixedExists.Exists)
                     {
                         logger?.LogWarning("Branch {Base} exists; suffix strategy → {Final}", candidate, suffixed);
                         return ConflictResolution.Ok(suffixed, conflictResolved: true);

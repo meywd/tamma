@@ -54,6 +54,22 @@ public sealed record GitMediationResult
     public bool? BranchDeleted { get; init; }
     public bool? AlreadyMerged { get; init; }
 
+    // ── Epic 31 P5 M2 — §4 degradation read-backs (additive; null = the op
+    //    ran undegraded). Each true is mirrored by a GIT.*.SKIPPED /
+    //    DOWNGRADED / METHOD_FALLBACK audit event. ──
+
+    /// <summary>DG-3 — the PR was opened/updated but the reviewer request was
+    /// skipped (the PR carries the needs-reviewer label).</summary>
+    public bool? ReviewersSkipped { get; init; }
+
+    /// <summary>DG-2 — the review comment was posted as a plain PR comment
+    /// carrying file:line (anchoring unsupported or rejected).</summary>
+    public bool? ReviewCommentDowngraded { get; init; }
+
+    /// <summary>DG-4 — the merge method that actually merged the PR after the
+    /// fixed-order fallback (null when the requested method was used).</summary>
+    public string? AppliedMergeStrategy { get; init; }
+
     // ── issue ──
     public string? IssueStatus { get; init; }
 

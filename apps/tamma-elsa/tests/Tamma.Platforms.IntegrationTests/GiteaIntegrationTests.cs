@@ -514,6 +514,122 @@ public class GiteaIntegrationTests
             r is PlatformResult<bool>.Failed);
     }
 
+    // ─────────────── Story 31-13 lifecycle verbs (Epic 31 P5 M1) ───────────────
+    // The six PR lifecycle verbs, REAL against the live container. The pinned
+    // 1.21 image is above the 1.14 requested_reviewers floor, so the driver
+    // must advertise PrLifecycle and every verb must perform.
+
+    [Test, Timeout(300_000)]
+    public void Driver_AdvertisesPrLifecycle_On121()
+    {
+        RequireReady();
+        _driver.Capabilities.Should().Contain(PlatformCapability.PrLifecycle,
+            "1.21 ≥ the 1.14 lifecycle floor — the P5 capability flip must hold on a real instance");
+    }
+
+    [Test, Timeout(300_000)]
+    public async Task ClosePullRequestAsync_ThenReopen_RoundTripsState()
+    {
+        RequireReady();
+        var branch = await CreateBranchWithCommitAsync($"feat/lc-close-{Guid.NewGuid():N}");
+        var pr = (await _driver.Client.OpenPullRequestAsync(new OpenPullRequestRequest(
+            _fixture.OwnerLogin, _fixture.RepoName,
+            Title: "lifecycle close/reopen", SourceBranch: branch,
+            TargetBranch: _fixture.DefaultBranch))).GetValueOrDefault()!;
+
+        var closed = await _driver.Client.ClosePullRequestAsync(
+            _fixture.OwnerLogin, _fixture.RepoName, pr.Number);
+        closed.Should().BeOfType<PlatformResult<PullRequest>.Ok>()
+            .Which.Value.State.Should().Be(PullRequestState.Closed);
+
+        var reopened = await _driver.Client.ReopenPullRequestAsync(
+            _fixture.OwnerLogin, _fixture.RepoName, pr.Number);
+        reopened.Should().BeOfType<PlatformResult<PullRequest>.Ok>()
+            .Which.Value.State.Should().Be(PullRequestState.Open);
+    }
+
+    [Test, Timeout(300_000)]
+    public async Task AddAndRemovePullRequestLabels_RoundTrip_CreatingMissingLabel()
+    {
+        RequireReady();
+        var branch = await CreateBranchWithCommitAsync($"feat/lc-labels-{Guid.NewGuid():N}");
+        var pr = (await _driver.Client.OpenPullRequestAsync(new OpenPullRequestRequest(
+            _fixture.OwnerLogin, _fixture.RepoName,
+            Title: "lifecycle labels", SourceBranch: branch,
+            TargetBranch: _fixture.DefaultBranch))).GetValueOrDefault()!;
+
+        var label = $"tamma-e2e-{Guid.NewGuid():N}"[..20];
+        var added = await _driver.Client.AddPullRequestLabelsAsync(
+            new AddPullRequestLabelsRequest(
+                _fixture.OwnerLogin, _fixture.RepoName, pr.Number, new[] { label }));
+        added.Should().BeOfType<PlatformResult<PullRequest>.Ok>(
+            "a missing label is created best-effort, then added");
+
+        var removed = await _driver.Client.RemovePullRequestLabelAsync(
+            _fixture.OwnerLogin, _fixture.RepoName, pr.Number, label);
+        removed.Should().BeOfType<PlatformResult<PullRequest>.Ok>();
+
+        // Removing it again is idempotent success (label now absent).
+        var again = await _driver.Client.RemovePullRequestLabelAsync(
+            _fixture.OwnerLogin, _fixture.RepoName, pr.Number, label);
+        again.Should().BeOfType<PlatformResult<PullRequest>.Ok>();
+    }
+
+    [Test, Timeout(300_000)]
+    public async Task SetDraftAsync_TogglesViaWipTitlePrefix_BothDirections()
+    {
+        RequireReady();
+        var branch = await CreateBranchWithCommitAsync($"feat/lc-draft-{Guid.NewGuid():N}");
+        // Draft open → the driver prefixes the title (Gitea has no
+        // create-side draft field on any version; WIP: IS the mechanism).
+        var pr = (await _driver.Client.OpenPullRequestAsync(new OpenPullRequestRequest(
+            _fixture.OwnerLogin, _fixture.RepoName,
+            Title: "lifecycle draft", SourceBranch: branch,
+            TargetBranch: _fixture.DefaultBranch, IsDraft: true))).GetValueOrDefault()!;
+        pr.IsDraft.Should().BeTrue("the WIP title prefix marks the PR draft on Gitea");
+        pr.Title.Should().StartWith("WIP:");
+
+        var ready = await _driver.Client.SetDraftAsync(
+            new SetPullRequestDraftRequest(_fixture.OwnerLogin, _fixture.RepoName, pr.Number, Draft: false));
+        var readyPr = ready.Should().BeOfType<PlatformResult<PullRequest>.Ok>().Subject.Value;
+        readyPr.IsDraft.Should().BeFalse("the un-draft strips the WIP prefix");
+        readyPr.Title.Should().Be("lifecycle draft");
+
+        var redraft = await _driver.Client.SetDraftAsync(
+            new SetPullRequestDraftRequest(_fixture.OwnerLogin, _fixture.RepoName, pr.Number, Draft: true));
+        redraft.Should().BeOfType<PlatformResult<PullRequest>.Ok>()
+            .Which.Value.IsDraft.Should().BeTrue();
+    }
+
+    [Test, Timeout(300_000)]
+    public async Task RequestReviewersAsync_UnresolvableReviewer_AnswersTypedFailure_NotThrow()
+    {
+        RequireReady();
+        var branch = await CreateBranchWithCommitAsync($"feat/lc-reviewers-{Guid.NewGuid():N}");
+        var pr = (await _driver.Client.OpenPullRequestAsync(new OpenPullRequestRequest(
+            _fixture.OwnerLogin, _fixture.RepoName,
+            Title: "lifecycle reviewers", SourceBranch: branch,
+            TargetBranch: _fixture.DefaultBranch))).GetValueOrDefault()!;
+
+        // The fixture has no second collaborator; Gitea refuses both
+        // ghost users and the PR author as reviewer. The verb must answer
+        // a TYPED failure (the DG-3 skip consumes it) — never throw, and
+        // never the capability refusal (the endpoint exists on 1.21).
+        var result = await _driver.Client.RequestReviewersAsync(
+            new RequestReviewersRequest(
+                _fixture.OwnerLogin, _fixture.RepoName, pr.Number,
+                new[] { $"ghost-{Guid.NewGuid():N}"[..12] }));
+
+        var failed = result.Should().BeOfType<PlatformResult<PullRequest>.Failed>().Subject;
+        failed.Error.Should().Match(e =>
+            e is PlatformError.InvalidRequest || e is PlatformError.NotFound);
+        if (failed.Error is PlatformError.InvalidRequest ir)
+        {
+            ir.Code.Should().NotBe("capability_unsupported",
+                "1.21 HAS the requested_reviewers endpoint — a refusal here is about the reviewer, not the capability");
+        }
+    }
+
     // ─────────────────── helpers ───────────────────
 
     /// <summary>

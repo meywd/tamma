@@ -176,6 +176,7 @@ public sealed class PlatformConnectService : IPlatformConnectService
         // about to create — no caching surprise. This proves the
         // credential can authenticate before we persist a row that
         // would otherwise fail at first webhook delivery.
+        IGitPlatformDriver driver;
         try
         {
             var probeInstallation = new PlatformInstallation(
@@ -184,7 +185,7 @@ public sealed class PlatformConnectService : IPlatformConnectService
                 Kind: request.Kind,
                 BaseUrl: request.BaseUrl,
                 InstallationExternalId: request.ExternalId);
-            var driver = await factory
+            driver = await factory
                 .CreateAsync(probeInstallation, request.CredentialPlaintext, ct)
                 .ConfigureAwait(false);
 
@@ -195,11 +196,26 @@ public sealed class PlatformConnectService : IPlatformConnectService
                     $"Factory for {request.Kind} reports Kind={factory.Kind}.");
             }
 
-            // Probe the driver. Different platforms accept different
-            // probe shapes — we run a no-op pagination over the
-            // accessible-repos enumerable. Drivers without that
-            // capability return an empty sequence; the call still
-            // exercises the auth handshake.
+            // Epic 31 P5 M1 — probe STRICTNESS (the plan's class-closing
+            // fix): a driver that cannot enumerate accessible repos cannot
+            // prove the credential authenticates, so connect FAILS instead
+            // of treating an un-probed credential as connected. (GitHub's
+            // instance of the vacuous probe was fixed in P1 by making its
+            // listing throw typed; this closes the class for every kind —
+            // Gitea/GitLab listings now also throw typed on failure rather
+            // than yielding an empty "success".)
+            if (!driver.Capabilities.Contains(PlatformCapability.ListAccessibleRepos))
+            {
+                return PlatformConnectResult.Failure(
+                    "auth_probe_unsupported",
+                    $"The {request.Kind} driver cannot enumerate accessible repos, " +
+                    "so the credential cannot be verified at connect time.");
+            }
+
+            // Probe the driver: a no-op pagination over the accessible-repos
+            // enumerable. An empty yield now genuinely means "this credential
+            // sees zero repos" (still a successful auth handshake); an auth
+            // or transport failure throws typed and lands in the catch below.
             await foreach (var _ in driver.Client.ListAccessibleReposAsync(ct)
                 .ConfigureAwait(false))
             {
@@ -266,6 +282,24 @@ public sealed class PlatformConnectService : IPlatformConnectService
                 actorUserId: request.ActorUserId,
                 ct)
             .ConfigureAwait(false);
+
+        // Epic 31 P4 M3 — git.webhook.register goes live: mint the
+        // per-installation webhook secret into the cabinet, stamp its ref on
+        // the row (WebhookSecret{Scope,Name} — where the 31-7 receiver reads
+        // it back), and register the hook on the installation's accessible
+        // repos via driver.Client.RegisterWebhookAsync. EVERY cannot-proceed
+        // state (no Tamma:PublicBaseUrl, capability unsupported, no cabinet,
+        // per-repo API failures) degrades to a recorded
+        // GIT.WEBHOOK_REGISTER.SKIPPED/PARTIAL/FAILED audit event — it NEVER
+        // blocks connect (the service catches everything internally).
+        var registration = _services
+            .GetService<Tamma.Api.Services.Webhooks.Registration.IWebhookRegistrationService>();
+        if (registration is not null)
+        {
+            await registration
+                .RegisterForInstallationAsync(driver, persisted, request.ActorUserId, ct)
+                .ConfigureAwait(false);
+        }
 
         return PlatformConnectResult.Success(
             installationId: persisted.Id,

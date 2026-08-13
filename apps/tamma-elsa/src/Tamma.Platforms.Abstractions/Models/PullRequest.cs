@@ -34,7 +34,26 @@ public sealed record PullRequest(
     string HtmlUrl,
     string AuthorLogin,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt)
+{
+    // ── Epic 31 P2 — merge-related read-backs the mediation swap
+    //    needs (optional init-only so driver construction sites and
+    //    deconstruction patterns are unchanged). Null = the platform
+    //    (or the specific read) did not report the value. ──
+
+    /// <summary>Merge commit SHA once merged (GitHub
+    /// <c>merge_commit_sha</c>, GitLab <c>merge_commit_sha</c> /
+    /// <c>squash_commit_sha</c>, Gitea <c>merged_commit_id</c>).</summary>
+    public string? MergeCommitSha { get; init; }
+
+    /// <summary>Platform-computed mergeability. True = clean, false =
+    /// CONFIRMED conflict, null = unknown / still computing.</summary>
+    public bool? Mergeable { get; init; }
+
+    /// <summary>Platform-specific mergeable detail (GitHub
+    /// <c>mergeable_state</c>: clean/dirty/blocked/…); null elsewhere.</summary>
+    public string? MergeableState { get; init; }
+}
 
 /// <summary>
 /// Lifecycle state. Drivers MUST normalize platform-specific values

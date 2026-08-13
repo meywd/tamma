@@ -5,20 +5,30 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using Tamma.Api.Services.Git;
-using Tamma.Core.Interfaces;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
+using Tamma.Platforms.Abstractions;
+using Tamma.Platforms.Abstractions.Models;
 
 namespace Tamma.Api.Tests.Git;
 
 /// <summary>
-/// Story 38-1 — <see cref="GitMediationService"/> composition (guard → token →
-/// platform-with-resolved-token → one DCB event). Every collaborator is faked;
-/// assertions cover the fail-closed order (guard FIRST — deny ⇒ no token
-/// resolved, platform never invoked), BYOK vs platform <c>credentialSource</c>,
-/// the typed key-free failure taxonomy with a preserved <c>platformStatusCode</c>,
-/// the 503 token-unavailable path, the exactly-one-terminal-event invariant + its
-/// tags, and credential safety (the resolved token appears in no result / event).
+/// Story 38-1 / Epic 31 P2 — <see cref="GitMediationService"/> composition
+/// (guard → driver resolution → platform-through-the-abstraction → one DCB
+/// event). Every collaborator is faked; assertions cover the fail-closed order
+/// (guard FIRST — deny ⇒ no driver resolved, platform never invoked), BYOK vs
+/// platform <c>credentialSource</c>, the typed key-free failure taxonomy with a
+/// preserved <c>platformStatusCode</c>, the 503 token-unavailable path, the
+/// exactly-one-terminal-event invariant + its tags, and credential safety (no
+/// credential appears in any result / event — post-swap, the credential never
+/// even ENTERS the mediation layer; it lives inside the resolved driver).
+///
+/// <para><b>P2 note.</b> The pre-swap fixture mocked the deleted
+/// IGitHubClientFactory + the GitHub-specific integration client. The SETUP
+/// moved onto <see cref="IPlatformResolver"/> + <see cref="IGitPlatformClient"/>;
+/// every BEHAVIORAL assertion (status codes, failure codes, outcomes, event
+/// types, tag shapes) is unchanged from the pre-swap fixture — that is the
+/// parity claim this file pins.</para>
 /// </summary>
 [TestFixture]
 public class GitMediationServiceTests
@@ -27,9 +37,8 @@ public class GitMediationServiceTests
     private const string Repo = "acme/widgets";
 
     private Mock<IGitRepoAuthorizer> _authorizer = null!;
-    private Mock<IGitTokenResolver> _tokenResolver = null!;
-    private Mock<IGitHubClientFactory> _factory = null!;
-    private Mock<IGitHubIntegrationService> _github = null!;
+    private Mock<IPlatformResolver> _resolver = null!;
+    private Mock<IGitPlatformClient> _client = null!;
     private RecordingEventRepository _events = null!;
     private GitMediationService _sut = null!;
     private readonly Guid _tenant = Guid.NewGuid();
@@ -38,15 +47,12 @@ public class GitMediationServiceTests
     public void SetUp()
     {
         _authorizer = new Mock<IGitRepoAuthorizer>(MockBehavior.Strict);
-        _tokenResolver = new Mock<IGitTokenResolver>(MockBehavior.Strict);
-        _factory = new Mock<IGitHubClientFactory>(MockBehavior.Strict);
-        _github = new Mock<IGitHubIntegrationService>(MockBehavior.Loose);
+        _resolver = new Mock<IPlatformResolver>(MockBehavior.Strict);
+        _client = new Mock<IGitPlatformClient>(MockBehavior.Loose);
         _events = new RecordingEventRepository();
 
-        _factory.Setup(f => f.Create(It.IsAny<string>())).Returns(_github.Object);
-
         _sut = new GitMediationService(
-            _authorizer.Object, _tokenResolver.Object, _factory.Object, _events,
+            _authorizer.Object, _resolver.Object, _events,
             NullLogger<GitMediationService>.Instance);
     }
 
@@ -58,13 +64,58 @@ public class GitMediationServiceTests
         .Setup(a => a.AuthorizeAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
         .ReturnsAsync(GitRepoAuthorization.Deny("not authorized"));
 
-    private void ResolveToken(string source) => _tokenResolver
-        .Setup(t => t.ResolveAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-        .ReturnsAsync(new GitTokenResolution(SecretToken, source));
+    private sealed class FakeDriver : IGitPlatformDriver
+    {
+        public FakeDriver(IGitPlatformClient client, IReadOnlySet<PlatformCapability>? capabilities = null)
+        {
+            Client = client;
+            Capabilities = capabilities ?? new HashSet<PlatformCapability>
+            {
+                PlatformCapability.PrLifecycle,
+                // P5 M2 (DG-2): the mediation review-comment core consults the
+                // resolved driver's capabilities before attempting the anchored
+                // post — the default fixture driver is anchoring-capable so the
+                // pre-M2 behavioral pins run unchanged.
+                PlatformCapability.PrFileReview,
+            };
+        }
 
-    private void NoToken() => _tokenResolver
-        .Setup(t => t.ResolveAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-        .ReturnsAsync((GitTokenResolution?)null);
+        public PlatformKind Kind => PlatformKind.GitHub;
+        public IGitPlatformClient Client { get; }
+        public IGitPlatformActionsClient? Actions => null;
+        public IReadOnlySet<PlatformCapability> Capabilities { get; }
+    }
+
+    private void ResolveDriver(string source, IReadOnlySet<PlatformCapability>? capabilities = null) => _resolver
+        .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        .ReturnsAsync(new MediationDriverResolution(
+            new FakeDriver(_client.Object, capabilities),
+            source == GitCredentialSources.Byok
+                ? MediationCredentialSource.TenantInstallation
+                : MediationCredentialSource.PlatformDefault));
+
+    private void NoDriver() => _resolver
+        .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        .ReturnsAsync((MediationDriverResolution?)null);
+
+    // ── platform model helpers ──
+
+    private static PullRequest Pr(
+        string number = "15",
+        PullRequestState state = PullRequestState.Open,
+        bool isDraft = false,
+        bool? mergeable = null,
+        string? mergeSha = null,
+        string url = "https://gh/pr/x",
+        string source = "feature",
+        string target = "main") =>
+        new(number, "t", null, source, target, state, isDraft, url, "bot",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        { Mergeable = mergeable, MergeCommitSha = mergeSha };
+
+    private static PlatformResult<T> Ok<T>(T value) => PlatformResult<T>.FromOk(value);
+
+    private static PlatformResult<T> Fail<T>(PlatformError error) => PlatformResult<T>.FromError(error);
 
     private static CreatePrRequest PrBody() => new()
     {
@@ -76,18 +127,22 @@ public class GitMediationServiceTests
         MergeStrategy = "squash", IssueNumber = 7, BranchName = "feature", CorrelationId = "corr-merge",
     };
 
-    private static CreateReleaseRequest ReleaseBody() => new()
+    private static Tamma.Api.Services.Git.CreateReleaseRequest ReleaseBody() => new()
     {
         TagName = "deploy-abc1234", TargetRef = "abc1234def", Name = "Release deploy-abc1234",
         Body = "notes", IssueNumber = 7, CorrelationId = "corr-release",
     };
+
+    private void NoExistingOpenPr() => _client
+        .Setup(c => c.ListOpenPullRequestsForBranchAsync("acme", "widgets", "feature", "main", It.IsAny<CancellationToken>()))
+        .ReturnsAsync(Ok<IReadOnlyList<PullRequest>>(Array.Empty<PullRequest>()));
 
     // ===================================================================
     // Cross-tenant guard (AC2) — FIRST, fail-closed
     // ===================================================================
 
     [Test]
-    public async Task CreatePr_GuardDenied_403_NoTokenResolved_PlatformNeverCalled()
+    public async Task CreatePr_GuardDenied_403_NoDriverResolved_PlatformNeverCalled()
     {
         Deny();
 
@@ -95,14 +150,12 @@ public class GitMediationServiceTests
 
         result.Success.Should().BeFalse();
         result.FailureCode.Should().Be(GitFailureCodes.RepoNotAuthorized);
-        result.CredentialSource.Should().BeNull("no token is resolved on a guard denial");
+        result.CredentialSource.Should().BeNull("no driver is resolved on a guard denial");
 
-        _tokenResolver.Verify(
-            t => t.ResolveAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never, "the guard runs BEFORE token resolution");
-        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never,
-            "no token-bound client is minted → the platform is never called");
-        _github.VerifyNoOtherCalls();
+        _resolver.Verify(
+            r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the guard runs BEFORE driver resolution");
+        _client.VerifyNoOtherCalls();
 
         _events.Appended.Should().HaveCount(1);
         var evt = _events.Appended.Single();
@@ -119,19 +172,17 @@ public class GitMediationServiceTests
     }
 
     // ===================================================================
-    // Token resolution (AC3) — BYOK / platform / fail-closed
+    // Driver resolution (AC3) — BYOK / platform / fail-closed
     // ===================================================================
 
     [Test]
-    public async Task CreatePr_Success_Byok_UsesResolvedToken_EmitsOneSuccessEvent()
+    public async Task CreatePr_Success_Byok_ResolvesDriverOnce_EmitsOneSuccessEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.GetGitHubOpenPullRequestForBranchAsync(Repo, "feature", "main"))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestRef?>.Ok(null));
-        _github.Setup(g => g.CreateGitHubPullRequestAsync(Repo, It.IsAny<CreatePullRequestRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestResult>.Ok(
-                new GitHubPullRequestResult { Success = true, Number = 42, Url = "https://gh/pr/42" }));
+        ResolveDriver(GitCredentialSources.Byok);
+        NoExistingOpenPr();
+        _client.Setup(c => c.OpenPullRequestAsync(It.IsAny<OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(number: "42", url: "https://gh/pr/42")));
 
         var result = await _sut.CreatePullRequestAsync(_tenant, Repo, PrBody());
 
@@ -141,8 +192,8 @@ public class GitMediationServiceTests
         result.PrUrl.Should().Be("https://gh/pr/42");
         result.CredentialSource.Should().Be(GitCredentialSources.Byok);
 
-        // The invariant: the token USED (minted into the client) == the token RESOLVED.
-        _factory.Verify(f => f.Create(SecretToken), Times.Once);
+        // The P2 invariant: the driver used == the driver resolved, exactly once.
+        _resolver.Verify(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
 
         _events.Appended.Should().HaveCount(1);
         var evt = _events.Appended.Single();
@@ -155,30 +206,28 @@ public class GitMediationServiceTests
     public async Task CreatePr_Success_Platform_StampsPlatformCredentialSource()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Platform);
-        _github.Setup(g => g.GetGitHubOpenPullRequestForBranchAsync(Repo, "feature", "main"))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestRef?>.Ok(null));
-        _github.Setup(g => g.CreateGitHubPullRequestAsync(Repo, It.IsAny<CreatePullRequestRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestResult>.Ok(
-                new GitHubPullRequestResult { Success = true, Number = 9, Url = "u" }));
+        ResolveDriver(GitCredentialSources.Platform);
+        NoExistingOpenPr();
+        _client.Setup(c => c.OpenPullRequestAsync(It.IsAny<OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(number: "9", url: "u")));
 
         var result = await _sut.CreatePullRequestAsync(_tenant, Repo, PrBody());
 
         result.CredentialSource.Should().Be(GitCredentialSources.Platform);
-        _factory.Verify(f => f.Create(SecretToken), Times.Once);
+        _resolver.Verify(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
-    public async Task CreatePr_TokenUnavailable_503_FailClosed_PlatformNeverCalled()
+    public async Task CreatePr_DriverUnavailable_503_FailClosed_PlatformNeverCalled()
     {
         Allow();
-        NoToken();
+        NoDriver();
 
         var result = await _sut.CreatePullRequestAsync(_tenant, Repo, PrBody());
 
         result.Success.Should().BeFalse();
         result.FailureCode.Should().Be(GitFailureCodes.TokenUnavailable);
-        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
+        _client.VerifyNoOtherCalls();
 
         result.ToHttpResult().Let(StatusOf).Should().Be(503);
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrOpenedFailed);
@@ -192,11 +241,10 @@ public class GitMediationServiceTests
     public async Task CreatePr_PlatformConflict_200SuccessFalse_GitConflict()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Platform);
-        _github.Setup(g => g.GetGitHubOpenPullRequestForBranchAsync(Repo, "feature", "main"))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestRef?>.Ok(null));
-        _github.Setup(g => g.CreateGitHubPullRequestAsync(Repo, It.IsAny<CreatePullRequestRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestResult>.Fail("409: a merge conflict"));
+        ResolveDriver(GitCredentialSources.Platform);
+        NoExistingOpenPr();
+        _client.Setup(c => c.OpenPullRequestAsync(It.IsAny<OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<PullRequest>(new PlatformError.InvalidRequest("merge_conflict", "a merge conflict")));
 
         var result = await _sut.CreatePullRequestAsync(_tenant, Repo, PrBody());
 
@@ -210,10 +258,9 @@ public class GitMediationServiceTests
     public async Task Merge_ClosedUnmerged_NotMergeable()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.GetGitHubPullRequestAsync(Repo, 15))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(
-                new GitHubPullRequestDetail { Number = 15, State = "closed", Merged = false }));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.GetPullRequestAsync("acme", "widgets", "15", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Closed)));
 
         var result = await _sut.MergePullRequestAsync(_tenant, Repo, 15, MergeBody());
 
@@ -227,12 +274,11 @@ public class GitMediationServiceTests
     public async Task Merge_ConflictOnMerge_GitConflict_PreservesPlatformStatusCode()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.GetGitHubPullRequestAsync(Repo, 15))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(
-                new GitHubPullRequestDetail { Number = 15, State = "open", Merged = false, Mergeable = null }));
-        _github.Setup(g => g.MergeGitHubPullRequestAsync(Repo, 15, "squash"))
-            .ReturnsAsync(IntegrationResult<GitHubMergeResult>.Fail("409: merge conflict"));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.GetPullRequestAsync("acme", "widgets", "15", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Open, mergeable: null)));
+        _client.Setup(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<PullRequest>(new PlatformError.InvalidRequest("merge_conflict", "merge conflict")));
 
         var result = await _sut.MergePullRequestAsync(_tenant, Repo, 15, MergeBody());
 
@@ -249,16 +295,15 @@ public class GitMediationServiceTests
     public async Task Merge_Success_MergedWithIssueClosedAndBranchDeleted()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.GetGitHubPullRequestAsync(Repo, 15))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(
-                new GitHubPullRequestDetail { Number = 15, State = "open", Merged = false, Mergeable = true }));
-        _github.Setup(g => g.MergeGitHubPullRequestAsync(Repo, 15, "squash"))
-            .ReturnsAsync(IntegrationResult<GitHubMergeResult>.Ok(new GitHubMergeResult { Success = true, MergeSha = "sha-123" }));
-        _github.Setup(g => g.CloseGitHubIssueAsync(Repo, 7, It.IsAny<string>()))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
-        _github.Setup(g => g.DeleteGitHubBranchAsync(Repo, "feature"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.GetPullRequestAsync("acme", "widgets", "15", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Open, mergeable: true)));
+        _client.Setup(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Merged, mergeSha: "sha-123")));
+        _client.Setup(c => c.CloseIssueAsync("acme", "widgets", "7", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(new Issue("7", "t", null, IssueState.Closed, "u", Array.Empty<string>())));
+        _client.Setup(c => c.DeleteBranchAsync("acme", "widgets", "feature", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(true));
 
         var result = await _sut.MergePullRequestAsync(_tenant, Repo, 15, MergeBody());
 
@@ -279,12 +324,12 @@ public class GitMediationServiceTests
     public async Task GetComments_Success_ReturnsMappedComments_OneEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Platform);
-        _github.Setup(g => g.GetPullRequestReviewCommentsAsync(Repo, 3))
-            .ReturnsAsync(IntegrationResult<List<GitHubReviewComment>>.Ok(new List<GitHubReviewComment>
+        ResolveDriver(GitCredentialSources.Platform);
+        _client.Setup(c => c.ListPullRequestReviewCommentsAsync("acme", "widgets", "3", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok<IReadOnlyList<PullRequestReviewComment>>(new List<PullRequestReviewComment>
             {
-                new() { Id = 1, Body = "this is a bug", Path = "a.cs", Line = 5, Author = "bob" },
-                new() { Id = 2, Body = "lgtm", Author = "sue" },
+                new("1", "this is a bug", "bob", DateTimeOffset.UtcNow, "a.cs", 5),
+                new("2", "lgtm", "sue", DateTimeOffset.UtcNow, null, null),
             }));
 
         var result = await _sut.GetPullRequestCommentsAsync(_tenant, Repo, 3, "corr-c");
@@ -304,17 +349,19 @@ public class GitMediationServiceTests
         var result = await _sut.GetPullRequestCommentsAsync(_tenant, Repo, 3, "corr-c");
 
         result.FailureCode.Should().Be(GitFailureCodes.RepoNotAuthorized);
-        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
-        _github.VerifyNoOtherCalls();
+        _resolver.Verify(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _client.VerifyNoOtherCalls();
     }
 
     [Test]
     public async Task UpdateIssue_Success_PostsCommentAndLabels_OneEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.PostIssueCommentAsync(Repo, 8, "status")).ReturnsAsync(IntegrationResult<bool>.Ok(true));
-        _github.Setup(g => g.AddIssueLabelsAsync(Repo, 8, It.IsAny<string[]>())).ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.CreateIssueCommentAsync("acme", "widgets", "8", "status", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(new IssueComment("1", "status", "bot", DateTimeOffset.UtcNow)));
+        _client.Setup(c => c.AddIssueLabelsAsync(It.IsAny<AddIssueLabelsRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok<IReadOnlyList<string>>(new[] { "in-progress" }));
 
         var body = new UpdateIssueRequest { Body = "status", AddLabels = new[] { "in-progress" }, CorrelationId = "corr-i" };
         var result = await _sut.UpdateIssueAsync(_tenant, Repo, 8, body);
@@ -329,9 +376,9 @@ public class GitMediationServiceTests
     public async Task UpdateIssue_CommentFails_LoudFailure_PreservesStatus()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.PostIssueCommentAsync(Repo, 8, "status"))
-            .ReturnsAsync(IntegrationResult<bool>.Fail("403: forbidden"));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.CreateIssueCommentAsync("acme", "widgets", "8", "status", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<IssueComment>(new PlatformError.PermissionDenied()));
 
         var body = new UpdateIssueRequest { Body = "status", CorrelationId = "corr-i" };
         var result = await _sut.UpdateIssueAsync(_tenant, Repo, 8, body);
@@ -347,13 +394,12 @@ public class GitMediationServiceTests
     // ===================================================================
 
     [Test]
-    public async Task CreateRelease_Success_Byok_UsesResolvedToken_EmitsOneSuccessEvent()
+    public async Task CreateRelease_Success_Byok_EmitsOneSuccessEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.CreateGitHubReleaseAsync(Repo, It.IsAny<ReleaseCreationRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubReleaseResult>.Ok(
-                new GitHubReleaseResult { Success = true, Id = 55, HtmlUrl = "https://gh/releases/55", TagName = "deploy-abc1234" }));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.CreateReleaseAsync(It.IsAny<Tamma.Platforms.Abstractions.Models.CreateReleaseRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(new Release("55", "deploy-abc1234", "Release deploy-abc1234", "https://gh/releases/55", false, false)));
 
         var result = await _sut.CreateReleaseAsync(_tenant, Repo, ReleaseBody());
 
@@ -364,9 +410,7 @@ public class GitMediationServiceTests
         result.ReleaseTag.Should().Be("deploy-abc1234");
         result.CredentialSource.Should().Be(GitCredentialSources.Byok);
 
-        // The invariant: the token USED (minted into the client) == the token RESOLVED.
-        _factory.Verify(f => f.Create(SecretToken), Times.Once);
-
+        _resolver.Verify(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.ReleaseCreatedSuccess);
     }
 
@@ -374,9 +418,9 @@ public class GitMediationServiceTests
     public async Task CreateRelease_PlatformError_200SuccessFalse_OneFailedEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Platform);
-        _github.Setup(g => g.CreateGitHubReleaseAsync(Repo, It.IsAny<ReleaseCreationRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubReleaseResult>.Fail("422: tag already exists"));
+        ResolveDriver(GitCredentialSources.Platform);
+        _client.Setup(c => c.CreateReleaseAsync(It.IsAny<Tamma.Platforms.Abstractions.Models.CreateReleaseRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<Release>(new PlatformError.InvalidRequest("already_exists", "tag already exists")));
 
         var result = await _sut.CreateReleaseAsync(_tenant, Repo, ReleaseBody());
 
@@ -395,28 +439,28 @@ public class GitMediationServiceTests
         var result = await _sut.CreateReleaseAsync(_tenant, Repo, ReleaseBody());
 
         result.FailureCode.Should().Be(GitFailureCodes.RepoNotAuthorized);
-        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
-        _github.VerifyNoOtherCalls();
+        _resolver.Verify(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _client.VerifyNoOtherCalls();
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.ReleaseCreatedFailed);
     }
 
     [Test]
-    public async Task CreateRelease_TokenUnavailable_503_FailClosed_PlatformNeverCalled()
+    public async Task CreateRelease_DriverUnavailable_503_FailClosed_PlatformNeverCalled()
     {
         Allow();
-        NoToken();
+        NoDriver();
 
         var result = await _sut.CreateReleaseAsync(_tenant, Repo, ReleaseBody());
 
         result.Success.Should().BeFalse();
         result.FailureCode.Should().Be(GitFailureCodes.TokenUnavailable);
-        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
+        _client.VerifyNoOtherCalls();
         result.ToHttpResult().Let(StatusOf).Should().Be(503);
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.ReleaseCreatedFailed);
     }
 
     // ===================================================================
-    // F3 — an unexpected exception (DB/decrypt/mint/transport) between the
+    // F3 — an unexpected exception (DB/decrypt/compose/transport) between the
     // guard and the platform call becomes a typed PLATFORM_ERROR (never a raw
     // 5xx) with exactly ONE terminal FAILED event.
     // ===================================================================
@@ -443,11 +487,11 @@ public class GitMediationServiceTests
     }
 
     [Test]
-    public async Task TokenResolverThrows_TypedPlatformError_OneFailedEvent()
+    public async Task ResolverThrows_TypedPlatformError_OneFailedEvent()
     {
         Allow();
-        _tokenResolver
-            .Setup(t => t.ResolveAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _resolver
+            .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("secret decrypt failed"));
 
         var result = await _sut.CreatePullRequestAsync(_tenant, Repo, PrBody());
@@ -458,11 +502,12 @@ public class GitMediationServiceTests
     }
 
     [Test]
-    public async Task ClientFactoryThrows_TypedPlatformError_OneFailedEvent()
+    public async Task DriverComposeThrows_TypedPlatformError_OneFailedEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _factory.Setup(f => f.Create(It.IsAny<string>())).Throws(new InvalidOperationException("client mint failed"));
+        _resolver
+            .Setup(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("driver compose failed"));
 
         var result = await _sut.MergePullRequestAsync(_tenant, Repo, 15, MergeBody());
 
@@ -473,19 +518,19 @@ public class GitMediationServiceTests
     }
 
     // ===================================================================
-    // Credential safety (AC3/AC7) — the token appears in no result / event
+    // Credential safety (AC3/AC7) — no credential appears in any result / event.
+    // Post-swap the credential never enters the mediation layer at all; this
+    // canary pins that no plumbing regression re-introduces it.
     // ===================================================================
 
     [Test]
-    public async Task CredentialSafety_ResolvedToken_NeverAppearsInResultOrEvent()
+    public async Task CredentialSafety_NoCredentialAppearsInResultOrEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.GetGitHubOpenPullRequestForBranchAsync(Repo, "feature", "main"))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestRef?>.Ok(null));
-        _github.Setup(g => g.CreateGitHubPullRequestAsync(Repo, It.IsAny<CreatePullRequestRequest>()))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestResult>.Ok(
-                new GitHubPullRequestResult { Success = true, Number = 1, Url = "u" }));
+        ResolveDriver(GitCredentialSources.Byok);
+        NoExistingOpenPr();
+        _client.Setup(c => c.OpenPullRequestAsync(It.IsAny<OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(number: "1", url: "u")));
 
         var result = await _sut.CreatePullRequestAsync(_tenant, Repo, PrBody());
 
@@ -501,16 +546,13 @@ public class GitMediationServiceTests
     // Story 31-13 — the 7 PR-lifecycle verbs
     // ===================================================================
 
-    private static GitHubPullRequestDetail PrDetail(string state, bool isDraft = false) =>
-        new() { Number = 15, State = state, IsDraft = isDraft };
-
     [Test]
     public async Task ClosePr_Success_EmitsExactlyOnePrClosedSuccessEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.ClosePullRequestAsync(Repo, 15))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(PrDetail("closed")));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.ClosePullRequestAsync("acme", "widgets", "15", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Closed)));
 
         var result = await _sut.ClosePullRequestAsync(_tenant, Repo, 15, new ClosePrRequest { CorrelationId = "corr-close" });
 
@@ -524,9 +566,9 @@ public class GitMediationServiceTests
     public async Task ReopenPr_Success_EmitsExactlyOnePrReopenedSuccessEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.ReopenPullRequestAsync(Repo, 15))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(PrDetail("open")));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.ReopenPullRequestAsync("acme", "widgets", "15", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Open)));
 
         var result = await _sut.ReopenPullRequestAsync(_tenant, Repo, 15, new ReopenPrRequest { CorrelationId = "corr-reopen" });
 
@@ -540,14 +582,19 @@ public class GitMediationServiceTests
     public async Task CommentPr_Success_EmitsExactlyOnePrCommentedSuccessEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.PostIssueCommentAsync(Repo, 15, "hello"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        ResolveDriver(GitCredentialSources.Byok);
+        // Epic 31 review (F-high) — the PR-comment path rides the PR-comment
+        // verb (GitLab MR iids are a separate sequence from issue iids).
+        _client.Setup(c => c.CreatePullRequestCommentAsync("acme", "widgets", "15", "hello", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(new IssueComment("9", "hello", "bot", DateTimeOffset.UtcNow)));
 
         var result = await _sut.CommentOnPullRequestAsync(_tenant, Repo, 15, new PrCommentRequest { Body = "hello", CorrelationId = "corr-cmt" });
 
         result.Success.Should().BeTrue();
         result.Outcome.Should().Be("Commented");
+        _client.Verify(c => c.CreateIssueCommentAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "routing a PR number through the issue-comment verb misdelivers on GitLab");
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrCommentedSuccess);
     }
 
@@ -555,9 +602,13 @@ public class GitMediationServiceTests
     public async Task ReviewCommentPr_Success_EmitsExactlyOnePrReviewCommentedSuccessEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.PostPullRequestReviewCommentAsync(Repo, 15, "nit", "sha1", "a.cs", 5, "RIGHT"))
-            .ReturnsAsync(IntegrationResult<GitHubReviewComment>.Ok(new GitHubReviewComment { Id = 77, Body = "nit", Path = "a.cs", Line = 5 }));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.CreatePullRequestReviewCommentAsync(
+                It.Is<CreatePullRequestReviewCommentRequest>(r =>
+                    r.Owner == "acme" && r.RepoName == "widgets" && r.PrNumber == "15"
+                    && r.Body == "nit" && r.CommitSha == "sha1" && r.Path == "a.cs" && r.Line == 5 && r.Side == "RIGHT"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(new IssueComment("77", "nit", "bot", DateTimeOffset.UtcNow)));
 
         var body = new PrReviewCommentRequest { Body = "nit", CommitId = "sha1", Path = "a.cs", Line = 5, Side = "RIGHT", CorrelationId = "corr-rc" };
         var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
@@ -572,9 +623,9 @@ public class GitMediationServiceTests
     public async Task RequestReviewersPr_Success_EmitsExactlyOnePrReviewersRequestedSuccessEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.RequestReviewersAsync(Repo, 15, It.IsAny<IReadOnlyList<string>>()))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.RequestReviewersAsync(It.IsAny<RequestReviewersRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr()));
 
         var body = new PrReviewersRequest { Reviewers = new[] { "alice", "bob" }, CorrelationId = "corr-rev" };
         var result = await _sut.RequestPullRequestReviewersAsync(_tenant, Repo, 15, body);
@@ -588,11 +639,11 @@ public class GitMediationServiceTests
     public async Task LabelsPr_Success_AddAndRemove_EmitsExactlyOnePrLabelsUpdatedSuccessEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.AddIssueLabelsAsync(Repo, 15, It.IsAny<string[]>()))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
-        _github.Setup(g => g.RemoveIssueLabelAsync(Repo, 15, "stale"))
-            .ReturnsAsync(IntegrationResult<bool>.Ok(true));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.AddPullRequestLabelsAsync(It.IsAny<AddPullRequestLabelsRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr()));
+        _client.Setup(c => c.RemovePullRequestLabelAsync("acme", "widgets", "15", "stale", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr()));
 
         var body = new PrLabelsRequest { AddLabels = new[] { "ready" }, RemoveLabels = new[] { "stale" }, CorrelationId = "corr-lbl" };
         var result = await _sut.UpdatePullRequestLabelsAsync(_tenant, Repo, 15, body);
@@ -606,9 +657,9 @@ public class GitMediationServiceTests
     public async Task DraftPr_Success_EmitsExactlyOnePrDraftSetSuccessEvent()
     {
         Allow();
-        ResolveToken(GitCredentialSources.Byok);
-        _github.Setup(g => g.SetPullRequestDraftAsync(Repo, 15, true))
-            .ReturnsAsync(IntegrationResult<GitHubPullRequestDetail>.Ok(PrDetail("open", isDraft: true)));
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.SetDraftAsync(It.IsAny<SetPullRequestDraftRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Open, isDraft: true)));
 
         var result = await _sut.SetPullRequestDraftAsync(_tenant, Repo, 15, new PrDraftRequest { Draft = true, CorrelationId = "corr-draft" });
 
@@ -618,11 +669,35 @@ public class GitMediationServiceTests
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrDraftSetSuccess);
     }
 
-    // ── Guard-deny: close AND draft (the GET-bearing verb) — REPO_NOT_AUTHORIZED,
-    //    platform verb NEVER called, token resolver NEVER called ──
+    // ── Epic 31 P2 (plan §4) — the typed capability refusal surfaces FIRST-CLASS
+    //    (failureCode = capability_unsupported, exact code) so the workflow's
+    //    Unsupported safety-net outcome can branch on it. ──
 
     [Test]
-    public async Task ClosePr_GuardDenied_NeverResolvesToken_PlatformNeverCalled()
+    public async Task DraftPr_CapabilityUnsupported_SurfacesFirstClassFailureCode()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.SetDraftAsync(It.IsAny<SetPullRequestDraftRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<PullRequest>(new PlatformError.InvalidRequest(
+                "capability_unsupported", "platform does not support draft toggling")));
+
+        var result = await _sut.SetPullRequestDraftAsync(_tenant, Repo, 15, new PrDraftRequest { Draft = false, CorrelationId = "corr-draft" });
+
+        result.Success.Should().BeFalse();
+        result.FailureCode.Should().Be(GitFailureCodes.CapabilityUnsupported,
+            "the exact code must round-trip — never coarsened into PLATFORM_ERROR");
+        result.FailureCode.Should().Be("capability_unsupported");
+        result.ToHttpResult().Let(StatusOf).Should().Be(200, "an unsupported capability is an expected, branchable failure");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrDraftSetFailed);
+        _events.Appended.Single().Tags.Should().Contain("capability_unsupported");
+    }
+
+    // ── Guard-deny: close AND draft (the GET-bearing verb) — REPO_NOT_AUTHORIZED,
+    //    platform verb NEVER called, no driver resolved ──
+
+    [Test]
+    public async Task ClosePr_GuardDenied_NeverResolvesDriver_PlatformNeverCalled()
     {
         Deny();
 
@@ -630,14 +705,14 @@ public class GitMediationServiceTests
 
         result.Success.Should().BeFalse();
         result.FailureCode.Should().Be(GitFailureCodes.RepoNotAuthorized);
-        _tokenResolver.Verify(t => t.ResolveAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        _github.Verify(g => g.ClosePullRequestAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
-        _github.VerifyNoOtherCalls();
+        _resolver.Verify(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _client.Verify(c => c.ClosePullRequestAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _client.VerifyNoOtherCalls();
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrClosedFailed);
     }
 
     [Test]
-    public async Task DraftPr_GuardDenied_NeverResolvesToken_PlatformNeverCalled()
+    public async Task DraftPr_GuardDenied_NeverResolvesDriver_PlatformNeverCalled()
     {
         Deny();
 
@@ -645,45 +720,264 @@ public class GitMediationServiceTests
 
         result.Success.Should().BeFalse();
         result.FailureCode.Should().Be(GitFailureCodes.RepoNotAuthorized);
-        _tokenResolver.Verify(t => t.ResolveAsync(It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        _github.Verify(g => g.SetPullRequestDraftAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<bool>()), Times.Never);
-        _github.VerifyNoOtherCalls();
+        _resolver.Verify(r => r.ResolveForMediationAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _client.Verify(c => c.SetDraftAsync(It.IsAny<SetPullRequestDraftRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _client.VerifyNoOtherCalls();
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrDraftSetFailed);
     }
 
-    // ── Token-unavailable: close AND review-comment — GIT_TOKEN_UNAVAILABLE
+    // ── Driver-unavailable: close AND review-comment — GIT_TOKEN_UNAVAILABLE
     //    fail-closed, exactly one FAILED event, platform verb never called ──
 
     [Test]
-    public async Task ClosePr_TokenUnavailable_FailsClosed_PlatformNeverCalled()
+    public async Task ClosePr_DriverUnavailable_FailsClosed_PlatformNeverCalled()
     {
         Allow();
-        NoToken();
+        NoDriver();
 
         var result = await _sut.ClosePullRequestAsync(_tenant, Repo, 15, new ClosePrRequest { CorrelationId = "corr-close" });
 
         result.Success.Should().BeFalse();
         result.FailureCode.Should().Be(GitFailureCodes.TokenUnavailable);
-        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
-        _github.Verify(g => g.ClosePullRequestAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        _client.Verify(c => c.ClosePullRequestAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrClosedFailed);
     }
 
     [Test]
-    public async Task ReviewCommentPr_TokenUnavailable_FailsClosed_PlatformNeverCalled()
+    public async Task ReviewCommentPr_DriverUnavailable_FailsClosed_PlatformNeverCalled()
     {
         Allow();
-        NoToken();
+        NoDriver();
 
         var body = new PrReviewCommentRequest { Body = "nit", Path = "a.cs", Line = 5, CorrelationId = "corr-rc" };
         var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
 
         result.Success.Should().BeFalse();
         result.FailureCode.Should().Be(GitFailureCodes.TokenUnavailable);
-        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
-        _github.Verify(g => g.PostPullRequestReviewCommentAsync(
-            It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        _client.Verify(c => c.CreatePullRequestReviewCommentAsync(
+            It.IsAny<CreatePullRequestReviewCommentRequest>(), It.IsAny<CancellationToken>()), Times.Never);
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrReviewCommentedFailed);
+    }
+
+    // ===================================================================
+    // Epic 31 P5 M2 — §4 degradation pairs at the mediation layer
+    // (DG-2 review-comment downgrade, DG-3 reviewer skip, DG-4 merge-
+    // method fallback). Every degraded trip is audited; nothing is
+    // silently dropped; real failures are never mis-classified (§4.5).
+    // ===================================================================
+
+    [Test]
+    public async Task ReviewCommentPr_DriverWithoutPrFileReview_DowngradesToPlainComment_WithAuditEvent()
+    {
+        Allow();
+        // DG-2 check step: the resolved driver positively lacks PrFileReview —
+        // the anchored post is never attempted.
+        ResolveDriver(GitCredentialSources.Byok,
+            new HashSet<PlatformCapability> { PlatformCapability.PrLifecycle });
+        string? postedBody = null;
+        // Epic 31 review (F-high) — the downgraded feedback targets the PR's
+        // own thread via the PR-comment verb (MR notes surface on GitLab).
+        _client.Setup(c => c.CreatePullRequestCommentAsync("acme", "widgets", "15", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, string, string, CancellationToken>((_, _, _, b, _) => postedBody = b)
+            .ReturnsAsync(Ok(new IssueComment("88", "x", "bot", DateTimeOffset.UtcNow)));
+
+        var body = new PrReviewCommentRequest { Body = "nit: rename this", CommitId = "sha1", Path = "src/a.cs", Line = 5, CorrelationId = "corr-rc" };
+        var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeTrue("the feedback is NEVER dropped (DG-2)");
+        result.Outcome.Should().Be("Commented");
+        result.ReviewCommentDowngraded.Should().BeTrue();
+        result.CommentId.Should().Be(88);
+        postedBody.Should().Contain("src/a.cs:5", "the downgraded body carries file:line");
+        postedBody.Should().Contain("nit: rename this");
+        _client.Verify(c => c.CreatePullRequestReviewCommentAsync(
+            It.IsAny<CreatePullRequestReviewCommentRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _events.Appended.Select(e => e.Type).Should().BeEquivalentTo(new[]
+        {
+            GitEventTypes.PrReviewCommentDowngraded,
+            GitEventTypes.PrReviewCommentedSuccess,
+        }, "an audited downgrade + exactly one terminal success");
+    }
+
+    [Test]
+    public async Task ReviewCommentPr_AnchoringRejected_DowngradesToPlainComment()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        // §4.3 safety net: the platform rejects the anchor (line not in diff).
+        _client.Setup(c => c.CreatePullRequestReviewCommentAsync(
+                It.IsAny<CreatePullRequestReviewCommentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<IssueComment>(new PlatformError.InvalidRequest(
+                "invalid_request", "line 5 is not part of the diff")));
+        _client.Setup(c => c.CreatePullRequestCommentAsync("acme", "widgets", "15", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(new IssueComment("89", "x", "bot", DateTimeOffset.UtcNow)));
+
+        var body = new PrReviewCommentRequest { Body = "nit", CommitId = "sha1", Path = "a.cs", Line = 5, CorrelationId = "corr-rc" };
+        var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeTrue();
+        result.ReviewCommentDowngraded.Should().BeTrue();
+        _events.Appended.Select(e => e.Type).Should().Contain(GitEventTypes.PrReviewCommentDowngraded);
+    }
+
+    [Test]
+    public async Task ReviewCommentPr_RealFailure_IsNotDowngraded()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        // §4.5 — an auth failure is a REAL failure; downgrading it would hide
+        // a broken credential behind a plain comment.
+        _client.Setup(c => c.CreatePullRequestReviewCommentAsync(
+                It.IsAny<CreatePullRequestReviewCommentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<IssueComment>(new PlatformError.AuthExpired()));
+
+        var body = new PrReviewCommentRequest { Body = "nit", CommitId = "sha1", Path = "a.cs", Line = 5, CorrelationId = "corr-rc" };
+        var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeFalse();
+        _client.Verify(c => c.CreatePullRequestCommentAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _client.Verify(c => c.CreateIssueCommentAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrReviewCommentedFailed);
+    }
+
+    [Test]
+    public async Task ReviewCommentPr_DowngradeFailingToo_FailsLoud_NeverSilentlyDrops()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok,
+            new HashSet<PlatformCapability> { PlatformCapability.PrLifecycle });
+        _client.Setup(c => c.CreatePullRequestCommentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<IssueComment>(new PlatformError.NotFound()));
+
+        var body = new PrReviewCommentRequest { Body = "nit", CommitId = "sha1", Path = "a.cs", Line = 5, CorrelationId = "corr-rc" };
+        var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeFalse("a dropped review comment must be LOUD");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrReviewCommentedFailed);
+    }
+
+    [Test]
+    public async Task CreatePr_ReviewerRequestUnsupported_SkipsWithLabelAndAuditEvent_PrStepSucceeds()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        NoExistingOpenPr();
+        _client.Setup(c => c.OpenPullRequestAsync(It.IsAny<OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr()));
+        _client.Setup(c => c.RequestReviewersAsync(It.IsAny<RequestReviewersRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<PullRequest>(new PlatformError.InvalidRequest(
+                "capability_unsupported", "no reviewer API")));
+        AddPullRequestLabelsRequest? labelCall = null;
+        _client.Setup(c => c.AddPullRequestLabelsAsync(It.IsAny<AddPullRequestLabelsRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<AddPullRequestLabelsRequest, CancellationToken>((r, _) => labelCall = r)
+            .ReturnsAsync(Ok(Pr()));
+
+        var body = new CreatePrRequest
+        {
+            Title = "[ADL] #7: thing", Body = "body", HeadRef = "feature", BaseRef = "main",
+            Reviewers = new[] { "alice" }, CorrelationId = "corr-pr",
+        };
+        var result = await _sut.CreatePullRequestAsync(_tenant, Repo, body);
+
+        result.Success.Should().BeTrue("DG-3 — a skipped reviewer request must NOT fail the PR step");
+        result.ReviewersSkipped.Should().BeTrue();
+        labelCall.Should().NotBeNull("the skip labels the PR for a human");
+        labelCall!.Labels.Should().Contain(Tamma.Activities.ADL.CreatePullRequestActivity.ReviewersSkippedLabel);
+        _events.Appended.Select(e => e.Type).Should().BeEquivalentTo(new[]
+        {
+            GitEventTypes.PrReviewersSkipped,
+            GitEventTypes.PrOpenedSuccess,
+        }, "an audited skip + exactly one terminal success");
+    }
+
+    [Test]
+    public async Task CreatePr_NoReviewersRequested_EmitsNoSkipEvent()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        NoExistingOpenPr();
+        _client.Setup(c => c.OpenPullRequestAsync(It.IsAny<OpenPullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr()));
+
+        var result = await _sut.CreatePullRequestAsync(_tenant, Repo, PrBody());
+
+        result.Success.Should().BeTrue();
+        result.ReviewersSkipped.Should().BeNull("no reviewer request was made — nothing was skipped");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrOpenedSuccess);
+    }
+
+    [Test]
+    public async Task MergePr_MethodUnsupported_FallsBackAlongFixedOrder_WithAuditEvent()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.GetPullRequestAsync("acme", "widgets", "15", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Open, mergeable: true)));
+        var attempted = new List<MergeMethod>();
+        _client.Setup(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<MergePullRequestRequest, CancellationToken>((r, _) => attempted.Add(r.Method))
+            .ReturnsAsync((MergePullRequestRequest r, CancellationToken _) =>
+                r.Method == MergeMethod.Rebase
+                    ? Fail<PullRequest>(new PlatformError.InvalidRequest(
+                        "merge_method_unsupported", "rebase not allowed on this project"))
+                    : Ok(Pr(state: PullRequestState.Merged, mergeSha: "sha-merged")));
+
+        var body = new MergePrRequest
+        {
+            MergeStrategy = "rebase", IssueNumber = 0, BranchName = "feature",
+            AutoDeleteBranch = false, CloseAssociatedIssue = false, CorrelationId = "corr-merge",
+        };
+        var result = await _sut.MergePullRequestAsync(_tenant, Repo, 15, body);
+
+        result.Success.Should().BeTrue("DG-4 — the fallback merges instead of failing");
+        result.MergeSha.Should().Be("sha-merged");
+        result.AppliedMergeStrategy.Should().Be("squash", "rebase→squash is the first fallback hop");
+        attempted.Should().Equal(MergeMethod.Rebase, MergeMethod.Squash);
+        _events.Appended.Select(e => e.Type).Should().BeEquivalentTo(new[]
+        {
+            GitEventTypes.PrMergeMethodFallback,
+            GitEventTypes.PrMergedSuccess,
+        }, "an audited fallback + exactly one terminal success");
+    }
+
+    [Test]
+    public async Task MergePr_RealFailure_DoesNotConsumeTheFallback()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.GetPullRequestAsync("acme", "widgets", "15", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Open, mergeable: true)));
+        _client.Setup(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<PullRequest>(new PlatformError.InvalidRequest(
+                "merge_conflict", "409: merge conflict")));
+
+        var result = await _sut.MergePullRequestAsync(_tenant, Repo, 15, MergeBody());
+
+        result.Success.Should().BeFalse("§4.5 — only the exact typed code is consumed by the fallback");
+        _client.Verify(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()),
+            Times.Once, "a real failure fails loud immediately — no method roulette");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrMergeFailed);
+    }
+
+    [Test]
+    public async Task MergePr_EveryMethodUnsupported_FailsLoud()
+    {
+        Allow();
+        ResolveDriver(GitCredentialSources.Byok);
+        _client.Setup(c => c.GetPullRequestAsync("acme", "widgets", "15", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(Pr(state: PullRequestState.Open, mergeable: true)));
+        _client.Setup(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail<PullRequest>(new PlatformError.InvalidRequest(
+                "merge_method_unsupported", "nope")));
+
+        var result = await _sut.MergePullRequestAsync(_tenant, Repo, 15, MergeBody());
+
+        result.Success.Should().BeFalse("DG-4 — fail loud only when NO method works");
+        _client.Verify(c => c.MergePullRequestAsync(It.IsAny<MergePullRequestRequest>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(3), "the full fixed order (requested + remaining) was tried");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrMergeFailed);
     }
 
     // ===================================================================

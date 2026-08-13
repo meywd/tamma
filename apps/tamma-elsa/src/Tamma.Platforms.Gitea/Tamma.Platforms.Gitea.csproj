@@ -23,6 +23,8 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
+    <!-- Epic 31 P4 M4: sealed-box CI-secret encryption moved down from Tamma.Api with the provisioner. -->
+    <PackageReference Include="Sodium.Core" Version="1.4.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,6 +33,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Tamma.Platforms.Gitea.Tests" />
+    <!-- Epic 31 P1 stage 1 — PlatformCapabilityContractTests constructs the
+         internal-ctor client to pin capability-flag ⇔ verb agreement. -->
+    <InternalsVisibleTo Include="Tamma.Platforms.Tests" />
   </ItemGroup>
 
 </Project>

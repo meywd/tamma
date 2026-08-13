@@ -53,6 +53,48 @@ public interface IGitPlatformClient
     Task<PlatformResult<Branch>> CreateBranchAsync(
         CreateBranchRequest request, CancellationToken ct = default);
 
+    // ── Epic 31 P2 — core verbs the mediation swap needs that were
+    //    missing from the P1 stage-1 additions: single-branch read
+    //    (existence + tip SHA), branch delete, open-PR-for-branch
+    //    lookup (the idempotent create-or-update dance), and PR
+    //    title/body update. Core verbs like GetRepo/CreateBranch —
+    //    every wired driver implements them for real; the null seam
+    //    answers the bare ServiceUnavailable stub. ──
+
+    /// <summary>
+    /// Read a single branch. <see cref="PlatformError.NotFound"/> when
+    /// the branch does not exist — callers use this as the existence
+    /// probe (the live path's <c>BranchExistsAsync</c> shape).
+    /// </summary>
+    Task<PlatformResult<Branch>> GetBranchAsync(
+        string owner, string repoName, string branchName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Delete a branch ref. Returns true on success. Deleting an
+    /// absent branch answers <see cref="PlatformError.NotFound"/> (the
+    /// caller decides whether that is a failure).
+    /// </summary>
+    Task<PlatformResult<bool>> DeleteBranchAsync(
+        string owner, string repoName, string branchName, CancellationToken ct = default);
+
+    /// <summary>
+    /// List the OPEN pull requests whose source branch is
+    /// <paramref name="sourceBranch"/> and target branch is
+    /// <paramref name="targetBranch"/> (0 or 1 entries on every
+    /// platform that forbids duplicate open PRs per branch pair).
+    /// Powers the create-PR idempotency lookup.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<PullRequest>>> ListOpenPullRequestsForBranchAsync(
+        string owner, string repoName, string sourceBranch, string targetBranch,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Update an existing PR's title and/or body (null = leave as-is).
+    /// Returns the updated PR.
+    /// </summary>
+    Task<PlatformResult<PullRequest>> UpdatePullRequestAsync(
+        UpdatePullRequestRequest request, CancellationToken ct = default);
+
     /// <summary>
     /// Open a new PR. See type-level remarks on idempotency.
     /// </summary>
@@ -117,11 +159,132 @@ public interface IGitPlatformClient
     Task<PlatformResult<PullRequest>> SetDraftAsync(
         SetPullRequestDraftRequest request, CancellationToken ct = default);
 
+    // ── Epic 31 P1 (stage 1) — the verbs the autonomous loop performs
+    //    through the live GitHub path (GitHubIntegrationService) that were
+    //    missing from the abstraction: issue close + labels, release
+    //    create, PR review-comment listing, commits, and branch
+    //    file-changes. Added NOW, across all drivers, so P2's mediation
+    //    swap doesn't churn this interface mid-flight. Same contract as
+    //    the 31-13 lifecycle verbs: a driver without the corresponding
+    //    capability (IssueLifecycle / Releases / PrReviewCommentRead /
+    //    CommitReads) MUST return PlatformError.InvalidRequest with code
+    //    "capability_unsupported" — never throw. Every driver answers
+    //    unsupported today; GitHub implements them in P1 stage 2. ──
+
     /// <summary>
-    /// Post a top-level comment on an issue or PR.
+    /// Close an issue, optionally posting a closing comment first
+    /// (returns the updated issue). Capability:
+    /// <see cref="PlatformCapability.IssueLifecycle"/>.
+    /// </summary>
+    Task<PlatformResult<Issue>> CloseIssueAsync(
+        string owner, string repoName, string issueNumber, string? comment = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Add labels to an issue; returns the issue's full label set after
+    /// the add. Capability: <see cref="PlatformCapability.IssueLifecycle"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<string>>> AddIssueLabelsAsync(
+        AddIssueLabelsRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove a single label from an issue; returns the remaining label
+    /// set. Removing an absent label is idempotent success. Capability:
+    /// <see cref="PlatformCapability.IssueLifecycle"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<string>>> RemoveIssueLabelAsync(
+        string owner, string repoName, string issueNumber, string label,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Create a release for a tag. Capability:
+    /// <see cref="PlatformCapability.Releases"/>.
+    /// </summary>
+    Task<PlatformResult<Release>> CreateReleaseAsync(
+        CreateReleaseRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// List the file/line-anchored review comments on a PR (the read
+    /// side of <see cref="CreatePullRequestReviewCommentAsync"/>).
+    /// Capability: <see cref="PlatformCapability.PrReviewCommentRead"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<PullRequestReviewComment>>> ListPullRequestReviewCommentsAsync(
+        string owner, string repoName, string prNumber, CancellationToken ct = default);
+
+    /// <summary>
+    /// List recent commits on a ref, newest first. Capability:
+    /// <see cref="PlatformCapability.CommitReads"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<Commit>>> ListCommitsAsync(
+        ListCommitsRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// List the files changed on a branch relative to a base ref (the
+    /// repo's default branch when the request leaves it null).
+    /// Capability: <see cref="PlatformCapability.CommitReads"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<PrFile>>> ListBranchFileChangesAsync(
+        ListBranchFileChangesRequest request, CancellationToken ct = default);
+
+    // ── Epic 31 P3 (seam 5) — the engine-callback verbs the loop's
+    //    work selection + triage flow ride on: issue listing, issue
+    //    creation, and the security-alert read. Same contract as the
+    //    other capability-gated verbs: a driver that cannot answer
+    //    returns PlatformError.InvalidRequest with code
+    //    "capability_unsupported" — never throws. ──
+
+    /// <summary>
+    /// List issues (excluding pull requests) matching the filter. The
+    /// work-item selection read. Capability:
+    /// <see cref="PlatformCapability.IssueLifecycle"/>.
+    /// </summary>
+    Task<PlatformResult<IReadOnlyList<Issue>>> ListIssuesAsync(
+        ListIssuesRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Create a new issue; returns the created issue with its REAL
+    /// platform <see cref="Issue.HtmlUrl"/> (no caller may fabricate a
+    /// github.com URL). Capability:
+    /// <see cref="PlatformCapability.IssueLifecycle"/>.
+    /// </summary>
+    Task<PlatformResult<Issue>> CreateIssueAsync(
+        CreateIssueRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// List open security alerts (dependency + static analysis) as
+    /// platform-native raw JSON. Platforms without a security-alert
+    /// surface answer <c>capability_unsupported</c>; a platform WITH
+    /// the surface but a repo where a scanner is disabled returns an
+    /// empty list for that scanner (never a failure).
+    /// </summary>
+    Task<PlatformResult<SecurityAlerts>> ListSecurityAlertsAsync(
+        string owner, string repoName, string alertType, CancellationToken ct = default);
+
+    /// <summary>
+    /// Post a top-level comment on an ISSUE. On platforms with a shared
+    /// issue/PR number space (GitHub, Gitea/Forgejo) this also reaches a
+    /// PR's discussion thread, but callers holding a PR number MUST use
+    /// <see cref="CreatePullRequestCommentAsync"/> instead — see its doc.
     /// </summary>
     Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
         string owner, string repoName, string issueOrPrNumber, string body,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Post a top-level comment on a PULL REQUEST's discussion thread.
+    ///
+    /// <para>Epic 31 review (F-high) — this verb exists because "a PR is an
+    /// issue" is only true where issues and PRs share one number space
+    /// (GitHub, Gitea/Forgejo — their drivers delegate to the issue-comment
+    /// surface). On GitLab, issue iids and MR iids are SEPARATE per-project
+    /// sequences with separate notes endpoints: routing a PR number through
+    /// <see cref="CreateIssueCommentAsync"/> there delivers the comment to an
+    /// unrelated issue (or 404s). Mediation's PR-comment paths (the plain
+    /// PR-comment verb and the DG-2 review-comment downgrade) call THIS
+    /// method so the driver can route by surface, not by name.</para>
+    /// </summary>
+    Task<PlatformResult<IssueComment>> CreatePullRequestCommentAsync(
+        string owner, string repoName, string prNumber, string body,
         CancellationToken ct = default);
 
     /// <summary>

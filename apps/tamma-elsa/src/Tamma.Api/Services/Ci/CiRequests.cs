@@ -16,4 +16,20 @@ public sealed record TriggerTestsRequest
 {
     public string Branch { get; init; } = string.Empty;
     public string CorrelationId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Epic 31 P3 — optional workflow file to dispatch. Null falls back to the
+    /// deployment's <c>CI:WorkflowId</c> (default <c>test.yml</c>), preserving
+    /// the pre-P3 behavior. Lets <c>/api/engine/trigger-ci</c> delegate into
+    /// this same mediation core without losing its explicit
+    /// <c>workflowFile</c> parameter. Additive — existing callers omit it.
+    /// </summary>
+    public string? WorkflowFile { get; init; }
+
+    /// <summary>
+    /// Epic 31 P3 — optional workflow-dispatch inputs (additive; the engine
+    /// trigger-ci callback carries them, the test-runs plane historically has
+    /// not).
+    /// </summary>
+    public Dictionary<string, string>? Inputs { get; init; }
 }

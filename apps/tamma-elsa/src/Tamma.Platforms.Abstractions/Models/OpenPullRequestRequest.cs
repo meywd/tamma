@@ -59,7 +59,11 @@ public sealed record CreatePullRequestReviewCommentRequest(
     string Path,
     int Line,
     string Body,
-    string CommitSha);
+    string CommitSha,
+    // Epic 31 P2 — which side of the diff the comment anchors on
+    // (GitHub vocabulary: RIGHT = the new file, LEFT = the old).
+    // Platforms without the concept ignore it.
+    string Side = "RIGHT");
 
 /// <summary>
 /// Input for <see cref="IGitPlatformClient.RegisterWebhookAsync"/>.

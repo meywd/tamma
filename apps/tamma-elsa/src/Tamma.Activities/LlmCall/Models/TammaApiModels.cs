@@ -498,6 +498,11 @@ public sealed record GitCallResponse
     [JsonPropertyName("branchDeleted")] public bool? BranchDeleted { get; init; }
     [JsonPropertyName("alreadyMerged")] public bool? AlreadyMerged { get; init; }
 
+    // Epic 31 P5 M2 — §4 degradation read-backs (additive; null = undegraded).
+    [JsonPropertyName("reviewersSkipped")] public bool? ReviewersSkipped { get; init; }
+    [JsonPropertyName("reviewCommentDowngraded")] public bool? ReviewCommentDowngraded { get; init; }
+    [JsonPropertyName("appliedMergeStrategy")] public string? AppliedMergeStrategy { get; init; }
+
     [JsonPropertyName("issueStatus")] public string? IssueStatus { get; init; }
 
     [JsonPropertyName("comments")] public IReadOnlyList<GitCommentDto>? Comments { get; init; }
@@ -515,6 +520,21 @@ public sealed record GitCallResponse
     [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
     [JsonPropertyName("platformStatusCode")] public int? PlatformStatusCode { get; init; }
     [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }
+}
+
+/// <summary>
+/// Epic 31 P2 (plan §4) — wire response of the READ-ONLY capability probe
+/// (<c>GET /api/v1/git/{owner}/{repo}/capabilities</c>). Mirrors
+/// <c>Tamma.Api.Services.Git.GitCapabilitiesResult</c>. KEY-FREE.
+/// </summary>
+public sealed record GitCapabilitiesResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; init; }
+    [JsonPropertyName("platformKind")] public string? PlatformKind { get; init; }
+    [JsonPropertyName("capabilities")] public IReadOnlyList<string>? Capabilities { get; init; }
+    [JsonPropertyName("credentialSource")] public string? CredentialSource { get; init; }
+    [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
+    [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
 }
 
 /// <summary>A key-free PR review comment. Mirrors <c>Tamma.Api.Services.Git.PrCommentDto</c>.</summary>

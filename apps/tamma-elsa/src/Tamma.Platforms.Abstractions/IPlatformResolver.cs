@@ -38,6 +38,30 @@ namespace Tamma.Platforms.Abstractions;
 /// <c>PLATFORM.INSTALLATION.DISCONNECTED</c>, and
 /// <c>TENANT.SWITCH_ORG</c> events.</para>
 /// </summary>
+/// <summary>
+/// Epic 31 P2 — which credential tier satisfied a
+/// <see cref="IPlatformResolver.ResolveForMediationAsync"/> call.
+/// Mediation surfaces this as the <c>credentialSource</c> LABEL
+/// (byok / platform) on results + audit events — never the credential.
+/// </summary>
+public enum MediationCredentialSource
+{
+    /// <summary>The tenant's own <c>tenant_platform_installations</c>
+    /// row (the BYOK tier).</summary>
+    TenantInstallation = 1,
+
+    /// <summary>The deployment-level <c>Platform:</c> config section
+    /// (single-user activation / the SaaS system tier).</summary>
+    PlatformDefault = 2,
+}
+
+/// <summary>
+/// Epic 31 P2 — a resolved driver plus the tier that produced it.
+/// </summary>
+public sealed record MediationDriverResolution(
+    IGitPlatformDriver Driver,
+    MediationCredentialSource Source);
+
 public interface IPlatformResolver
 {
     /// <summary>
@@ -53,6 +77,31 @@ public interface IPlatformResolver
     /// </summary>
     Task<IGitPlatformDriver?> ResolveForTenantAsync(
         Guid tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Epic 31 P2 — the mediation plane's resolution: tenant
+    /// installation first, then the deployment-level <c>Platform:</c>
+    /// config tier, else null (mediation fails closed with
+    /// <c>GIT_TOKEN_UNAVAILABLE</c>).
+    ///
+    /// <para>Two-scoping rule (CLAUDE.md) answered explicitly:</para>
+    /// <list type="bullet">
+    ///   <item><b>single-user mode</b> (<paramref name="tenantId"/> is
+    ///         null, or the synthetic personal tenant has no row): the
+    ///         SOLE USER owns activation via the <c>Platform:</c>
+    ///         config section — resolved as an in-memory installation,
+    ///         never persisted (no config↔DB drift; idempotent by
+    ///         construction). Source = <see cref="MediationCredentialSource.PlatformDefault"/>.</item>
+    ///   <item><b>SaaS mode</b>: the TENANT owns activation via its
+    ///         <c>tenant_platform_installations</c> row (unchanged DB
+    ///         path). Source = <see cref="MediationCredentialSource.TenantInstallation"/>.
+    ///         A tenant without a row falls back to the deployment's
+    ///         <c>Platform:</c> config — the same "system tier"
+    ///         semantics the pre-P2 <c>GitHub:Token</c> fallback had.</item>
+    /// </list>
+    /// </summary>
+    Task<MediationDriverResolution?> ResolveForMediationAsync(
+        Guid? tenantId, CancellationToken ct = default);
 
     /// <summary>
     /// Resolve the driver for a tenant + explicit kind — used by
@@ -74,6 +123,32 @@ public interface IPlatformResolver
     /// belongs to a known tenant. Returns null when no row matches.
     /// </summary>
     Task<IGitPlatformDriver?> ResolveForWebhookAsync(
+        PlatformKind kind,
+        string installationExternalId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Epic 31 review (F-high) — resolve the driver for a SPECIFIC
+    /// installation of a tenant, looked up by <c>(kind, externalId)</c> and
+    /// TENANT-SCOPED: a row belonging to a different tenant answers null.
+    ///
+    /// <para>This is the per-repo resolution seam the pre-Epic-31 engine
+    /// callback / agent dispatch had (repo → App installation →
+    /// installation token): a tenant with the App on MULTIPLE installations
+    /// (personal + org, two orgs) cannot ride the tenant-primary driver for
+    /// repos of a sibling installation — GitHub App installation tokens
+    /// cannot see a sibling installation's repos (404). Callers map the
+    /// repo to its installation external id (the App-plane repo registry)
+    /// and resolve here, falling back to
+    /// <see cref="ResolveForMediationAsync"/> when no per-repo row exists.</para>
+    ///
+    /// <para>Caching note: the driver cache is keyed <c>(tenant, kind)</c>
+    /// and holds the tenant's PRIMARY row's driver — resolving a
+    /// NON-primary installation composes WITHOUT touching that cache so the
+    /// two installations' drivers can never be served for each other.</para>
+    /// </summary>
+    Task<IGitPlatformDriver?> ResolveForRepoInstallationAsync(
+        Guid tenantId,
         PlatformKind kind,
         string installationExternalId,
         CancellationToken ct = default);

@@ -164,9 +164,16 @@ public class SingleIssueCycleSafetyTests
         ci.Should().NotBeNull("a CI gate must run before the merge gate");
         ReadDefinitionId(ci!).Should().Be("ci-with-debug-retry");
 
-        // TDD loop done → CI gate; CI passed → merge-approval gate.
-        HasEdge("HasMoreTasks", "CiGate", "False").Should().BeTrue(
-            "the TDD loop completion must enter the CI gate");
+        // Epic 31 P3 — the TDD loop completion enters the §4 CHECK STEP first
+        // (CheckCiSupported), whose Supported edge runs the CI gate; the
+        // Unsupported edge takes the DG-7 alternative step (skip-with-audit →
+        // the HUMAN merge gate).
+        HasEdge("HasMoreTasks", "CheckCiSupported", "False").Should().BeTrue(
+            "the TDD loop completion must enter the CI check step");
+        HasEdge("CheckCiSupported", "CiGate", "Supported").Should().BeTrue(
+            "a supported platform runs the CI gate exactly as before");
+        HasEdge("CheckCiSupported", "MarkCiSkipped", "Unsupported").Should().BeTrue(
+            "an unsupported platform takes the DG-7 alternative step");
         // Reachability, not adjacency — MarkPrReadyForReview now sits on this edge
         // (the PR is opened as a draft and GitHub cannot merge a draft). The
         // invariant is unchanged: only a CI PASS may reach the merge gate.

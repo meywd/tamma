@@ -19,10 +19,15 @@ public class ReservedKeysAndEngineCommandTests
 
     private static ActionKey Effect(string wire) => new(ActionNamespace.Effect, wire);
 
-    /// <summary>The four RESERVED keys (AC5): a real catalog row, no performer.</summary>
+    /// <summary>The RESERVED keys (AC5): a real catalog row, no performer.
+    /// Four at 43-12; three since Epic 31 P4 M3 (2026-08-08):
+    /// git.webhook.register went LIVE — its first caller is the server-initiated
+    /// WebhookRegistrationService (provisioning plumbing), so per the row's own
+    /// 43-12 note it moved to the MACHINERY inventory rather than binding an
+    /// LLM route (see MachineryInventoryTests).</summary>
     private static readonly string[] ReservedWires =
     [
-        "deploy.dev", "deploy.staging", "git.checks.bypass", "git.webhook.register",
+        "deploy.dev", "deploy.staging", "git.checks.bypass",
     ];
 
     [Test]

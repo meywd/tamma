@@ -237,6 +237,76 @@ public class GiteaPlatformClientTests
         handler.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
     }
 
+    // ── Epic 31 review (F-medium) — the idempotent-open lookup and the
+    //    branch-pair listing must page like the driver's other list verbs:
+    //    the old first-page-only read missed an existing PR ordered past
+    //    position 50 and the create then 409'd. ──
+
+    private static string OpenPrPageJson(int count) =>
+        "[" + string.Join(",", Enumerable.Range(1, count).Select(i =>
+            $$"""
+            {"number":{{i}},"title":"other-{{i}}","state":"open",
+              "user":{"login":"u"},
+              "head":{"ref":"other-branch-{{i}}"},"base":{"ref":"main"},
+              "created_at":"2026-04-21T00:00:00Z","updated_at":"2026-04-21T00:00:00Z"}
+            """)) + "]";
+
+    [Test]
+    public async Task OpenPullRequestAsync_FindsExistingMatch_BeyondTheFirstPage()
+    {
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        // Page 1: a FULL page of non-matching open PRs.
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls?state=open",
+            HttpStatusCode.OK, OpenPrPageJson(50));
+        // Page 2: partial page carrying the (head, base) match.
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls?state=open",
+            HttpStatusCode.OK,
+            """
+            [{"number":61,"title":"existing","state":"open",
+              "user":{"login":"alice"},
+              "head":{"ref":"feat/x"},"base":{"ref":"main"},
+              "created_at":"2026-04-21T00:00:00Z","updated_at":"2026-04-21T00:00:00Z"}]
+            """);
+
+        var result = await client.OpenPullRequestAsync(new OpenPullRequestRequest(
+            "octo", "repo", "new title", "feat/x", "main"));
+
+        var pr = result.Should().BeOfType<PlatformResult<PullRequest>.Ok>().Subject.Value;
+        pr.Number.Should().Be("61",
+            "an existing pair-PR past position 50 must be found — the old single-page "
+            + "lookup proceeded to a duplicate create that Gitea 409'd");
+        handler.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
+    }
+
+    [Test]
+    public async Task ListOpenPullRequestsForBranchAsync_PagesUntilPartialPage()
+    {
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls?state=open",
+            HttpStatusCode.OK, OpenPrPageJson(50));
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls?state=open",
+            HttpStatusCode.OK,
+            """
+            [{"number":61,"title":"existing","state":"open",
+              "user":{"login":"alice"},
+              "head":{"ref":"feat/x"},"base":{"ref":"main"},
+              "created_at":"2026-04-21T00:00:00Z","updated_at":"2026-04-21T00:00:00Z"}]
+            """);
+
+        var result = await client.ListOpenPullRequestsForBranchAsync(
+            "octo", "repo", "feat/x", "main");
+
+        var prs = result.Should().BeOfType<PlatformResult<IReadOnlyList<PullRequest>>.Ok>()
+            .Subject.Value;
+        prs.Should().ContainSingle().Which.Number.Should().Be("61",
+            "callers (the create activity's already-exists fallback) conclude 'no PR is "
+            + "open for this branch' from an empty answer — it must cover every page");
+    }
+
     [Test]
     public async Task OpenPullRequestAsync_CreatesNewPR_WhenNoExistingMatch()
     {
@@ -262,10 +332,37 @@ public class GiteaPlatformClientTests
         pr.Number.Should().Be("99");
         pr.IsDraft.Should().BeTrue();
         var posted = handler.Requests.First(r => r.Method == HttpMethod.Post);
-        posted.Body.Should().Contain("\"title\":\"new\"")
+        // P5 M1 — Gitea has no create-side draft field (ignored server-side);
+        // draft IS the WIP title prefix, so a draft open prefixes the title.
+        posted.Body.Should().Contain("\"title\":\"WIP: new\"")
             .And.Contain("\"head\":\"feat/y\"")
             .And.Contain("\"base\":\"main\"")
             .And.Contain("\"draft\":true");
+    }
+
+    [Test]
+    public async Task OpenPullRequestAsync_DoesNotPrefixTitle_WhenNotDraft()
+    {
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls?state=open",
+            HttpStatusCode.OK, "[]");
+        handler.EnqueueJson(HttpMethod.Post,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls",
+            HttpStatusCode.Created,
+            """
+            {"number":100,"title":"plain","body":null,"state":"open",
+              "merged":false,"draft":false,"html_url":"https://x",
+              "user":{"login":"bot"},
+              "head":{"ref":"feat/z"},"base":{"ref":"main"},
+              "created_at":"2026-04-21T00:00:00Z","updated_at":"2026-04-21T00:00:00Z"}
+            """);
+
+        await client.OpenPullRequestAsync(new OpenPullRequestRequest(
+            "octo", "repo", "plain", "feat/z", "main", IsDraft: false));
+
+        var posted = handler.Requests.First(r => r.Method == HttpMethod.Post);
+        posted.Body.Should().Contain("\"title\":\"plain\"");
     }
 
     // ───────────── GetPullRequestAsync ─────────────
@@ -410,6 +507,29 @@ public class GiteaPlatformClientTests
         post.Body.Should().Contain("\"body\":\"comment\"");
     }
 
+    [Test]
+    public async Task CreatePullRequestCommentAsync_DelegatesToTheSharedIssueCommentSurface()
+    {
+        // Epic 31 review (F-high) — the PR-comment verb exists because GitLab
+        // MR iids are a separate sequence; on Gitea/Forgejo issues and PRs
+        // share one number space and one comment surface, so the verb rides
+        // /issues/{n}/comments (the shared-space behavior is proven live by
+        // GiteaIntegrationTests.CreateIssueCommentAsync_PostsToOpenPr).
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        handler.EnqueueJson(HttpMethod.Post,
+            "https://gitea.example.com/api/v1/repos/octo/repo/issues/12/comments",
+            HttpStatusCode.Created,
+            """
+            {"id":77,"body":"pr feedback","user":{"login":"bot"},
+              "created_at":"2026-04-21T00:00:00Z"}
+            """);
+
+        var result = await client.CreatePullRequestCommentAsync("octo", "repo", "12", "pr feedback");
+
+        result.Should().BeOfType<PlatformResult<IssueComment>.Ok>()
+            .Which.Value.Id.Should().Be("77");
+    }
+
     // ───────────── RegisterWebhookAsync ─────────────
 
     [Test]
@@ -465,19 +585,40 @@ public class GiteaPlatformClientTests
     }
 
     [Test]
-    public async Task ListAccessibleReposAsync_StopsOnError()
+    public async Task ListAccessibleReposAsync_ThrowsTyped_OnPlatformRejection()
     {
+        // P5 M1 probe strictness: a 403/401 must THROW typed, never complete
+        // as a silent empty enumeration — otherwise a junk credential passes
+        // the onboarding auth probe (the vacuous-probe class P1 closed for
+        // GitHub).
         var (client, _, handler, _) = GiteaTestFixtures.Build();
         handler.EnqueueJson(HttpMethod.Get,
             "https://gitea.example.com/api/v1/user/repos?page=1",
             HttpStatusCode.Forbidden, "{}");
 
-        var collected = new List<Repo>();
-        await foreach (var r in client.ListAccessibleReposAsync())
+        var act = async () =>
         {
-            collected.Add(r);
-        }
+            await foreach (var _ in client.ListAccessibleReposAsync()) { }
+        };
 
-        collected.Should().BeEmpty();
+        (await act.Should().ThrowAsync<GiteaPlatformApiException>())
+            .Which.Error.Should().BeOfType<PlatformError.PermissionDenied>();
+    }
+
+    [Test]
+    public async Task ListAccessibleReposAsync_ThrowsTyped_OnUnauthorized()
+    {
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/user/repos?page=1",
+            HttpStatusCode.Unauthorized, "{}");
+
+        var act = async () =>
+        {
+            await foreach (var _ in client.ListAccessibleReposAsync()) { }
+        };
+
+        (await act.Should().ThrowAsync<GiteaPlatformApiException>())
+            .Which.Error.Should().BeOfType<PlatformError.AuthExpired>();
     }
 }

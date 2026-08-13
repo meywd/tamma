@@ -8,7 +8,6 @@ using Tamma.Api.Services.GitHub;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
-#pragma warning disable CS0618 // Story 31-8: transitional consumer of obsolete IGitHubSecretsProvisioner.
 
 namespace Tamma.Api.Tests.GitHub;
 
@@ -25,8 +24,8 @@ public class InstallationRouterServiceTests
     private Mock<ITenantRepository> _tenantRepo = null!;
     private Mock<IUserRepository> _userRepo = null!;
     private Mock<IApiKeyRepository> _apiKeyRepo = null!;
-    private Mock<IGitHubAppClient> _gitHubApp = null!;
-    private Mock<IGitHubSecretsProvisioner> _provisioner = null!;
+    private Mock<Tamma.Platforms.GitHub.IGitHubAppInstallationReader> _gitHubApp = null!;
+    private Mock<IInstallationSecretsPusher> _provisioner = null!;
     private Mock<ILogger<InstallationRouterService>> _logger = null!;
     private InstallationRouterService _service = null!;
 
@@ -38,8 +37,8 @@ public class InstallationRouterServiceTests
         _tenantRepo = new Mock<ITenantRepository>();
         _userRepo = new Mock<IUserRepository>();
         _apiKeyRepo = new Mock<IApiKeyRepository>();
-        _gitHubApp = new Mock<IGitHubAppClient>();
-        _provisioner = new Mock<IGitHubSecretsProvisioner>();
+        _gitHubApp = new Mock<Tamma.Platforms.GitHub.IGitHubAppInstallationReader>();
+        _provisioner = new Mock<IInstallationSecretsPusher>();
         _logger = new Mock<ILogger<InstallationRouterService>>();
 
         // Default: GitHub App client is unwired (Null behaviour) and the
@@ -48,13 +47,13 @@ public class InstallationRouterServiceTests
         // separately via integration tests.
         _gitHubApp
             .Setup(c => c.GetInstallationAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(GitHubAppResult<GitHubInstallationDetails>.NotConfigured());
+            .ReturnsAsync(Tamma.Platforms.GitHub.GitHubAppReadResult<Tamma.Platforms.GitHub.GitHubAppInstallationDetails>.NotConfigured());
         _gitHubApp
             .Setup(c => c.ListInstallationReposAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(GitHubAppResult<IReadOnlyList<GitHubInstallationRepoDetail>>.NotConfigured());
+            .ReturnsAsync(Tamma.Platforms.GitHub.GitHubAppReadResult<IReadOnlyList<Tamma.Platforms.GitHub.GitHubAppInstallationRepo>>.NotConfigured());
         _provisioner
-            .Setup(p => p.ProvisionSecretAsync(
-                It.IsAny<long>(),
+            .Setup(p => p.PushAsync(
+                It.IsAny<Guid>(),
                 It.IsAny<IReadOnlyList<(string, string)>>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
@@ -119,6 +118,63 @@ public class InstallationRouterServiceTests
         _eventRepo.Verify(r => r.AppendAsync(It.Is<DomainEvent>(
             e => e.Type == "INSTALLATION.LINKED.SUCCESS")),
             Times.Once);
+    }
+
+    [Test]
+    public async Task HandleCallbackAsync_BridgesTheInstallation_BeforePushingSecrets()
+    {
+        // Epic 31 review (F-high) — DriverInstallationSecretsPusher resolves
+        // the GitHub driver from the tenant_platform_installations row the
+        // BRIDGE creates. The old push-then-bridge order meant a first-time
+        // App install resolved no driver and provisioned ZERO repo secrets
+        // (github_client_not_configured for every repo, nothing retried).
+        var userId = Guid.NewGuid();
+        var tenantId = Guid.NewGuid();
+
+        _userRepo.Setup(r => r.GetByIdAsync(userId))
+            .ReturnsAsync(new User { Id = userId, Email = "test@example.com", TenantId = tenantId });
+        _tenantRepo.Setup(r => r.GetByIdAsync(tenantId))
+            .ReturnsAsync(new Tenant { Id = tenantId, Name = "Acme", Slug = "acme" });
+        _installRepo.Setup(r => r.GetByInstallationIdAsync(12345L))
+            .ReturnsAsync((GitHubInstallation?)null);
+        _installRepo.Setup(r => r.CreateAsync(It.IsAny<GitHubInstallation>()))
+            .ReturnsAsync((GitHubInstallation i) => i);
+
+        var order = new List<string>();
+        var bridge = new Mock<Tamma.Api.Services.Platforms.IGitHubInstallationBridge>();
+        bridge
+            .Setup(b => b.EnsureBridgedAsync(tenantId, 12345L, It.IsAny<CancellationToken>()))
+            .Callback(() => order.Add("bridge"))
+            .ReturnsAsync(true);
+        _provisioner
+            .Setup(p => p.PushAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyList<(string, string)>>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Callback(() => order.Add("push"))
+            .ReturnsAsync((IReadOnlyList<SecretProvisionResult>)Array.Empty<SecretProvisionResult>());
+
+        var service = new InstallationRouterService(
+            _installRepo.Object,
+            _eventRepo.Object,
+            _tenantRepo.Object,
+            _userRepo.Object,
+            new MemoryCache(new MemoryCacheOptions()),
+            _gitHubApp.Object,
+            _provisioner.Object,
+            _apiKeyRepo.Object,
+            _logger.Object,
+            webhookSignals: null,
+            installationBridge: bridge.Object);
+
+        var result = await service.HandleCallbackAsync(12345L, null, userId);
+
+        result.Success.Should().BeTrue();
+        // The secrets pusher can only resolve a driver AFTER the bridge has
+        // minted the tenant_platform_installations row.
+        order.Should().Equal("bridge", "push");
     }
 
     [Test]
@@ -447,7 +503,6 @@ public class InstallationRouterServiceTests
             _provisioner.Object,
             _apiKeyRepo.Object,
             _logger.Object,
-            taskQueue: null,
             webhookSignals: registry);
         return (svc, registry);
     }

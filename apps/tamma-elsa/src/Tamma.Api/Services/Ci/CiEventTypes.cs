@@ -33,4 +33,14 @@ public static class CiFailureCodes
 
     /// <summary>Any other expected platform failure (permission, rate-limit, transient).</summary>
     public const string PlatformError = "PLATFORM_ERROR";
+
+    /// <summary>
+    /// Epic 31 P3 (plan §4) — the resolved platform driver cannot perform CI
+    /// dispatch / run reads (no Actions surface, or the platform's typed
+    /// <c>capability_unsupported</c> refusal). FIRST-CLASS (never coarsened into
+    /// <see cref="PlatformError"/>) so the workflow's check step / safety-net
+    /// outcome can branch on it. Mirrors
+    /// <c>Tamma.Api.Services.Git.GitFailureCodes.CapabilityUnsupported</c>.
+    /// </summary>
+    public const string CapabilityUnsupported = "capability_unsupported";
 }

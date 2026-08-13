@@ -88,6 +88,68 @@ jobs:
             --logger "trx;LogFileName=gitea-forgejo.trx" \
             --logger "console;verbosity=normal"
 
+  # Epic 31 P5 M3 — the full-stack Gitea acceptance vehicle: Gitea +
+  # Postgres containers + the REAL Tamma.Api binary as a host process
+  # (zero GitHub configuration). Heavier than the per-PR driver suite
+  # (boots the whole API incl. self-migration), so it rides the nightly
+  # schedule like the GitLab job, plus manual dispatch and an opt-in PR
+  # label.
+  gitea-e2e-nightly:
+    name: Gitea full-stack E2E (nightly + manual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'run-gitea-e2e')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Pull images (with retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            docker pull gitea/gitea:1.21
+            docker pull postgres:17-alpine
+
+      - name: Restore
+        working-directory: apps/tamma-elsa
+        run: dotnet restore Tamma.sln
+
+      # The E2E fixture launches src/Tamma.Api/bin/Release/net8.0/Tamma.Api.dll,
+      # so the full solution build (not just the test project) is required.
+      - name: Build solution
+        working-directory: apps/tamma-elsa
+        run: dotnet build Tamma.sln -c Release --no-restore
+
+      - name: Run Gitea full-stack E2E
+        working-directory: apps/tamma-elsa
+        env:
+          PLATFORMS_REQUIRE_DOCKER: 'true'
+        run: |
+          dotnet test tests/Tamma.Platforms.IntegrationTests/Tamma.Platforms.IntegrationTests.csproj \
+            -c Release --no-build \
+            --filter "TestCategory=GiteaE2E" \
+            --logger "trx;LogFileName=gitea-e2e.trx" \
+            --logger "console;verbosity=normal"
+
+      - name: Upload TRX results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitea-e2e-trx
+          path: apps/tamma-elsa/tests/Tamma.Platforms.IntegrationTests/TestResults/
+
       - name: Upload TRX results on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -115,14 +177,16 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      # gitlab-ce is ~3 GB — give the pull plenty of retries.
+      # gitlab-ce is ~3 GB — give the pull plenty of retries. The tag is
+      # PINNED to the fixture's baseline (GitLabContainerFixture.GitLabImage);
+      # bumping it is a deliberate decision, not "latest = better".
       - name: Pull GitLab CE image (with retry)
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
           max_attempts: 3
           retry_wait_seconds: 60
-          command: docker pull gitlab/gitlab-ce:latest
+          command: docker pull gitlab/gitlab-ce:16.11.10-ce.0
 
       - name: Restore
         working-directory: apps/tamma-elsa

@@ -161,6 +161,30 @@ public class PlatformConnectServiceTests
     }
 
     [Test]
+    public async Task Connect_FailsClosed_WhenDriverCannotEnumerateRepos()
+    {
+        // Epic 31 P5 M1 probe strictness: a driver without the
+        // ListAccessibleRepos capability cannot prove the credential
+        // authenticates — connect must FAIL rather than persist a
+        // 'connected' row on an unverifiable credential (the empty-as-
+        // success class GitHub's P1 fix closed for one kind).
+        _driverFactory.DriverCapabilities = new HashSet<PlatformCapability>();
+
+        var result = await _service.ConnectAsync(new PlatformConnectRequest(
+            TenantId: Guid.NewGuid(),
+            ActorUserId: Guid.NewGuid(),
+            Kind: PlatformKind.Gitea,
+            BaseUrl: "https://gitea.example.com",
+            ExternalId: null,
+            CredentialPlaintext: "unverifiable-token"));
+
+        result.Succeeded.Should().BeFalse();
+        result.ErrorCode.Should().Be("auth_probe_unsupported");
+        _installations.Created.Should().BeEmpty();
+        _emitter.ConnectedEvents.Should().BeEmpty();
+    }
+
+    [Test]
     public async Task Connect_RejectsInvalidBody()
     {
         var result = await _service.ConnectAsync(new PlatformConnectRequest(
@@ -413,7 +437,11 @@ public class PlatformConnectServiceTests
     /// Test double for <see cref="IGitPlatformDriverFactory"/>.
     /// Records the credential plaintext + base url it's handed (so
     /// tests can assert the secret-store roundtrip and base url
-    /// passthrough) and exposes a switch to throw on probe.
+    /// passthrough) and exposes a switch to throw on probe. The
+    /// returned driver advertises <see cref="PlatformCapability.ListAccessibleRepos"/>
+    /// by default — the P5 M1 probe strictness fails connect for a
+    /// driver that cannot enumerate repos, and the happy-path tests
+    /// model a probe-capable driver.
     /// </summary>
     private sealed class FakeDriverFactory : IGitPlatformDriverFactory
     {
@@ -423,6 +451,8 @@ public class PlatformConnectServiceTests
         public string? LastCredentialPlaintext { get; private set; }
         public string? LastInstallationBaseUrl { get; private set; }
         public Exception? ThrowOnCreate { get; set; }
+        public IReadOnlySet<PlatformCapability> DriverCapabilities { get; set; } =
+            new HashSet<PlatformCapability> { PlatformCapability.ListAccessibleRepos };
 
         public Task<IGitPlatformDriver> CreateAsync(
             PlatformInstallation installation,
@@ -432,8 +462,24 @@ public class PlatformConnectServiceTests
             LastCredentialPlaintext = credentialPlaintext;
             LastInstallationBaseUrl = installation.BaseUrl;
             if (ThrowOnCreate is not null) throw ThrowOnCreate;
-            IGitPlatformDriver driver = new NullGitPlatformDriver { Kind = Kind };
+            IGitPlatformDriver driver = new FakeDriver
+            {
+                Kind = Kind,
+                Capabilities = DriverCapabilities,
+            };
             return Task.FromResult(driver);
         }
+    }
+
+    /// <summary>Minimal driver: null-object client (empty accessible-repos
+    /// enumeration = successful auth handshake with zero repos) + a
+    /// configurable capability set.</summary>
+    private sealed class FakeDriver : IGitPlatformDriver
+    {
+        public PlatformKind Kind { get; init; } = PlatformKind.Gitea;
+        public IGitPlatformClient Client { get; init; } = NullGitPlatformDriver.Instance.Client;
+        public IGitPlatformActionsClient? Actions => null;
+        public IReadOnlySet<PlatformCapability> Capabilities { get; init; } =
+            new HashSet<PlatformCapability>();
     }
 }

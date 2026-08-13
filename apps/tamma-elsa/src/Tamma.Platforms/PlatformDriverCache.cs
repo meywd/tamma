@@ -14,8 +14,15 @@ namespace Tamma.Platforms;
 ///
 /// <para>Behavior summary (Story 31-2 AC4):</para>
 /// <list type="bullet">
-///   <item><b>TTL</b>: 5-minute sliding expiration. A missed
-///         invalidation event still self-heals within the window.</item>
+///   <item><b>TTL</b>: 5-minute sliding expiration PLUS an absolute
+///         bound (<see cref="PlatformDriverCacheOptions.AbsoluteTtl"/>,
+///         default 5 minutes). The absolute bound is what makes "a
+///         missed invalidation event still self-heals within the
+///         window" literally true: sliding expiration alone renews on
+///         every hit, so a tenant with sustained traffic (the CI
+///         poller resolves every 30s) kept a stale driver — and its
+///         compose-time credential — alive FOREVER (Epic 31 review,
+///         F-medium).</item>
 ///   <item><b>Capacity</b>: configurable via
 ///         <see cref="PlatformDriverCacheOptions.MaxEntries"/>;
 ///         default 512.</item>
@@ -35,6 +42,7 @@ public sealed class PlatformDriverCache : IDisposable
 {
     private readonly MemoryCache _cache;
     private readonly TimeSpan _slidingTtl;
+    private readonly TimeSpan _absoluteTtl;
     private readonly int _maxEntries;
     private readonly ILogger<PlatformDriverCache> _logger;
     // Tracks which (tenantId, kind) keys live in the cache so
@@ -49,6 +57,7 @@ public sealed class PlatformDriverCache : IDisposable
     {
         options ??= new PlatformDriverCacheOptions();
         _slidingTtl = options.SlidingTtl;
+        _absoluteTtl = options.AbsoluteTtl;
         _maxEntries = options.MaxEntries;
         _logger = logger ?? NullLogger<PlatformDriverCache>.Instance;
         _cache = new MemoryCache(new MemoryCacheOptions
@@ -95,6 +104,10 @@ public sealed class PlatformDriverCache : IDisposable
         {
             Size = 1,
             SlidingExpiration = _slidingTtl,
+            // The HARD staleness bound — sliding expiration renews on
+            // every hit, so without this a hot tenant's entry (and its
+            // compose-time credential) never expired (Epic 31 review).
+            AbsoluteExpirationRelativeToNow = _absoluteTtl,
             // When the cache evicts the entry, drop it from the
             // tenant index so InvalidateTenantAsync doesn't try to
             // re-evict a stale key.
@@ -207,11 +220,23 @@ public sealed class PlatformDriverCache : IDisposable
 public sealed class PlatformDriverCacheOptions
 {
     /// <summary>
-    /// Sliding expiration window. Default 5 minutes — long enough
-    /// that steady-state hits dominate, short enough that a missed
-    /// invalidation event self-heals.
+    /// Sliding expiration window. Default 5 minutes — evicts idle
+    /// tenants' entries early. NOT the staleness guarantee: hits renew
+    /// it, so the bound for an active tenant is
+    /// <see cref="AbsoluteTtl"/>.
     /// </summary>
     public TimeSpan SlidingTtl { get; init; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Absolute expiration (relative to insertion) — the HARD bound on
+    /// how long a composed driver (and the credential baked into it at
+    /// compose time) can be served regardless of hit rate. Default 5
+    /// minutes, matching the documented "self-heals in ≤5 minutes"
+    /// safety property (Story 31-2 §9; Epic 31 review, F-medium: the
+    /// sliding-only cache violated it for any tenant with sub-window
+    /// traffic).
+    /// </summary>
+    public TimeSpan AbsoluteTtl { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// Capacity (entry count). Default 512 — per Story 31-2 §9, this

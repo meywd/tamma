@@ -39,6 +39,10 @@
       shipped today; the generic ContainerBuilder is what we need.
     -->
     <PackageReference Include="Testcontainers" Version="3.10.0" />
+    <!-- Epic 31 P5 M3 — the full-stack Gitea E2E boots Postgres for the
+         host-run Tamma.Api and seeds/queries the control-plane store
+         through the real EF model (Tamma.Data reference below). -->
+    <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -48,6 +52,26 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\Tamma.Platforms.Gitea\Tamma.Platforms.Gitea.csproj" />
+    <!-- Epic 31 P6 M2 — the GitLab suite drives the real driver against a
+         pinned gitlab-ce container (nightly job). -->
+    <ProjectReference Include="..\..\src\Tamma.Platforms.GitLab\Tamma.Platforms.GitLab.csproj" />
+    <!-- Epic 31 P1 stage 2 — the GitHub suite drives the real driver
+         (env-gated live API; no container image exists for GitHub). -->
+    <ProjectReference Include="..\..\src\Tamma.Platforms.GitHub\Tamma.Platforms.GitHub.csproj" />
+    <!-- Epic 31 P5 M3 — E2E fixture seeds the repo-grant rows + reads DCB
+         events / webhook deliveries through the real EF model. -->
+    <ProjectReference Include="..\..\src\Tamma.Data\Tamma.Data.csproj" />
+  </ItemGroup>
+
+  <!-- Epic 31 P5 M3 — the full-stack E2E launches the REAL Tamma.Api as a
+       host process. The reference below only forces build ordering (the
+       fixture runs the app from the Api project's own bin directory, not
+       from this project's output); ReferenceOutputAssembly=false keeps the
+       exe and its dependency closure out of the test bin. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Tamma.Api\Tamma.Api.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false" />
   </ItemGroup>
 
 </Project>

@@ -46,9 +46,11 @@ public class GitTokenResolverTests
             NullLogger<GitTokenResolver>.Instance);
     }
 
+    // Epic 31 P2 — the BYOK tier now resolves the tenant's PRIMARY installation
+    // of ANY kind (GetByTenantPrimaryAsync), not a hardcoded github row.
     private void ByokInstallation()
         => _installations
-            .Setup(r => r.GetByTenantKindAsync(Tenant, "github", It.IsAny<CancellationToken>()))
+            .Setup(r => r.GetByTenantPrimaryAsync(Tenant, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new TenantPlatformInstallation
             {
                 TenantId = Tenant,
@@ -81,7 +83,7 @@ public class GitTokenResolverTests
     {
         // No BYOK installation for the tenant → falls to the platform default.
         _installations
-            .Setup(r => r.GetByTenantKindAsync(Tenant, "github", It.IsAny<CancellationToken>()))
+            .Setup(r => r.GetByTenantPrimaryAsync(Tenant, It.IsAny<CancellationToken>()))
             .ReturnsAsync((TenantPlatformInstallation?)null);
 
         var result = await Build(("GitHub:Token", PlatformToken)).ResolveAsync(Tenant, Repo);
@@ -101,7 +103,7 @@ public class GitTokenResolverTests
         result.Should().NotBeNull();
         result!.Source.Should().Be(GitCredentialSources.Platform);
         _installations.Verify(
-            r => r.GetByTenantKindAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            r => r.GetByTenantPrimaryAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never, "a null tenant has no BYOK tier to consult");
     }
 
@@ -113,7 +115,7 @@ public class GitTokenResolverTests
         // No BYOK, no platform GitHub:Token → null ⇒ the caller returns 503
         // GIT_TOKEN_UNAVAILABLE, never an empty/default token.
         _installations
-            .Setup(r => r.GetByTenantKindAsync(Tenant, "github", It.IsAny<CancellationToken>()))
+            .Setup(r => r.GetByTenantPrimaryAsync(Tenant, It.IsAny<CancellationToken>()))
             .ReturnsAsync((TenantPlatformInstallation?)null);
 
         var result = await Build(/* no GitHub:Token */).ResolveAsync(Tenant, Repo);
@@ -135,5 +137,49 @@ public class GitTokenResolverTests
 
         result.Should().NotBeNull();
         result!.Source.Should().Be(GitCredentialSources.Platform);
+    }
+
+    // ── Epic 31 P2 — BYOK-of-any-kind + JSON-credential guard ───────────
+
+    [Test]
+    public async Task Byok_NonGitHubKind_ResolvesUsableCredential()
+    {
+        // A Gitea-only tenant's primary installation now feeds the BYOK tier.
+        _installations
+            .Setup(r => r.GetByTenantPrimaryAsync(Tenant, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TenantPlatformInstallation
+            {
+                TenantId = Tenant,
+                PlatformKind = "gitea",
+                CredentialSecretScope = "tenant",
+                CredentialSecretName = "gitea/install-1",
+            });
+        _credentialReader
+            .Setup(c => c.ReadActivePlaintextAsync("tenant", Tenant, "gitea/install-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ByokToken);
+
+        var result = await Build(("GitHub:Token", PlatformToken)).ResolveAsync(Tenant, Repo);
+
+        result.Should().NotBeNull();
+        result!.Source.Should().Be(GitCredentialSources.Byok);
+        result.Token.Should().Be(ByokToken, "a non-GitHub tenant resolves its own credential");
+    }
+
+    [Test]
+    public async Task Byok_JsonAppReference_IsNotABearer_FallsBackToPlatform()
+    {
+        // The P2 registry bridge stores {"kind":"app",...} REFERENCES — a JSON
+        // credential must never be used as a bearer token; raw-git/CI callers
+        // fall back to the platform tier.
+        ByokInstallation();
+        _credentialReader
+            .Setup(c => c.ReadActivePlaintextAsync("tenant", Tenant, "github-installation", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("{\"kind\":\"app\",\"appId\":1,\"privateKeyPem\":\"pem\"}");
+
+        var result = await Build(("GitHub:Token", PlatformToken)).ResolveAsync(Tenant, Repo);
+
+        result.Should().NotBeNull();
+        result!.Source.Should().Be(GitCredentialSources.Platform);
+        result.Token.Should().Be(PlatformToken);
     }
 }

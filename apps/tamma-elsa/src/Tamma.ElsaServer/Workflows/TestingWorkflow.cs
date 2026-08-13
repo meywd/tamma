@@ -83,8 +83,13 @@ public class TestingWorkflow : WorkflowBase
         var consecutivePassCountVar = builder.WithVariable<int>("ConsecutivePassCount", 0);
         var attemptNumberVar = builder.WithVariable<int>("AttemptNumber", 1);
         var maxAttemptsVar = builder.WithVariable<int>("MaxAttempts", 3);
-        // Best-effort tenant tag for the DCB events (empty/single-user → platform-scope).
-        var tenantIdVar = builder.WithVariable<string>("TenantIdTag", "");
+        // Tenant scope (empty/single-user → platform-scope). MUST be named
+        // "TenantId": TriggerCIActivity / WaitForCIResultsActivity (and
+        // EventPersistenceMiddleware) resolve tenant ambiently via
+        // GetVariable("TenantId") — the old name "TenantIdTag" was invisible
+        // to that lookup, so the CI trigger + the DG-5 poller ran
+        // platform-scoped in SaaS (Epic 31 review, F-high).
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
         // The terminal escalation reason (set just before routing into the escalation leg).
         var escalationReasonVar = builder.WithVariable<string>("EscalationReason", "");
         // The real underlying failure detail surfaced on an escalation (never empty).
@@ -147,6 +152,16 @@ public class TestingWorkflow : WorkflowBase
         { Id = "TriggerSucceeded", Name = "CI Trigger Succeeded?" };
         triggerSucceeded.SetDisplayText("CI Trigger Succeeded?");
 
+        // Epic 31 P3 (§4.3 safety net) — the trigger's typed capability_unsupported
+        // outcome routes to a DISTINCT terminal (passed=false, ciUnsupported=true)
+        // that ci-with-debug-retry propagates upward WITHOUT burning debug retries:
+        // an unsupported platform will answer identically on every retry. The
+        // cycle-level alternative step (CI.WORKFLOW_DISPATCH.SKIPPED → human
+        // merge-approval path) owns the audit event + routing.
+        var triggerUnsupported = new FlowDecision(ctx => ciTriggerResultVar.Get(ctx)?.Unsupported == true)
+        { Id = "TriggerUnsupported", Name = "CI Dispatch Unsupported?" };
+        triggerUnsupported.SetDisplayText("CI Dispatch Unsupported?");
+
         // ============================================
         // Step 2: Wait for CI results (bookmark + durable timeout)
         // ============================================
@@ -156,6 +171,8 @@ public class TestingWorkflow : WorkflowBase
             Name = "Wait for CI Results",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             RunId = new(ctx => ciTriggerResultVar.Get(ctx)?.RunId ?? "unknown"),
+            // DG-5 — the poller needs the repo on the bookmark payload.
+            Repository = new(ctx => (string?)repositoryVar.Get(ctx)),
             TimeoutMinutes = new(30),
             Results = new(ciResultsFromWaitVar)
         };
@@ -395,6 +412,8 @@ public class TestingWorkflow : WorkflowBase
             Name = "Wait for CI Results (Retry)",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             RunId = new(ctx => ciTriggerResultVar.Get(ctx)?.RunId ?? "unknown"),
+            // DG-5 — the poller needs the repo on the bookmark payload.
+            Repository = new(ctx => (string?)repositoryVar.Get(ctx)),
             TimeoutMinutes = new(30),
             Results = new(ciResultsFromWaitVar)
         };
@@ -598,6 +617,16 @@ public class TestingWorkflow : WorkflowBase
         var finishRetryPass = new Finish { Id = "FinishRetryPass", Name = "Complete: Tests Passed After Retry" };
         finishRetryPass.SetDisplayText("Complete: Tests Passed After Retry");
 
+        // Epic 31 P3 — the CI-unsupported terminal (never a pass, never an
+        // escalation: the parent routes it to the §4 alternative step).
+        var setOutputUnsupportedPassed = MakeOutput("SetOutputUnsupportedPassed", "passed", _ => (object)false);
+        var setOutputUnsupportedFlag = MakeOutput("SetOutputUnsupportedFlag", "ciUnsupported", _ => (object)true);
+        var setOutputUnsupportedEscalated = MakeOutput("SetOutputUnsupportedEscalated", "escalated", _ => (object)false);
+        var setOutputUnsupportedReason = MakeOutput("SetOutputUnsupportedReason", "escalationReason",
+            ctx => (object)(ciTriggerResultVar.Get(ctx)?.Error ?? "capability_unsupported: the platform cannot dispatch CI"));
+        var finishUnsupported = new Finish { Id = "FinishCiUnsupported", Name = "Complete: CI Unsupported" };
+        finishUnsupported.SetDisplayText("Complete: CI Unsupported");
+
         // ============================================
         // Build the Flowchart
         // ============================================
@@ -627,6 +656,8 @@ public class TestingWorkflow : WorkflowBase
             setReasonRetryCritical, setDetailRetryCritical, setReasonExhausted, setDetailExhausted,
             setReasonTimeout, setDetailTimeout, emitCiTimedOut,
             setReasonTriggerFailed, setDetailTriggerFailed, emitCiTriggerFailed,
+            triggerUnsupported, setOutputUnsupportedPassed, setOutputUnsupportedFlag,
+            setOutputUnsupportedEscalated, setOutputUnsupportedReason, finishUnsupported,
             emitGateEscalated,
             setOutputFailReport, setOutputFailPassed, setOutputFailFeedback, setOutputFailEscalated, setOutputFailReason, finishFail,
         };
@@ -642,8 +673,15 @@ public class TestingWorkflow : WorkflowBase
         Connect(flowchart, initInputs, triggerCI);
         Connect(flowchart, triggerCI, emitCiTriggered);
         Connect(flowchart, emitCiTriggered, triggerSucceeded);
-        // Trigger failed -> escalate (ci-trigger-failed)
-        Connect(flowchart, triggerSucceeded, setReasonTriggerFailed, "False");
+        // Trigger failed -> §4.3 typed-unsupported check FIRST (exact-code
+        // match set by TriggerCIActivity), then the ordinary escalate chain.
+        Connect(flowchart, triggerSucceeded, triggerUnsupported, "False");
+        Connect(flowchart, triggerUnsupported, setOutputUnsupportedPassed, "True");
+        Connect(flowchart, setOutputUnsupportedPassed, setOutputUnsupportedFlag);
+        Connect(flowchart, setOutputUnsupportedFlag, setOutputUnsupportedEscalated);
+        Connect(flowchart, setOutputUnsupportedEscalated, setOutputUnsupportedReason);
+        Connect(flowchart, setOutputUnsupportedReason, finishUnsupported);
+        Connect(flowchart, triggerUnsupported, setReasonTriggerFailed, "False");
         Connect(flowchart, setReasonTriggerFailed, setDetailTriggerFailed);
         Connect(flowchart, setDetailTriggerFailed, emitCiTriggerFailed);
         Connect(flowchart, emitCiTriggerFailed, emitGateEscalated);
