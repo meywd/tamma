@@ -281,24 +281,40 @@ internal sealed class GitHubHttpClient
             UpdateRateLimit(response);
             if (response.IsSuccessStatusCode)
             {
-                if (typeof(T) == typeof(JsonElement))
+                // Epic 31 review — a 2xx body that does not deserialize into
+                // the expected shape must map to a TYPED failure, never throw
+                // through the drivers' no-throw PlatformResult contract. The
+                // concrete case: GET /contents/{path} on a DIRECTORY answers
+                // 200 with a JSON ARRAY, which used to escape as a raw
+                // JsonException from ReadFromJsonAsync.
+                try
                 {
-                    var raw = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                    if (string.IsNullOrEmpty(raw))
+                    if (typeof(T) == typeof(JsonElement))
+                    {
+                        var raw = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                        if (string.IsNullOrEmpty(raw))
+                        {
+                            return PlatformResult<T>.FromError(new PlatformError.Unknown("empty body"));
+                        }
+                        using var doc = JsonDocument.Parse(raw);
+                        return PlatformResult<T>.FromOk((T)(object)doc.RootElement.Clone());
+                    }
+                    var typed = await response.Content
+                        .ReadFromJsonAsync<T>(JsonOptions, ct)
+                        .ConfigureAwait(false);
+                    if (typed is null)
                     {
                         return PlatformResult<T>.FromError(new PlatformError.Unknown("empty body"));
                     }
-                    using var doc = JsonDocument.Parse(raw);
-                    return PlatformResult<T>.FromOk((T)(object)doc.RootElement.Clone());
+                    return PlatformResult<T>.FromOk(typed);
                 }
-                var typed = await response.Content
-                    .ReadFromJsonAsync<T>(JsonOptions, ct)
-                    .ConfigureAwait(false);
-                if (typed is null)
+                catch (JsonException ex)
                 {
-                    return PlatformResult<T>.FromError(new PlatformError.Unknown("empty body"));
+                    return PlatformResult<T>.FromError(new PlatformError.InvalidRequest(
+                        "response_shape_mismatch",
+                        $"GitHub answered {(int)response.StatusCode} but the body does not match the "
+                        + $"expected {typeof(T).Name} shape: {ex.Message}"));
                 }
-                return PlatformResult<T>.FromOk(typed);
             }
 
             var err = await GitHubErrorMapper.MapAsync(response, ct).ConfigureAwait(false);

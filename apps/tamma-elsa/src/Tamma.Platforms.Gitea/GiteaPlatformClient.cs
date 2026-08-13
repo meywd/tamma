@@ -173,23 +173,43 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
         ArgumentException.ThrowIfNullOrWhiteSpace(targetBranch);
 
         // Gitea has no head/base filter on the list endpoint — list open
-        // PRs (first page) and filter client-side, the same shape the
-        // idempotent-open lookup uses.
-        var path = $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}" +
-                   $"/pulls?state=open&page=1&limit={PageSize}";
-        var result = await _http
-            .GetJsonAsync<List<GiteaPullRequestDto>>(path, ct)
-            .ConfigureAwait(false);
-        return result.Map(list =>
+        // PRs and filter client-side, the same shape the idempotent-open
+        // lookup uses. Pages until a partial page (Epic 31 review,
+        // F-medium): the old first-page-only read missed an existing PR
+        // ordered past position 50 in a >50-open-PR repo, so callers
+        // concluded no PR was open and the create path 409'd.
+        var aggregate = new List<PullRequest>();
+        var page = 1;
+        while (true)
         {
-            IReadOnlyList<PullRequest> prs = list
-                .Where(dto =>
-                    string.Equals(dto.Head?.Ref, sourceBranch, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(dto.Base?.Ref, targetBranch, StringComparison.OrdinalIgnoreCase))
-                .Select(MapPullRequest)
-                .ToList();
-            return prs;
-        });
+            ct.ThrowIfCancellationRequested();
+            var path = $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}" +
+                       $"/pulls?state=open&page={page}&limit={PageSize}";
+            var result = await _http
+                .GetJsonAsync<List<GiteaPullRequestDto>>(path, ct)
+                .ConfigureAwait(false);
+            switch (result)
+            {
+                case PlatformResult<List<GiteaPullRequestDto>>.Ok ok:
+                    aggregate.AddRange(ok.Value
+                        .Where(dto =>
+                            string.Equals(dto.Head?.Ref, sourceBranch, StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(dto.Base?.Ref, targetBranch, StringComparison.OrdinalIgnoreCase))
+                        .Select(MapPullRequest));
+                    if (ok.Value.Count < PageSize)
+                    {
+                        return PlatformResult<IReadOnlyList<PullRequest>>.FromOk(aggregate);
+                    }
+                    page++;
+                    break;
+                case PlatformResult<List<GiteaPullRequestDto>>.Failed failed:
+                    return PlatformResult<IReadOnlyList<PullRequest>>.FromError(failed.Error);
+                case PlatformResult<List<GiteaPullRequestDto>>.ServiceUnavailable:
+                    return PlatformResult<IReadOnlyList<PullRequest>>.FromServiceUnavailable();
+                default:
+                    throw new InvalidOperationException("unhandled result variant");
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -591,18 +611,58 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
     }
 
     /// <summary>
+    /// List EVERY repo label, paging until a partial page (the
+    /// <see cref="ListRepoBranchesAsync"/> pattern). Epic 31 review
+    /// (F-high/F-medium): the three label name→id resolutions read only the
+    /// first 50-item page, so in a >50-label repo (Gitea's max page size is
+    /// 50, default sort ascending by name) a label past position 50 was
+    /// invisible — the add path created duplicates, the remove path returned
+    /// FALSE success without deleting, and issue creation dropped labels.
+    /// </summary>
+    private async Task<PlatformResult<List<GiteaLabelDto>>> ListAllLabelsAsync(
+        string owner, string repoName, CancellationToken ct)
+    {
+        var aggregate = new List<GiteaLabelDto>();
+        var page = 1;
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var path = $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}/labels?page={page}&limit={PageSize}";
+            var result = await _http
+                .GetJsonAsync<List<GiteaLabelDto>>(path, ct)
+                .ConfigureAwait(false);
+            switch (result)
+            {
+                case PlatformResult<List<GiteaLabelDto>>.Ok ok:
+                    aggregate.AddRange(ok.Value);
+                    if (ok.Value.Count < PageSize)
+                    {
+                        return PlatformResult<List<GiteaLabelDto>>.FromOk(aggregate);
+                    }
+                    page++;
+                    break;
+                case PlatformResult<List<GiteaLabelDto>>.Failed failed:
+                    return PlatformResult<List<GiteaLabelDto>>.FromError(failed.Error);
+                case PlatformResult<List<GiteaLabelDto>>.ServiceUnavailable:
+                    return PlatformResult<List<GiteaLabelDto>>.FromServiceUnavailable();
+                default:
+                    throw new InvalidOperationException("unhandled result variant");
+            }
+        }
+    }
+
+    /// <summary>
     /// Resolve label names → repo label ids, creating missing labels
     /// best-effort (default neutral color). Only a failure to LIST the
-    /// repo labels fails the resolution; a failed create skips that
-    /// label (mirrors CreateIssueAsync's tolerant posture).
+    /// repo labels fails the resolution; a failed create first re-lists and
+    /// resolves on a conflict (a concurrent creator / a listing miss —
+    /// Epic 31 review), and only then skips that label (mirrors
+    /// CreateIssueAsync's tolerant posture).
     /// </summary>
     private async Task<PlatformResult<List<long>>> ResolveOrCreateLabelIdsAsync(
         string owner, string repoName, IReadOnlyList<string> names, CancellationToken ct)
     {
-        var listed = await _http
-            .GetJsonAsync<List<GiteaLabelDto>>(
-                $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}/labels?limit={PageSize}", ct)
-            .ConfigureAwait(false);
+        var listed = await ListAllLabelsAsync(owner, repoName, ct).ConfigureAwait(false);
         if (listed is not PlatformResult<List<GiteaLabelDto>>.Ok listedOk)
         {
             return listed switch
@@ -637,26 +697,39 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
             {
                 ids.Add(createdOk.Value.Id);
                 byName[name] = createdOk.Value.Id;
+                continue;
             }
-            else
+
+            // A conflict means the label DOES exist (a concurrent creator won
+            // the race, or a server that rejects duplicate names) — re-list
+            // and resolve the id instead of dropping the label.
+            if (created is PlatformResult<GiteaLabelDto>.Failed createFailed
+                && createFailed.Error is PlatformError.InvalidRequest ir
+                && ir.Code is "already_exists" or "conflict")
             {
-                _logger.LogWarning(
-                    "Could not create missing label {Label} on {Owner}/{Repo}; skipping it",
-                    name, owner, repoName);
+                var resolved = await TryResolveLabelIdAsync(owner, repoName, name, ct).ConfigureAwait(false);
+                if (resolved is { } existingId)
+                {
+                    ids.Add(existingId);
+                    byName[name] = existingId;
+                    continue;
+                }
             }
+
+            _logger.LogWarning(
+                "Could not create missing label {Label} on {Owner}/{Repo}; skipping it",
+                name, owner, repoName);
         }
         return PlatformResult<List<long>>.FromOk(ids);
     }
 
-    /// <summary>Resolve one label name → id; null when absent or the
-    /// listing failed (the remove verb treats both as idempotent).</summary>
+    /// <summary>Resolve one label name → id across EVERY label page; null
+    /// when absent or the listing failed (the remove verb treats both as
+    /// idempotent).</summary>
     private async Task<long?> TryResolveLabelIdAsync(
         string owner, string repoName, string label, CancellationToken ct)
     {
-        var listed = await _http
-            .GetJsonAsync<List<GiteaLabelDto>>(
-                $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}/labels?limit={PageSize}", ct)
-            .ConfigureAwait(false);
+        var listed = await ListAllLabelsAsync(owner, repoName, ct).ConfigureAwait(false);
         if (listed is not PlatformResult<List<GiteaLabelDto>>.Ok ok) return null;
         foreach (var l in ok.Value)
         {
@@ -761,13 +834,12 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
 
         // Gitea's create-issue takes label IDs, not names — resolve them
         // best-effort (a miss skips that label; the create never fails
-        // because a label doesn't exist).
+        // because a label doesn't exist). Pages every label (Epic 31 review
+        // — the old single 50-item page dropped labels sorted past 50).
         var labelIds = new List<long>();
         if (request.Labels is { Count: > 0 } wanted)
         {
-            var labelsRes = await _http
-                .GetJsonAsync<List<GiteaLabelDto>>(
-                    $"/api/v1/repos/{Encode(request.Owner)}/{Encode(request.RepoName)}/labels?limit=50", ct)
+            var labelsRes = await ListAllLabelsAsync(request.Owner, request.RepoName, ct)
                 .ConfigureAwait(false);
             if (labelsRes is PlatformResult<List<GiteaLabelDto>>.Ok labelsOk)
             {
@@ -1030,7 +1102,11 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
     /// <summary>
     /// Find an open PR with matching (head, base) pair so OpenPR is
     /// idempotent (31-1 ADR §5). Best-effort — on failure we return
-    /// null and let the caller create.
+    /// null and let the caller create. Pages until a partial page or a
+    /// match (Epic 31 review, F-medium): the old first-page-only read
+    /// missed an existing pair-PR ordered past position 50, so the
+    /// idempotent open proceeded to a duplicate create that Gitea 409'd —
+    /// the step failed even though the exact PR existed.
     /// </summary>
     private async Task<PullRequest?> FindOpenPullByBranchPairAsync(
         string owner, string repoName, string head, string targetBase,
@@ -1038,24 +1114,30 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
     {
         // Gitea accepts head as "user:branch" or just "branch"; we
         // pass branch directly. state=open filters to live PRs.
-        var path = $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}" +
-                   $"/pulls?state=open&page=1&limit={PageSize}";
-        var result = await _http
-            .GetJsonAsync<List<GiteaPullRequestDto>>(path, ct)
-            .ConfigureAwait(false);
-        if (result is not PlatformResult<List<GiteaPullRequestDto>>.Ok ok)
+        var page = 1;
+        while (true)
         {
-            return null;
-        }
-        foreach (var dto in ok.Value)
-        {
-            if (string.Equals(dto.Head?.Ref, head, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(dto.Base?.Ref, targetBase, StringComparison.OrdinalIgnoreCase))
+            ct.ThrowIfCancellationRequested();
+            var path = $"/api/v1/repos/{Encode(owner)}/{Encode(repoName)}" +
+                       $"/pulls?state=open&page={page}&limit={PageSize}";
+            var result = await _http
+                .GetJsonAsync<List<GiteaPullRequestDto>>(path, ct)
+                .ConfigureAwait(false);
+            if (result is not PlatformResult<List<GiteaPullRequestDto>>.Ok ok)
             {
-                return MapPullRequest(dto);
+                return null;
             }
+            foreach (var dto in ok.Value)
+            {
+                if (string.Equals(dto.Head?.Ref, head, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(dto.Base?.Ref, targetBase, StringComparison.OrdinalIgnoreCase))
+                {
+                    return MapPullRequest(dto);
+                }
+            }
+            if (ok.Value.Count < PageSize) return null;
+            page++;
         }
-        return null;
     }
 
     private static string Encode(string segment) => Uri.EscapeDataString(segment);

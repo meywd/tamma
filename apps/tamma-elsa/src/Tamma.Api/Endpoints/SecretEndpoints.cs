@@ -2,6 +2,8 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Tamma.Api.Authorization;
 using Tamma.Api.Services.Secrets;
 using Tamma.Api.Services.Secrets.Query;
@@ -423,6 +425,8 @@ public static class SecretEndpoints
         ClaimsPrincipal principal,
         [FromServices] ISecretRevealService revealService,
         [FromServices] ISecretQueryService queryService,
+        [FromServices] Tamma.Data.Repositories.ITenantPlatformInstallationRepository installations,
+        [FromServices] Tamma.Platforms.IPlatformInstallationEventEmitter installationEvents,
         HttpContext http)
     {
         ArgumentNullException.ThrowIfNull(body);
@@ -463,6 +467,19 @@ public static class SecretEndpoints
                 ct: http.RequestAborted)
                 .ConfigureAwait(false);
 
+            // Epic 31 review (F-medium) — if this tenant secret backs a
+            // platform installation credential, the resolver's driver cache
+            // is still serving a driver composed from the OLD plaintext.
+            // Emit PLATFORM.INSTALLATION.CREDENTIAL_ROTATED (durable audit +
+            // in-process bus fan-out) so PlatformDriverCacheInvalidator
+            // evicts immediately; the cache's absolute TTL stays the safety
+            // net for multi-pod deployments. Best-effort — the rotation
+            // itself already succeeded.
+            await EmitCredentialRotatedForBackedInstallationsAsync(
+                tenantId, existing.Name, actorUserId,
+                installations, installationEvents, http)
+                .ConfigureAwait(false);
+
             return Results.Ok(ToIssueResponse(result));
         }
         catch (KeyNotFoundException)
@@ -472,6 +489,59 @@ public static class SecretEndpoints
         catch (ArgumentException ex)
         {
             return Results.BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Epic 31 review (F-medium) — bridge the secrets plane to the platform
+    /// plane: a rotated TENANT secret that a
+    /// <c>tenant_platform_installations</c> row references as its credential
+    /// (matched by slug) gets a CREDENTIAL_ROTATED installation event per
+    /// backed installation, which the in-process bus fans out to
+    /// <c>PlatformDriverCacheInvalidator</c>. Best-effort by design: a
+    /// failure here must never fail the rotation that already happened —
+    /// the driver cache's absolute TTL bounds the staleness either way.
+    /// </summary>
+    internal static async Task EmitCredentialRotatedForBackedInstallationsAsync(
+        Guid tenantId,
+        string secretName,
+        Guid actorUserId,
+        Tamma.Data.Repositories.ITenantPlatformInstallationRepository installations,
+        Tamma.Platforms.IPlatformInstallationEventEmitter installationEvents,
+        HttpContext http)
+    {
+        try
+        {
+            var rows = await installations
+                .ListByTenantAsync(tenantId, http.RequestAborted)
+                .ConfigureAwait(false);
+            foreach (var row in rows)
+            {
+                if (!string.Equals(row.CredentialSecretScope, "tenant", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (!string.Equals(row.CredentialSecretName, secretName, StringComparison.Ordinal))
+                    continue;
+                if (!Tamma.Platforms.PlatformResolver.TryParseKind(row.PlatformKind, out var kind))
+                    continue;
+
+                await installationEvents.EmitCredentialRotatedAsync(
+                    tenantId, kind, row.Id, actorUserId, http.RequestAborted)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Null-tolerant: unit-test HttpContexts carry no RequestServices,
+            // and this is a diagnostics-only tail on a best-effort path.
+            (http.RequestServices as IServiceProvider)?
+                .GetService<Microsoft.Extensions.Logging.ILoggerFactory>()?
+                .CreateLogger(nameof(SecretEndpoints))
+                .LogWarning(
+                    ex,
+                    "Could not emit CREDENTIAL_ROTATED for installations backed by tenant "
+                    + "secret {SecretName} (tenant {TenantId}); the driver cache's absolute "
+                    + "TTL bounds the staleness",
+                    secretName, tenantId);
         }
     }
 

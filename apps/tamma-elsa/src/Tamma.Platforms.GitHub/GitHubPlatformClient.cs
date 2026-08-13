@@ -122,7 +122,19 @@ public sealed class GitHubPlatformClient : IGitPlatformClient
         var path = $"/repos/{Encode(request.Owner)}/{Encode(request.RepoName)}" +
                    $"/contents/{EncodePath(request.Path)}?ref={Encode(request.Ref)}";
         var result = await _http.GetJsonAsync<GitHubContentsDto>(path, ct).ConfigureAwait(false);
-        return result.Map(DecodeContents);
+        // Not Map: decoding can now FAIL typed (not_a_file / file_too_large /
+        // decode_failed) instead of silently answering Ok(empty) — Epic 31
+        // review: a >1MB file read as Ok(byte[0]) let callers proceed as if
+        // the file were empty. (A directory path never reaches the decoder:
+        // GitHub answers a JSON ARRAY there, which the http client's
+        // shape-mismatch guard maps to a typed response_shape_mismatch.)
+        return result switch
+        {
+            PlatformResult<GitHubContentsDto>.Ok ok => DecodeContents(ok.Value),
+            PlatformResult<GitHubContentsDto>.Failed failed =>
+                PlatformResult<byte[]>.FromError(failed.Error),
+            _ => PlatformResult<byte[]>.FromServiceUnavailable(),
+        };
     }
 
     /// <inheritdoc />
@@ -1010,28 +1022,62 @@ public sealed class GitHubPlatformClient : IGitPlatformClient
         Sha: dto.Commit?.Sha ?? string.Empty,
         Protected: dto.Protected);
 
-    internal static byte[] DecodeContents(GitHubContentsDto dto)
+    /// <summary>
+    /// Epic 31 review — decoding answers TYPED failures instead of silently
+    /// coercing "the API told us something else" into Ok(empty bytes):
+    /// <list type="bullet">
+    ///   <item>non-file types (dir / symlink / submodule) ⇒ <c>not_a_file</c>;</item>
+    ///   <item><c>encoding:"none"</c> with a non-zero size — the documented
+    ///     1–100 MB answer under the default JSON accept type — ⇒
+    ///     <c>file_too_large</c> (a caller that needs such files can re-fetch
+    ///     with the raw media type; silently answering byte[0] made callers
+    ///     analyze a large file as if it were empty);</item>
+    ///   <item>corrupt base64 ⇒ <c>decode_failed</c>;</item>
+    ///   <item>a genuinely EMPTY file (size 0 — GitHub also reports it as
+    ///     <c>encoding:"none"</c>) ⇒ Ok(byte[0]), the one honest empty.</item>
+    /// </list>
+    /// </summary>
+    internal static PlatformResult<byte[]> DecodeContents(GitHubContentsDto dto)
     {
         if (!string.Equals(dto.Type, "file", StringComparison.OrdinalIgnoreCase))
         {
-            return Array.Empty<byte>();
+            return PlatformResult<byte[]>.FromError(new PlatformError.InvalidRequest(
+                "not_a_file",
+                $"the path is a '{dto.Type ?? "unknown"}', not a file — file-content reads require a file"));
         }
+
+        if (string.Equals(dto.Encoding, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            if (dto.Size == 0)
+            {
+                return PlatformResult<byte[]>.FromOk(Array.Empty<byte>());
+            }
+            return PlatformResult<byte[]>.FromError(new PlatformError.InvalidRequest(
+                "file_too_large",
+                $"GitHub omits inline content for files between 1 MB and 100 MB under the JSON "
+                + $"media type (size={dto.Size} bytes); re-fetch with the raw media type to read it"));
+        }
+
         if (string.Equals(dto.Encoding, "base64", StringComparison.OrdinalIgnoreCase)
             && !string.IsNullOrEmpty(dto.Content))
         {
             try
             {
                 // GitHub base64 bodies carry embedded newlines.
-                return Convert.FromBase64String(dto.Content.Replace("\n", string.Empty));
+                return PlatformResult<byte[]>.FromOk(
+                    Convert.FromBase64String(dto.Content.Replace("\n", string.Empty)));
             }
-            catch (FormatException)
+            catch (FormatException ex)
             {
-                return Array.Empty<byte>();
+                return PlatformResult<byte[]>.FromError(new PlatformError.InvalidRequest(
+                    "decode_failed",
+                    $"the file's base64 content could not be decoded: {ex.Message}"));
             }
         }
-        return string.IsNullOrEmpty(dto.Content)
+
+        return PlatformResult<byte[]>.FromOk(string.IsNullOrEmpty(dto.Content)
             ? Array.Empty<byte>()
-            : Encoding.UTF8.GetBytes(dto.Content);
+            : Encoding.UTF8.GetBytes(dto.Content));
     }
 
     internal static PullRequest MapPullRequest(GitHubPullRequestDto dto)

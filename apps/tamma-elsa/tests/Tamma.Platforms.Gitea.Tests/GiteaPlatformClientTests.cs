@@ -237,6 +237,76 @@ public class GiteaPlatformClientTests
         handler.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
     }
 
+    // ── Epic 31 review (F-medium) — the idempotent-open lookup and the
+    //    branch-pair listing must page like the driver's other list verbs:
+    //    the old first-page-only read missed an existing PR ordered past
+    //    position 50 and the create then 409'd. ──
+
+    private static string OpenPrPageJson(int count) =>
+        "[" + string.Join(",", Enumerable.Range(1, count).Select(i =>
+            $$"""
+            {"number":{{i}},"title":"other-{{i}}","state":"open",
+              "user":{"login":"u"},
+              "head":{"ref":"other-branch-{{i}}"},"base":{"ref":"main"},
+              "created_at":"2026-04-21T00:00:00Z","updated_at":"2026-04-21T00:00:00Z"}
+            """)) + "]";
+
+    [Test]
+    public async Task OpenPullRequestAsync_FindsExistingMatch_BeyondTheFirstPage()
+    {
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        // Page 1: a FULL page of non-matching open PRs.
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls?state=open",
+            HttpStatusCode.OK, OpenPrPageJson(50));
+        // Page 2: partial page carrying the (head, base) match.
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls?state=open",
+            HttpStatusCode.OK,
+            """
+            [{"number":61,"title":"existing","state":"open",
+              "user":{"login":"alice"},
+              "head":{"ref":"feat/x"},"base":{"ref":"main"},
+              "created_at":"2026-04-21T00:00:00Z","updated_at":"2026-04-21T00:00:00Z"}]
+            """);
+
+        var result = await client.OpenPullRequestAsync(new OpenPullRequestRequest(
+            "octo", "repo", "new title", "feat/x", "main"));
+
+        var pr = result.Should().BeOfType<PlatformResult<PullRequest>.Ok>().Subject.Value;
+        pr.Number.Should().Be("61",
+            "an existing pair-PR past position 50 must be found — the old single-page "
+            + "lookup proceeded to a duplicate create that Gitea 409'd");
+        handler.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
+    }
+
+    [Test]
+    public async Task ListOpenPullRequestsForBranchAsync_PagesUntilPartialPage()
+    {
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls?state=open",
+            HttpStatusCode.OK, OpenPrPageJson(50));
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls?state=open",
+            HttpStatusCode.OK,
+            """
+            [{"number":61,"title":"existing","state":"open",
+              "user":{"login":"alice"},
+              "head":{"ref":"feat/x"},"base":{"ref":"main"},
+              "created_at":"2026-04-21T00:00:00Z","updated_at":"2026-04-21T00:00:00Z"}]
+            """);
+
+        var result = await client.ListOpenPullRequestsForBranchAsync(
+            "octo", "repo", "feat/x", "main");
+
+        var prs = result.Should().BeOfType<PlatformResult<IReadOnlyList<PullRequest>>.Ok>()
+            .Subject.Value;
+        prs.Should().ContainSingle().Which.Number.Should().Be("61",
+            "callers (the create activity's already-exists fallback) conclude 'no PR is "
+            + "open for this branch' from an empty answer — it must cover every page");
+    }
+
     [Test]
     public async Task OpenPullRequestAsync_CreatesNewPR_WhenNoExistingMatch()
     {

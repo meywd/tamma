@@ -49,6 +49,11 @@ internal sealed class GitHubContentsDto
     [JsonPropertyName("type")] public string? Type { get; set; }
     [JsonPropertyName("encoding")] public string? Encoding { get; set; }
     [JsonPropertyName("content")] public string? Content { get; set; }
+
+    /// <summary>Needed to tell a genuinely EMPTY file from a 1–100 MB file:
+    /// both answer <c>encoding:"none", content:""</c> under the JSON accept
+    /// type, and only <c>size</c> separates them (Epic 31 review).</summary>
+    [JsonPropertyName("size")] public long Size { get; set; }
 }
 
 internal sealed class GitHubRefObjectDto

@@ -215,6 +215,79 @@ public class GiteaPrLifecycleTests
             r.Method == HttpMethod.Delete && r.Url.EndsWith("/issues/5/labels/3"));
     }
 
+    // ── Epic 31 review — label name→id resolution must page like every
+    //    other list helper in the driver. A single 50-item read made a
+    //    label sorted past position 50 invisible: the add path created a
+    //    duplicate, and the remove path answered FALSE success without
+    //    deleting anything. ──
+
+    private static string LabelPageJson(int count, int idOffset = 0) =>
+        "[" + string.Join(",", Enumerable.Range(1, count)
+            .Select(i => $$"""{"id":{{i + idOffset}},"name":"l{{i + idOffset:000}}"}""")) + "]";
+
+    [Test]
+    public async Task RemovePullRequestLabelAsync_FindsLabelBeyondTheFirstPage_AndDeletes()
+    {
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        // Page 1: a FULL page (50) without the target — the old code
+        // stopped here and reported idempotent success with the label
+        // still attached.
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/labels",
+            HttpStatusCode.OK, LabelPageJson(50));
+        // Page 2: partial page carrying the target.
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/labels",
+            HttpStatusCode.OK, """[{"id":777,"name":"tamma-adl"}]""");
+        handler.EnqueueJson(HttpMethod.Delete,
+            "https://gitea.example.com/api/v1/repos/octo/repo/issues/5/labels/777",
+            HttpStatusCode.NoContent, "");
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls/5",
+            HttpStatusCode.OK, PrJson);
+
+        var result = await client.RemovePullRequestLabelAsync("octo", "repo", "5", "tamma-adl");
+
+        result.Should().BeOfType<PlatformResult<PullRequest>.Ok>();
+        handler.Requests.Should().Contain(r =>
+            r.Method == HttpMethod.Delete && r.Url.EndsWith("/issues/5/labels/777"),
+            "a label on page 2 must actually be deleted — the old single-page read "
+            + "returned success while leaving the label attached (false-success audit event)");
+    }
+
+    [Test]
+    public async Task AddPullRequestLabelsAsync_CreateConflict_ReListsAndResolves_NeverSkips()
+    {
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        // Resolution list misses the label (e.g. a concurrent creator).
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/labels",
+            HttpStatusCode.OK, "[]");
+        // The create answers a conflict — the label exists after all.
+        handler.EnqueueJson(HttpMethod.Post,
+            "https://gitea.example.com/api/v1/repos/octo/repo/labels",
+            HttpStatusCode.Conflict, """{"message":"label already exists"}""");
+        // The re-list resolves the id.
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/labels",
+            HttpStatusCode.OK, """[{"id":42,"name":"needs-reviewer"}]""");
+        handler.EnqueueJson(HttpMethod.Post,
+            "https://gitea.example.com/api/v1/repos/octo/repo/issues/5/labels",
+            HttpStatusCode.OK, """[{"id":42,"name":"needs-reviewer"}]""");
+        handler.EnqueueJson(HttpMethod.Get,
+            "https://gitea.example.com/api/v1/repos/octo/repo/pulls/5",
+            HttpStatusCode.OK, PrJson);
+
+        var result = await client.AddPullRequestLabelsAsync(
+            new AddPullRequestLabelsRequest("octo", "repo", "5", ["needs-reviewer"]));
+
+        result.Should().BeOfType<PlatformResult<PullRequest>.Ok>();
+        handler.Requests.Single(r =>
+                r.Method == HttpMethod.Post && r.Url.Contains("/issues/5/labels"))
+            .Body.Should().Contain("\"labels\":[42]",
+                "a create-conflict means the label EXISTS — resolve and apply it, never skip");
+    }
+
     [Test]
     public async Task RemovePullRequestLabelAsync_IsIdempotent_WhenLabelUnknown()
     {

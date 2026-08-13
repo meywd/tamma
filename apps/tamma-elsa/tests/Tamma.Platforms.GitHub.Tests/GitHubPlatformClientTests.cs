@@ -119,6 +119,96 @@ public sealed class GitHubPlatformClientTests
         System.Text.Encoding.UTF8.GetString(result.GetValueOrDefault()!).Should().Be("hello world");
     }
 
+    // ── Epic 31 review — the contents API's "something else" answers become
+    //    TYPED failures instead of a silent Ok(byte[0]) / a raw JsonException
+    //    through the no-throw contract. ──
+
+    [Test]
+    public async Task GetFileContent_largeFile_EncodingNone_FailsTyped_FileTooLarge()
+    {
+        // 1–100 MB under the default JSON accept type: 200 with
+        // encoding:"none", content:"" — NOT an empty file.
+        var (client, handler) = Build();
+        handler.EnqueueJson(HttpMethod.Get, $"{Api}/repos/o/r/contents/big.lock?ref=main",
+            HttpStatusCode.OK,
+            """{ "type": "file", "encoding": "none", "content": "", "size": 1857222 }""");
+
+        var result = await client.GetFileContentAsync(
+            new GetFileContentRequest("o", "r", "big.lock", "main"));
+
+        result.Should().BeOfType<PlatformResult<byte[]>.Failed>()
+            .Subject.Error.Should().BeOfType<PlatformError.InvalidRequest>()
+            .Which.Code.Should().Be("file_too_large",
+                "answering Ok(byte[0]) made callers analyze a >1MB file as if it were empty");
+    }
+
+    [Test]
+    public async Task GetFileContent_emptyFile_EncodingNone_SizeZero_IsOkEmpty()
+    {
+        // A genuinely empty file also reports encoding:"none" — size is the
+        // only separator, and empty must stay a SUCCESS.
+        var (client, handler) = Build();
+        handler.EnqueueJson(HttpMethod.Get, $"{Api}/repos/o/r/contents/empty.txt?ref=main",
+            HttpStatusCode.OK,
+            """{ "type": "file", "encoding": "none", "content": "", "size": 0 }""");
+
+        var result = await client.GetFileContentAsync(
+            new GetFileContentRequest("o", "r", "empty.txt", "main"));
+
+        result.GetValueOrDefault().Should().BeEmpty("an empty file is the one honest empty answer");
+    }
+
+    [Test]
+    public async Task GetFileContent_directoryType_FailsTyped_NotAFile()
+    {
+        var (client, handler) = Build();
+        handler.EnqueueJson(HttpMethod.Get, $"{Api}/repos/o/r/contents/src?ref=main",
+            HttpStatusCode.OK,
+            """{ "type": "dir", "size": 0 }""");
+
+        var result = await client.GetFileContentAsync(
+            new GetFileContentRequest("o", "r", "src", "main"));
+
+        result.Should().BeOfType<PlatformResult<byte[]>.Failed>()
+            .Subject.Error.Should().BeOfType<PlatformError.InvalidRequest>()
+            .Which.Code.Should().Be("not_a_file");
+    }
+
+    [Test]
+    public async Task GetFileContent_corruptBase64_FailsTyped_DecodeFailed()
+    {
+        var (client, handler) = Build();
+        handler.EnqueueJson(HttpMethod.Get, $"{Api}/repos/o/r/contents/f.bin?ref=main",
+            HttpStatusCode.OK,
+            """{ "type": "file", "encoding": "base64", "content": "%%%not-base64%%%", "size": 12 }""");
+
+        var result = await client.GetFileContentAsync(
+            new GetFileContentRequest("o", "r", "f.bin", "main"));
+
+        result.Should().BeOfType<PlatformResult<byte[]>.Failed>()
+            .Subject.Error.Should().BeOfType<PlatformError.InvalidRequest>()
+            .Which.Code.Should().Be("decode_failed");
+    }
+
+    [Test]
+    public async Task GetFileContent_directoryPath_ArrayBody_MapsToTypedShapeMismatch_NeverThrows()
+    {
+        // GET /contents/{dir} answers 200 with a JSON ARRAY — the http
+        // client's shape-mismatch guard must map it to a typed error, not
+        // let a JsonException escape the no-throw driver contract.
+        var (client, handler) = Build();
+        handler.EnqueueJson(HttpMethod.Get, $"{Api}/repos/o/r/contents/src?ref=main",
+            HttpStatusCode.OK,
+            """[ { "type": "file", "name": "a.txt" }, { "type": "file", "name": "b.txt" } ]""");
+
+        var result = await client.GetFileContentAsync(
+            new GetFileContentRequest("o", "r", "src", "main"));
+
+        result.Should().BeOfType<PlatformResult<byte[]>.Failed>()
+            .Subject.Error.Should().BeOfType<PlatformError.InvalidRequest>()
+            .Which.Code.Should().Be("response_shape_mismatch");
+    }
+
     [Test]
     public async Task CreateBranch_posts_ref_and_sha()
     {
