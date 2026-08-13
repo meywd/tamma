@@ -45,6 +45,10 @@ public class CiWaitEndpointsTests
         _client
             .Setup(c => c.RunInstanceAsync(It.IsAny<RunWorkflowInstanceRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RunWorkflowInstanceResponse());
+        // Default: the atomic claim succeeds (this caller deleted the row).
+        _bookmarks
+            .Setup(b => b.DeleteAsync(It.IsAny<BookmarkFilter>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1L);
     }
 
     private static StoredBookmark Bookmark(string id, string instanceId, object? payload) => new()
@@ -168,6 +172,88 @@ public class CiWaitEndpointsTests
                 && (string)r.Input!["Status"] == "success"
                 && (bool)r.Input!["BuildPassed"]),
             It.IsAny<CancellationToken>()), Times.Once);
+        // The row is claimed (deleted) exactly once, BEFORE the run.
+        _bookmarks.Verify(b => b.DeleteAsync(
+            It.Is<BookmarkFilter>(f => f.BookmarkId == "bm-1"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ================================================================
+    // Concurrent-resume serialization (Epic 31 review, F-critical):
+    // the bookmark row is claimed ATOMICALLY before running, so of N
+    // concurrent callers exactly one executes the continuation.
+    // ================================================================
+
+    [Test]
+    public async Task Resume_TwoConcurrentResumes_OnlyOneRunsTheInstance()
+    {
+        // Both callers pass the FindMany check (the row is still visible for
+        // the whole in-flight burst — that is the race), but the atomic
+        // delete-claim admits exactly one: the store answers 1 for the first
+        // DELETE and 0 for the loser.
+        StoreHasBookmarkById("bm-1", Bookmark("bm-1", "wf-1",
+            new CIResultBookmarkPayload(Guid.NewGuid(), "42", "acme/widgets")));
+        var claims = 0;
+        _bookmarks
+            .Setup(b => b.DeleteAsync(
+                It.Is<BookmarkFilter>(f => f.BookmarkId == "bm-1"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref claims) == 1 ? 1L : 0L);
+
+        var request = new CiWaitEndpoints.ResumeRequest("bm-1", "42", "success", BuildPassed: true);
+        var results = await Task.WhenAll(
+            Task.Run(() => CiWaitEndpoints.Resume(
+                request, _bookmarks.Object, _runtime.Object, NullLoggerFactory.Instance, CancellationToken.None)),
+            Task.Run(() => CiWaitEndpoints.Resume(
+                request, _bookmarks.Object, _runtime.Object, NullLoggerFactory.Instance, CancellationToken.None)));
+
+        results.Select(StatusCodeOf).Should().BeEquivalentTo(
+            new int?[] { StatusCodes.Status200OK, StatusCodes.Status404NotFound },
+            "exactly one caller wins the claim; the loser is a benign no-op");
+        _client.Verify(c => c.RunInstanceAsync(
+            It.IsAny<RunWorkflowInstanceRequest>(), It.IsAny<CancellationToken>()), Times.Once,
+            "the continuation must execute exactly once — never in parallel");
+    }
+
+    [Test]
+    public async Task Resume_LostClaim_Returns404_NeverRunsAnInstance()
+    {
+        // The row was visible at FindMany time but a concurrent caller claimed
+        // it before this one — mid-burst duplicate ⇒ benign 404, no run.
+        StoreHasBookmarkById("bm-1", Bookmark("bm-1", "wf-1",
+            new CIResultBookmarkPayload(Guid.NewGuid(), "42", "acme/widgets")));
+        _bookmarks
+            .Setup(b => b.DeleteAsync(It.IsAny<BookmarkFilter>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0L);
+
+        var result = await CiWaitEndpoints.Resume(
+            new CiWaitEndpoints.ResumeRequest("bm-1", "42", "success", BuildPassed: true),
+            _bookmarks.Object, _runtime.Object, NullLoggerFactory.Instance, CancellationToken.None);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound);
+        _client.Verify(c => c.RunInstanceAsync(
+            It.IsAny<RunWorkflowInstanceRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task Resume_RunFailure_RestoresTheClaimedRow_AndPropagates()
+    {
+        // A claim whose run fails must put the row back — otherwise the wait
+        // disappears from the poller and only the 30m timeout can end it.
+        var bookmark = Bookmark("bm-1", "wf-1",
+            new CIResultBookmarkPayload(Guid.NewGuid(), "42", "acme/widgets"));
+        StoreHasBookmarkById("bm-1", bookmark);
+        _client
+            .Setup(c => c.RunInstanceAsync(It.IsAny<RunWorkflowInstanceRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("engine burst failed"));
+
+        var act = () => CiWaitEndpoints.Resume(
+            new CiWaitEndpoints.ResumeRequest("bm-1", "42", "success", BuildPassed: true),
+            _bookmarks.Object, _runtime.Object, NullLoggerFactory.Instance, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _bookmarks.Verify(b => b.SaveAsync(bookmark, It.IsAny<CancellationToken>()), Times.Once,
+            "a failed run must restore the claimed row so the wait stays discoverable");
     }
 
     [Test]

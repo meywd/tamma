@@ -37,8 +37,12 @@ namespace Tamma.Api.Services.Ci;
 /// <para><b>Idempotency / the timeout race.</b> Elsa burns the wait's bookmarks
 /// when the activity completes, and the resume seam targets the exact bookmark
 /// id: if the timeout edge (or a concurrent tick) advanced the wait first, the
-/// resume answers 404 and this poller treats that as a benign no-op. A resume
-/// can therefore never double-advance a workflow.</para>
+/// resume answers 404 and this poller treats that as a benign no-op. For
+/// resumes that are IN FLIGHT (not yet committed), the seam additionally
+/// claims the bookmark row atomically before running — a tick that lands
+/// mid-continuation (or after the caller-side HTTP timeout of a long burst)
+/// loses the claim and gets the same benign 404, so a resume can never
+/// double-advance a workflow (see <c>CiWaitEndpoints</c>).</para>
 ///
 /// <para><b>Fail-soft.</b> Every per-wait failure is caught and logged; a bad
 /// wait never stops the sweep, and a dead engine or platform never crashes the

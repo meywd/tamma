@@ -36,6 +36,23 @@ namespace Tamma.ElsaServer.Endpoints;
 /// can never double-advance the workflow. Resume targets the exact
 /// <c>BookmarkId</c> (globally unique), so there is no ambiguous-match arm.</para>
 ///
+/// <para><b>Concurrent-resume serialization (Epic 31 review, F-critical).</b>
+/// The 404 guard above only covers resumes arriving AFTER an earlier one
+/// COMMITS. Elsa's local runtime deletes the consumed bookmark's store row
+/// only when the resumed burst's state commits at the END of the run, so for
+/// the whole continuation the row stays visible and a second caller (the 30s
+/// poller tick, the webhook accelerator, an HTTP retry after the client
+/// timeout) would load the still-suspended state and execute the SAME
+/// continuation a second time in parallel. <see cref="Resume"/> therefore
+/// CLAIMS the bookmark row atomically BEFORE running: it deletes the row by
+/// id (the EF store issues one conditional <c>DELETE</c>), and only the
+/// single caller that observed a row actually deleted proceeds to
+/// <c>RunInstanceAsync</c>; every other concurrent caller observes 0 rows
+/// and takes the idempotent 404 path. The resume itself never needs the row
+/// — the runner schedules the bookmark from the instance's persisted
+/// <c>WorkflowState</c>. A claim whose run then FAILS restores the row so
+/// the wait stays discoverable (poller retry / timeout SLA).</para>
+///
 /// <para>Auth: mapped with <c>RequireAuthorization()</c> in Program.cs — the
 /// only legitimate caller is the Tamma.Api→engine hop presenting the Elsa
 /// admin API key. Same engine-control-surface rationale as the merge/deploy
@@ -138,6 +155,21 @@ public static class CiWaitEndpoints
 
         var bookmark = bookmarks[0];
 
+        // Atomic claim — serialize concurrent resumes for this bookmark (see
+        // the type doc): exactly one caller deletes the row; the rest see 0
+        // and treat the wait as already-resumed. Never run without a claim.
+        var claimed = (await bookmarkStore
+            .DeleteAsync(new BookmarkFilter { BookmarkId = bookmark.Id }, ct)
+            .ConfigureAwait(false)) > 0;
+
+        if (!claimed)
+        {
+            logger.LogInformation(
+                "CI-wait bookmark {BookmarkId} claimed by a concurrent resume — this caller is a benign no-op",
+                bookmark.Id);
+            return Results.NotFound(new { error = "bookmark_not_found", bookmarkId = request.BookmarkId });
+        }
+
         var input = new Dictionary<string, object>
         {
             ["Status"] = request.Status ?? "Unknown",
@@ -148,13 +180,25 @@ public static class CiWaitEndpoints
             .CreateClientAsync(bookmark.WorkflowInstanceId, ct)
             .ConfigureAwait(false);
 
-        await client.RunInstanceAsync(
-            new RunWorkflowInstanceRequest
-            {
-                BookmarkId = bookmark.Id,
-                Input = input,
-            },
-            ct).ConfigureAwait(false);
+        try
+        {
+            await client.RunInstanceAsync(
+                new RunWorkflowInstanceRequest
+                {
+                    BookmarkId = bookmark.Id,
+                    Input = input,
+                },
+                ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The claim consumed the row but the continuation never reached a
+            // commit — restore the row (not the caller's token: a cancelled
+            // restore is a restore that never happened) so the wait stays
+            // discoverable for the poller / keeps its timeout SLA.
+            await bookmarkStore.SaveAsync(bookmark, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
 
         logger.LogInformation(
             "Resumed CI wait {BookmarkId} (instance {InstanceId}) with status {Status} (buildPassed={BuildPassed})",

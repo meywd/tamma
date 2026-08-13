@@ -83,8 +83,13 @@ public class TestingWorkflow : WorkflowBase
         var consecutivePassCountVar = builder.WithVariable<int>("ConsecutivePassCount", 0);
         var attemptNumberVar = builder.WithVariable<int>("AttemptNumber", 1);
         var maxAttemptsVar = builder.WithVariable<int>("MaxAttempts", 3);
-        // Best-effort tenant tag for the DCB events (empty/single-user → platform-scope).
-        var tenantIdVar = builder.WithVariable<string>("TenantIdTag", "");
+        // Tenant scope (empty/single-user → platform-scope). MUST be named
+        // "TenantId": TriggerCIActivity / WaitForCIResultsActivity (and
+        // EventPersistenceMiddleware) resolve tenant ambiently via
+        // GetVariable("TenantId") — the old name "TenantIdTag" was invisible
+        // to that lookup, so the CI trigger + the DG-5 poller ran
+        // platform-scoped in SaaS (Epic 31 review, F-high).
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
         // The terminal escalation reason (set just before routing into the escalation leg).
         var escalationReasonVar = builder.WithVariable<string>("EscalationReason", "");
         // The real underlying failure detail surfaced on an escalation (never empty).

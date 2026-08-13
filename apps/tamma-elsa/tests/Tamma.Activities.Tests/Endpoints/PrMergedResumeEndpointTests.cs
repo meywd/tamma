@@ -53,6 +53,10 @@ public class PrMergedResumeEndpointTests
         _bookmarks
             .Setup(b => b.FindManyAsync(It.IsAny<BookmarkFilter>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Enumerable.Empty<StoredBookmark>());
+        // Default: the atomic claim succeeds (this caller deleted the row).
+        _bookmarks
+            .Setup(b => b.DeleteAsync(It.IsAny<BookmarkFilter>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1L);
     }
 
     private static StoredBookmark Bookmark(string id, string name, string instanceId) => new()
@@ -200,6 +204,70 @@ public class PrMergedResumeEndpointTests
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
         _client.Verify(c => c.RunInstanceAsync(
             It.IsAny<RunWorkflowInstanceRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ================================================================
+    // Concurrent-resume serialization (Epic 31 review, F-critical): the
+    // bookmark row is claimed ATOMICALLY before running, so a webhook
+    // redelivery racing the 12h SLA edge (or an HTTP retry racing a long
+    // in-flight burst) can never execute the continuation twice.
+    // ================================================================
+
+    [Test]
+    public async Task Resume_TwoConcurrentResumes_OnlyOneRunsTheInstance()
+    {
+        var qualified = WaitForPRMergedActivity.BookmarkName(Tenant, Repo, Pr);
+        StoreHas(qualified, Bookmark("bm-1", qualified, "wf-1"));
+        var claims = 0;
+        _bookmarks
+            .Setup(b => b.DeleteAsync(
+                It.Is<BookmarkFilter>(f => f.BookmarkId == "bm-1"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref claims) == 1 ? 1L : 0L);
+
+        var results = await Task.WhenAll(
+            Task.Run(() => Call()),
+            Task.Run(() => Call()));
+
+        results.Select(StatusCodeOf).Should().BeEquivalentTo(
+            new int?[] { StatusCodes.Status200OK, StatusCodes.Status404NotFound },
+            "exactly one caller wins the claim; the loser is a benign no-op");
+        _client.Verify(c => c.RunInstanceAsync(
+            It.IsAny<RunWorkflowInstanceRequest>(), It.IsAny<CancellationToken>()), Times.Once,
+            "the Merged continuation must execute exactly once — never in parallel");
+    }
+
+    [Test]
+    public async Task Resume_LostClaim_Returns404_NeverRunsAnInstance()
+    {
+        var qualified = WaitForPRMergedActivity.BookmarkName(Tenant, Repo, Pr);
+        StoreHas(qualified, Bookmark("bm-1", qualified, "wf-1"));
+        _bookmarks
+            .Setup(b => b.DeleteAsync(It.IsAny<BookmarkFilter>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0L);
+
+        var result = await Call();
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound);
+        _client.Verify(c => c.RunInstanceAsync(
+            It.IsAny<RunWorkflowInstanceRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task Resume_RunFailure_RestoresTheClaimedRow_AndPropagates()
+    {
+        var qualified = WaitForPRMergedActivity.BookmarkName(Tenant, Repo, Pr);
+        var bookmark = Bookmark("bm-1", qualified, "wf-1");
+        StoreHas(qualified, bookmark);
+        _client
+            .Setup(c => c.RunInstanceAsync(It.IsAny<RunWorkflowInstanceRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("engine burst failed"));
+
+        var act = () => Call();
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _bookmarks.Verify(b => b.SaveAsync(bookmark, It.IsAny<CancellationToken>()), Times.Once,
+            "a failed run must restore the claimed row so the wait keeps its 12h SLA");
     }
 
     [Test]

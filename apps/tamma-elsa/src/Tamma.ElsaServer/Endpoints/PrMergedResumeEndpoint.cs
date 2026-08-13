@@ -39,6 +39,15 @@ namespace Tamma.ElsaServer.Endpoints;
 ///   <item><description><b>404 = idempotent no-op</b> — a burned bookmark
 ///   (the SLA edge fired first, or a duplicate delivery raced) resolves
 ///   nothing and never double-advances the workflow.</description></item>
+///   <item><description><b>Atomic claim before running</b> (Epic 31 review,
+///   F-critical — same defect as <see cref="CiWaitEndpoints"/>, see its type
+///   doc for the full mechanics): the consumed bookmark row is only deleted
+///   when the resumed burst COMMITS, so two concurrent deliveries (webhook
+///   redelivery vs the 12h SLA edge vs an HTTP retry) could both find the
+///   row and run the continuation twice in parallel. The resumer deletes the
+///   row by id FIRST — one conditional <c>DELETE</c>, exactly one winner —
+///   and only the winner runs the instance; a claim whose run fails restores
+///   the row so the wait keeps its SLA.</description></item>
 /// </list>
 /// </summary>
 public static class PrMergedResumeEndpoint
@@ -119,6 +128,26 @@ public static class PrMergedResumeEndpoint
 
         var bookmark = bookmarks[0];
 
+        // Atomic claim — serialize concurrent resumes for this bookmark (see
+        // the type doc): exactly one caller deletes the row; the rest see 0
+        // and treat the wait as already-resumed. Never run without a claim.
+        var claimed = (await bookmarkStore
+            .DeleteAsync(new BookmarkFilter { BookmarkId = bookmark.Id }, ct)
+            .ConfigureAwait(false)) > 0;
+
+        if (!claimed)
+        {
+            logger.LogInformation(
+                "pr-merged bookmark {Bookmark} claimed by a concurrent resume — this caller is a benign no-op",
+                matchedName);
+            return Results.NotFound(new
+            {
+                error = "bookmark_not_found",
+                bookmark = qualified,
+                detail = "No PR-merged wait is currently suspended for this PR.",
+            });
+        }
+
         // The activity's OnMerged callback reads WorkflowInput["mergeSha"].
         var input = new Dictionary<string, object>();
         if (!string.IsNullOrWhiteSpace(request.MergeSha))
@@ -128,13 +157,25 @@ public static class PrMergedResumeEndpoint
             .CreateClientAsync(bookmark.WorkflowInstanceId, ct)
             .ConfigureAwait(false);
 
-        await client.RunInstanceAsync(
-            new RunWorkflowInstanceRequest
-            {
-                BookmarkId = bookmark.Id,
-                Input = input,
-            },
-            ct).ConfigureAwait(false);
+        try
+        {
+            await client.RunInstanceAsync(
+                new RunWorkflowInstanceRequest
+                {
+                    BookmarkId = bookmark.Id,
+                    Input = input,
+                },
+                ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The claim consumed the row but the continuation never reached a
+            // commit — restore the row (not the caller's token: a cancelled
+            // restore is a restore that never happened) so the wait keeps its
+            // 12h SLA and a webhook redelivery can retry.
+            await bookmarkStore.SaveAsync(bookmark, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
 
         logger.LogInformation(
             "Resumed pr-merged wait {Bookmark} (instance {InstanceId}) on the Merged edge with sha {MergeSha}",

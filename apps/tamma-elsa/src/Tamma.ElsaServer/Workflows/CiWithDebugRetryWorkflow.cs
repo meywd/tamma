@@ -25,7 +25,7 @@ namespace Tamma.ElsaServer.Workflows;
 ///       NO  -> finish(passed=false, errorMessage, ciRetryCount)
 ///       YES -> incrementCiRetry -> dispatchCiDebugging -> (loop to testingPipeline)
 ///
-/// Inputs:  repository, branchName, issueNumber, skillLevel
+/// Inputs:  repository, branchName, issueNumber, skillLevel, tenantId (optional)
 /// Outputs: passed (bool), errorMessage (string), ciRetryCount (int)
 ///
 /// ciRetryCount is always reset to 0 on entry so that each invocation
@@ -48,6 +48,13 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
         var branchName = builder.WithVariable<string>("BranchName", "");
         var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
         var skillLevel = builder.WithVariable<int>("SkillLevel", 5);
+        // Epic 31 review (F-high) — the cycle passes tenantId into this gate
+        // (SingleIssueCycleWorkflow / MergeApprovalWorkflow both send it) and
+        // this workflow used to DROP it, so the whole CI plane below ran
+        // platform-scoped in SaaS. Named "TenantId" per the MediatedLlmText
+        // ambient convention so EventPersistenceMiddleware tags this
+        // instance's events with the tenant too.
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
         // ciRetryCount is always reset to 0 on workflow entry (see initInputs below)
         // so each invocation gets the full retry budget regardless of prior history.
         //
@@ -80,6 +87,10 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 if (issue > 0) issueNumber.Set(ctx, issue);
                 var skill = ctx.GetInput<int>("skillLevel");
                 if (skill > 0) skillLevel.Set(ctx, skill);
+                // Tenant scope for the testing/debugging dispatches (empty in
+                // single-user mode — platform scope).
+                var tenant = ctx.GetInput<string>("tenantId");
+                if (!string.IsNullOrWhiteSpace(tenant)) tenantIdVar.Set(ctx, tenant);
                 // Always reset ciRetryCount to 0 on entry so each invocation
                 // (including re-entries from review-fix or merge re-test) gets full retry budget.
                 // Verified correct per Story 12-5e investigation — no bug present.
@@ -104,7 +115,11 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 ["SessionId"] = Guid.NewGuid(),
                 ["Repository"] = repository.Get(ctx),
                 ["Branch"] = branchName.Get(ctx),
-                ["SkillLevel"] = skillLevel.Get(ctx)
+                ["SkillLevel"] = skillLevel.Get(ctx),
+                // Epic 31 review (F-high) — TriggerCI/WaitForCIResults inside
+                // testing-pipeline resolve tenant ambiently; without this the
+                // CI trigger + the DG-5 poller run platform-scoped in SaaS.
+                ["tenantId"] = tenantIdVar.Get(ctx)
             }),
             WaitForCompletion = new(true),
             Result = new(testResult)
@@ -191,6 +206,9 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 ["repositoryUrl"] = repository.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
                 ["skillLevel"] = skillLevel.Get(ctx),
+                // Epic 31 review (F-high) — the debugging workflow's mediated
+                // LLM/testing dispatches resolve tenant from this input.
+                ["tenantId"] = tenantIdVar.Get(ctx),
                 // Story 39-15 (D4) — capture the prior attempt's typed diagnosis id (additive
                 // debugging output) so a re-diagnosis supersedes the previous one.
                 ["priorDiagnosisDocumentId"] = ReadDiagnosisDocumentId(debugResult.Get(ctx)),
