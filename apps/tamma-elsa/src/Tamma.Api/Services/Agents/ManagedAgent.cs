@@ -310,6 +310,11 @@ public sealed class ManagedAgent : IManagedAgent
             {
                 Name = ctx.Provider,
                 ApiKey = credential.ApiKey, // request-scoped; dropped after the call
+                // 2026-08-13 — call identity keys for the opt-in scripted
+                // provider (deterministic response selection). Ignored by every
+                // HTTP provider; never serialized onto a wire body.
+                CallRole = request.Role,
+                CallAction = request.Action,
             };
 
             // ── Story 39-9 — build the deterministic repair-ring plan (AC1/AC9). ──

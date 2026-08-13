@@ -624,6 +624,15 @@ if (!string.IsNullOrWhiteSpace(
 // of provider-key resolution into the LLM call path (CallLlmInlineActivity).
 builder.Services.AddProviderCredentialResolution();
 
+// 2026-08-13 (Epic 31 P5 follow-up) — the OPT-IN scripted LLM provider (the
+// deterministic in-process test provider behind the engine-driven autonomous
+// E2E). Default: a NO-OP (flag off). Llm:EnableScriptedProvider=true on a
+// host carrying any SaaS/production signal REFUSES TO START (structural
+// guard, ScriptedProviderPosture). Must run AFTER
+// AddProviderCredentialResolution (it decorates the resolver so "scripted"
+// needs no key).
+builder.Services.AddScriptedLlmProvider(builder.Configuration);
+
 // Epic 46 — the live model-listing seam (46-0: IProviderModelCatalog — one
 // fetch/normalize/cache service behind the admin + tenant models routes) and
 // the persisted provider-settings store (46-1: IProviderSettingsStore — the

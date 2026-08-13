@@ -428,6 +428,25 @@ builder.Services.Configure<ProviderAllowlistOptions>(
     builder.Configuration.GetSection("Security:ProviderAllowlist"));
 builder.Services.AddSingleton<ProviderAllowlist>();
 
+// 2026-08-13 (Epic 31 P5 follow-up) — the OPT-IN scripted LLM provider, engine
+// side. The engine never serves scripted responses (the responder lives in
+// Tamma.Api); all it does here is ALLOW-LIST the "scripted" key so the
+// LlmCallWorkflow provider chain can name it (Llm:DefaultProviderChain /
+// caller / agent-config chains — see LlmProviderChainHelper). Default: no-op.
+// Flag on + any SaaS/production signal ⇒ the engine REFUSES TO START (the same
+// structural guard as the API host).
+if (ScriptedProviderPosture.AssertAllowed(builder.Configuration))
+{
+    builder.Services.PostConfigure<ProviderAllowlistOptions>(o =>
+    {
+        if (!o.AdditionalProviders.Contains(
+                ScriptedProviderPosture.ProviderKey, StringComparer.OrdinalIgnoreCase))
+        {
+            o.AdditionalProviders.Add(ScriptedProviderPosture.ProviderKey);
+        }
+    });
+}
+
 // Story 32-5 (AC9) — the engine holds NO LLM provider key.
 //
 // The 32-3 engine credential-resolver wiring was DELETED here: after the Epic-32

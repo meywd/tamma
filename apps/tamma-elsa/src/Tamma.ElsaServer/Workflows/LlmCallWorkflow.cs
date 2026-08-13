@@ -327,7 +327,17 @@ public class LlmCallWorkflow : WorkflowBase
             SystemPromptOverrideProp = new(context => systemPromptOverrideVar.Get(context))
         }, "Resolve Agent Config");
 
-        // 4. Resolve provider chain — prefers: caller input > DB agent config > default
+        // 4. Resolve provider chain — prefers: caller input > DB agent config >
+        //    Llm:DefaultProviderChain config > hardcoded default. Precedence +
+        //    filtering live in LlmProviderChainHelper (pure, unit-tested).
+        //    2026-08-13: the filter now runs against the DI-configured
+        //    ProviderAllowlist (defaults + Security:ProviderAllowlist:
+        //    AdditionalProviders) instead of the static default instance,
+        //    which silently ignored the very config key this node's rejection
+        //    message told operators to set. That DI allowlist (plus the
+        //    config-tier chain) is how the opt-in "scripted" provider becomes
+        //    selectable for the engine-driven E2E — and how any self-hosted
+        //    custom provider becomes selectable at all.
         var resolveChain = new SetVariable
         {
             Id = "ResolveChain",
@@ -337,27 +347,16 @@ public class LlmCallWorkflow : WorkflowBase
                 var raw = inputVar.Get(context);
                 var input = ParseInput(raw);
 
-                List<string> chain;
+                var dbChain = providerChainVar.Get(context) as ICollection<string>;
 
-                // Priority 1: Caller provided an explicit chain in input
-                if (input.ProviderChain.Count > 0)
-                    chain = input.ProviderChain;
-                // Priority 2: Agent config from DB set a chain (via ResolveAgentConfigActivity)
-                else if (providerChainVar.Get(context) is ICollection<string> dbChain && dbChain.Count > 0)
-                    chain = dbChain.ToList();
-                // Priority 3: Default chain
-                else
-                    chain = new List<string> { "anthropic", "openai", "openrouter" };
+                var configuration = context.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+                var configChain = Microsoft.Extensions.Configuration.ConfigurationBinder
+                    .Get<string[]>(configuration.GetSection(Helpers.LlmProviderChainHelper.DefaultChainConfigKey));
 
-                // Filter through provider allowlist — reject unknown providers
-                var filtered = ProviderAllowlist.FilterAllowedDefault(chain);
-                if (filtered.Count == 0)
-                {
-                    // All providers rejected — fail with clear error, do not silently fall back
-                    throw new InvalidOperationException(
-                        $"All providers in chain were rejected by allowlist: [{string.Join(", ", chain)}]. " +
-                        "Configure allowed providers via Security:ProviderAllowlist:AdditionalProviders.");
-                }
+                var allowlist = context.GetRequiredService<ProviderAllowlist>();
+
+                var filtered = Helpers.LlmProviderChainHelper.Resolve(
+                    input.ProviderChain, dbChain?.ToList(), configChain, allowlist);
 
                 return (object)filtered;
             })
