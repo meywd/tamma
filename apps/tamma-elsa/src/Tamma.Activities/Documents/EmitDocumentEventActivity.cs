@@ -82,25 +82,25 @@ public class EmitDocumentEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? DocumentEvents.Escalated;
-        var documentId = DocumentId.Get(context);
-        var documentType = DocumentType.Get(context);
-        var round = Round.Get(context);
-        var issueId = IssueId.Get(context);
-        var correlationId = CorrelationId.Get(context);
-        var sessionId = SessionId.Get(context);
-        var tenantId = DocumentEvents.ParseTenantId(TenantId.Get(context));
-        var detail = Detail.Get(context);
-        var dataJson = DataJson.Get(context);
+        var type = EventType.GetOrDefault(context) ?? DocumentEvents.Escalated;
+        var documentId = DocumentId.GetOrDefault(context);
+        var documentType = DocumentType.GetOrDefault(context);
+        var round = Round.GetOrDefault(context);
+        var issueId = IssueId.GetOrDefault(context);
+        var correlationId = CorrelationId.GetOrDefault(context);
+        var sessionId = SessionId.GetOrDefault(context);
+        var tenantId = DocumentEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var detail = Detail.GetOrDefault(context);
+        var dataJson = DataJson.GetOrDefault(context);
 
         var evt = BuildTammaEvent(
             type, documentId, documentType, round, issueId, correlationId, sessionId, tenantId, detail, dataJson);
 
         // D6 — override the auto-minted id with the pre-minted transition event id
         // when supplied, so the store's correlating_event_id resolves to THIS row.
-        var eventId = EventId.Get(context);
+        var eventId = EventId.GetOrDefault(context);
         if (!string.IsNullOrWhiteSpace(eventId) && Guid.TryParse(eventId, out var preMinted))
             evt.Id = preMinted;
 
@@ -110,7 +110,8 @@ public class EmitDocumentEventActivity : Activity
             "Emitted {Type} for document {Doc} ({DocType}) round {Round} issue {Issue}",
             type, documentId, documentType, round, issueId);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

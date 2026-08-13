@@ -57,14 +57,14 @@ public class EmitReviewFixEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? ReviewFixEvents.AppliedFailed;
-        var repository = Repository.Get(context) ?? "";
-        var prNumber = PrNumber.Get(context);
-        var issueNumber = IssueNumber.Get(context);
-        var tenantId = ReviewFixEvents.ParseTenantId(TenantId.Get(context));
-        var data = ParseData(DataJson.Get(context));
+        var type = EventType.GetOrDefault(context) ?? ReviewFixEvents.AppliedFailed;
+        var repository = Repository.GetOrDefault(context) ?? "";
+        var prNumber = PrNumber.GetOrDefault(context);
+        var issueNumber = IssueNumber.GetOrDefault(context);
+        var tenantId = ReviewFixEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var data = ParseData(DataJson.GetOrDefault(context));
 
         var evt = BuildTammaEvent(type, repository, prNumber, issueNumber, tenantId, data);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -73,7 +73,8 @@ public class EmitReviewFixEventActivity : Activity
             "Emitted {Type} for pr #{Pr} in {Repo} (issue #{Issue})",
             type, prNumber, repository, issueNumber);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

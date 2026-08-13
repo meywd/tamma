@@ -58,15 +58,15 @@ public class EmitClarifyEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? ClarifyEvents.QuestionsFailed;
-        var sessionId = SessionId.Get(context);
-        var issueId = IssueId.Get(context);
-        var tenantId = ClarifyEvents.ParseTenantId(TenantId.Get(context));
-        var channel = Channel.Get(context);
-        var questionCount = QuestionCount.Get(context);
-        var detail = Detail.Get(context);
+        var type = EventType.GetOrDefault(context) ?? ClarifyEvents.QuestionsFailed;
+        var sessionId = SessionId.GetOrDefault(context);
+        var issueId = IssueId.GetOrDefault(context);
+        var tenantId = ClarifyEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var channel = Channel.GetOrDefault(context);
+        var questionCount = QuestionCount.GetOrDefault(context);
+        var detail = Detail.GetOrDefault(context);
 
         var evt = BuildTammaEvent(type, sessionId, issueId, tenantId, channel, questionCount, detail);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -75,7 +75,8 @@ public class EmitClarifyEventActivity : Activity
             "Emitted {Type} for clarify session {Session} issue {Issue} (questions={Count})",
             type, sessionId, issueId, questionCount);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

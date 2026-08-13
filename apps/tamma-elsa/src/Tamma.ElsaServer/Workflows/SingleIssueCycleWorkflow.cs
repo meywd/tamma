@@ -57,55 +57,55 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
-        var repository = builder.WithVariable<string>("Repository", "");
-        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
-        var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot");
-        var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
-        var tenantId = builder.WithVariable<string>("TenantId", "");
+        var workItemJson = builder.WithVariable<string>("WorkItemJson", "").Persisted();
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var issueNumber = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot").Persisted();
+        var baseBranch = builder.WithVariable<string>("BaseBranch", "main").Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
         // Deployment mode (dev | business) — drives the deployment pipeline's
         // production approval gate (Business Mode requires human approval before
         // prod). Read from input; defaults to dev when absent.
-        var mode = builder.WithVariable<string>("Mode", "");
+        var mode = builder.WithVariable<string>("Mode", "").Persisted();
         // Operator force-flag for the prod approval gate (Deployment:RequireProdApproval).
         // Threaded from DispatchCycleActivity so an operator can force the gate even
         // in single-user/dev mode. Read from input; defaults false.
-        var requireProdApproval = builder.WithVariable<bool>("RequireProdApproval", false);
+        var requireProdApproval = builder.WithVariable<bool>("RequireProdApproval", false).Persisted();
 
         // Conventions (loaded from repo config)
-        var conventions = builder.WithVariable<string>("Conventions", "");
+        var conventions = builder.WithVariable<string>("Conventions", "").Persisted();
 
         // Step outputs
-        var contextIds = builder.WithVariable<string>("ContextIds", "");
-        var poSummary = builder.WithVariable<string>("POSummary", "");
-        var planJson = builder.WithVariable<string>("PlanJson", "");
-        var reviewDecision = builder.WithVariable<string>("ReviewDecision", "");
-        var tasksJson = builder.WithVariable<string>("TasksJson", "");
-        var taskReviewDecision = builder.WithVariable<string>("TaskReviewDecision", "");
-        var branchName = builder.WithVariable<string>("BranchName", "");
+        var contextIds = builder.WithVariable<string>("ContextIds", "").Persisted();
+        var poSummary = builder.WithVariable<string>("POSummary", "").Persisted();
+        var planJson = builder.WithVariable<string>("PlanJson", "").Persisted();
+        var reviewDecision = builder.WithVariable<string>("ReviewDecision", "").Persisted();
+        var tasksJson = builder.WithVariable<string>("TasksJson", "").Persisted();
+        var taskReviewDecision = builder.WithVariable<string>("TaskReviewDecision", "").Persisted();
+        var branchName = builder.WithVariable<string>("BranchName", "").Persisted();
         // Branch-creation gating (IMPORTANT-5): the cycle must NOT proceed to
         // createPR on a failed branch (empty head → doomed PR + false "branch
         // created" notify). The branch sub-workflow reports success / errorCode /
         // exitReason; we capture them to route a loud terminal on failure.
-        var branchSuccess = builder.WithVariable<bool>("BranchSuccess", false);
-        var branchErrorCode = builder.WithVariable<string>("BranchErrorCode", "");
-        var branchErrorReason = builder.WithVariable<string>("BranchErrorReason", "");
-        var prNumber = builder.WithVariable<int>("PRNumber", 0);
-        var prUrl = builder.WithVariable<string>("PRUrl", "");
-        var exitReason = builder.WithVariable<string>("ExitReason", "");
+        var branchSuccess = builder.WithVariable<bool>("BranchSuccess", false).Persisted();
+        var branchErrorCode = builder.WithVariable<string>("BranchErrorCode", "").Persisted();
+        var branchErrorReason = builder.WithVariable<string>("BranchErrorReason", "").Persisted();
+        var prNumber = builder.WithVariable<int>("PRNumber", 0).Persisted();
+        var prUrl = builder.WithVariable<string>("PRUrl", "").Persisted();
+        var exitReason = builder.WithVariable<string>("ExitReason", "").Persisted();
 
         // Fail-the-cycle sink context (Phase A): which step failed + the underlying
         // detail surfaced on the loud CYCLE.STEP_FAILED audit row. Defaults are never
         // empty (no silent failure) — every error route stamps a real stepId/detail.
-        var failedStepId = builder.WithVariable<string>("FailedStepId", "unknown-step");
-        var failedDetail = builder.WithVariable<string>("FailedDetail", "step produced no usable result");
+        var failedStepId = builder.WithVariable<string>("FailedStepId", "unknown-step").Persisted();
+        var failedDetail = builder.WithVariable<string>("FailedDetail", "step produced no usable result").Persisted();
 
         // Review / revision tracking (must be declared before activities that reference them)
-        var reviewNotes = builder.WithVariable<string>("ReviewNotes", "");
-        var planRevisionCount = builder.WithVariable<int>("PlanRevisionCount", 0);
+        var reviewNotes = builder.WithVariable<string>("ReviewNotes", "").Persisted();
+        var planRevisionCount = builder.WithVariable<int>("PlanRevisionCount", 0).Persisted();
 
         // Sub-workflow results
-        var subResult = builder.WithVariable<IDictionary<string, object>?>();
+        var subResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ================================================================
         // 0. Read workflow inputs into variables (no side effects in activity lambdas)
@@ -516,9 +516,9 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         // 10. TDD Loop (for each task in dependency order)
         // Each task: red → green → CI → refactor → commit
         // ================================================================
-        var currentTaskIndex = builder.WithVariable<int>("CurrentTaskIndex", 0);
-        var totalTasks = builder.WithVariable<int>("TotalTasks", 0);
-        var currentTaskJson = builder.WithVariable<string>("CurrentTaskJson", "");
+        var currentTaskIndex = builder.WithVariable<int>("CurrentTaskIndex", 0).Persisted();
+        var totalTasks = builder.WithVariable<int>("TotalTasks", 0).Persisted();
+        var currentTaskJson = builder.WithVariable<string>("CurrentTaskJson", "").Persisted();
 
         var initTaskLoop = Assign(totalTasks, ctx =>
         {
@@ -718,7 +718,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         // `outcome` output). Defaults to "escalated" when the gate returns nothing
         // parseable so an unreadable result is treated as a loud non-merge (never a
         // silent merge), keeping the cycle on a terminal path.
-        var gateOutcome = builder.WithVariable<string>("GateOutcome", "escalated");
+        var gateOutcome = builder.WithVariable<string>("GateOutcome", "escalated").Persisted();
         var extractGateOutcome = Assign(gateOutcome, ctx =>
         {
             var result = subResult.Get(ctx);
@@ -762,7 +762,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         // ================================================================
         // 13. Wait for PR Merged (bookmark — blocks until merged)
         // ================================================================
-        var mergeSha = builder.WithVariable<string>("MergeSha", "");
+        var mergeSha = builder.WithVariable<string>("MergeSha", "").Persisted();
         var waitForMerged = new WaitForPRMergedActivity
         {
             Id = "WaitForPRMerged",
@@ -885,7 +885,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         };
         planMaxRevisionsCheck.SetDisplayText("Plan Max Revisions?");
 
-        var taskRevisionCount = builder.WithVariable<int>("TaskRevisionCount", 0);
+        var taskRevisionCount = builder.WithVariable<int>("TaskRevisionCount", 0).Persisted();
         var incrementTaskRevision = Assign(taskRevisionCount, ctx =>
             (object)(taskRevisionCount.Get(ctx) + 1),
             "IncrTaskRevision", "Increment Task Revision");

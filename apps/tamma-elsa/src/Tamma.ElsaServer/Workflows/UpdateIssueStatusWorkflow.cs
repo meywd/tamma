@@ -46,19 +46,19 @@ public class UpdateIssueStatusWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repositoryVar = builder.WithVariable<string>("Repository", "");
-        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0);
-        var messageVar = builder.WithVariable<string>("Message", "");
-        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
-        var prNumberVar = builder.WithVariable<int>("PrNumber", 0);
-        var prUrlVar = builder.WithVariable<string>("PrUrl", "");
-        var addLabelsVar = builder.WithVariable<string[]>("AddLabels", Array.Empty<string>());
-        var removeLabelsVar = builder.WithVariable<string[]>("RemoveLabels", Array.Empty<string>());
+        var repositoryVar = builder.WithVariable<string>("Repository", "").Persisted();
+        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var messageVar = builder.WithVariable<string>("Message", "").Persisted();
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "").Persisted();
+        var prNumberVar = builder.WithVariable<int>("PrNumber", 0).Persisted();
+        var prUrlVar = builder.WithVariable<string>("PrUrl", "").Persisted();
+        var addLabelsVar = builder.WithVariable<string[]>("AddLabels", Array.Empty<string>()).Persisted();
+        var removeLabelsVar = builder.WithVariable<string[]>("RemoveLabels", Array.Empty<string>()).Persisted();
 
-        var updatedVar = builder.WithVariable<bool>("Updated", false);
-        var errorCodeVar = builder.WithVariable<string>("ErrorCode", "");
-        var errorVar = builder.WithVariable<string>("Error", "");
-        var startedAtTicksVar = builder.WithVariable<long>("StartedAtTicks", 0);
+        var updatedVar = builder.WithVariable<bool>("Updated", false).Persisted();
+        var errorCodeVar = builder.WithVariable<string>("ErrorCode", "").Persisted();
+        var errorVar = builder.WithVariable<string>("Error", "").Persisted();
+        var startedAtTicksVar = builder.WithVariable<long>("StartedAtTicks", 0).Persisted();
 
         // ================================================================
         // 1. Read inputs

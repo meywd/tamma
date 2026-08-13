@@ -52,21 +52,21 @@ public class MentorshipWorkflow : WorkflowBase
         // =====================================================================
         // Workflow Variables
         // =====================================================================
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var sessionId = builder.WithVariable<Guid>("SessionId", default(Guid));
-        var storyId = builder.WithVariable<string>("StoryId", "");
-        var juniorId = builder.WithVariable<string>("JuniorId", "");
-        var skillLevel = builder.WithVariable<int>("SkillLevel", 3);
-        var assessmentAttempt = builder.WithVariable<int>("AssessmentAttempt", 0);
-        var planIteration = builder.WithVariable<int>("PlanIteration", 0);
-        var qualityRetryCount = builder.WithVariable<int>("QualityRetryCount", 0);
-        var reviewIteration = builder.WithVariable<int>("ReviewIteration", 0);
-        var blockerEscalationLevel = builder.WithVariable<int>("BlockerEscalationLevel", 0);
-        var maxBasicRetries = builder.WithVariable<int>("MaxBasicRetries", 2);
-        var maxDebugRetries = builder.WithVariable<int>("MaxDebugRetries", 3);
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
+        var sessionId = builder.WithVariable<Guid>("SessionId", default(Guid)).Persisted();
+        var storyId = builder.WithVariable<string>("StoryId", "").Persisted();
+        var juniorId = builder.WithVariable<string>("JuniorId", "").Persisted();
+        var skillLevel = builder.WithVariable<int>("SkillLevel", 3).Persisted();
+        var assessmentAttempt = builder.WithVariable<int>("AssessmentAttempt", 0).Persisted();
+        var planIteration = builder.WithVariable<int>("PlanIteration", 0).Persisted();
+        var qualityRetryCount = builder.WithVariable<int>("QualityRetryCount", 0).Persisted();
+        var reviewIteration = builder.WithVariable<int>("ReviewIteration", 0).Persisted();
+        var blockerEscalationLevel = builder.WithVariable<int>("BlockerEscalationLevel", 0).Persisted();
+        var maxBasicRetries = builder.WithVariable<int>("MaxBasicRetries", 2).Persisted();
+        var maxDebugRetries = builder.WithVariable<int>("MaxDebugRetries", 3).Persisted();
 
         // DispatchWorkflow result capture for AssessmentWorkflow
-        var assessmentDispatchResult = builder.WithVariable<IDictionary<string, object>?>();
+        var assessmentDispatchResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // =====================================================================
         // 1. INITIALIZATION ACTIVITIES

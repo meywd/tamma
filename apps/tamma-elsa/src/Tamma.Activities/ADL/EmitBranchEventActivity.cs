@@ -59,13 +59,13 @@ public class EmitBranchEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? BranchEvents.CreatedFailed;
-        var issueNumber = IssueNumber.Get(context);
-        var repository = Repository.Get(context) ?? "";
-        var tenantId = BranchEvents.ParseTenantId(TenantId.Get(context));
-        var data = ParseData(DataJson.Get(context));
+        var type = EventType.GetOrDefault(context) ?? BranchEvents.CreatedFailed;
+        var issueNumber = IssueNumber.GetOrDefault(context);
+        var repository = Repository.GetOrDefault(context) ?? "";
+        var tenantId = BranchEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var data = ParseData(DataJson.GetOrDefault(context));
 
         var evt = BuildTammaEvent(type, issueNumber, repository, tenantId, data);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -73,7 +73,8 @@ public class EmitBranchEventActivity : Activity
         _logger?.LogInformation(
             "Emitted {Type} for issue #{Issue} in {Repo}", type, issueNumber, repository);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

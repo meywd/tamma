@@ -71,6 +71,9 @@ public sealed class HourlyAnalyticsRollupSchedulerOptions
 public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
 {
     private readonly IWorkflowDispatcher _dispatcher;
+    // 2026-08-13 — per-fire scope for the (scoped) IWorkflowDefinitionService
+    // used by the version-id resolve (see PublishedWorkflowDispatch).
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptions<HourlyAnalyticsRollupSchedulerOptions> _options;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<HourlyAnalyticsRollupScheduler> _logger;
@@ -85,6 +88,7 @@ public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
 
     public HourlyAnalyticsRollupScheduler(
         IWorkflowDispatcher dispatcher,
+        IServiceScopeFactory scopeFactory,
         IOptions<HourlyAnalyticsRollupSchedulerOptions> options,
         TimeProvider timeProvider,
         ILogger<HourlyAnalyticsRollupScheduler> logger,
@@ -92,10 +96,12 @@ public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
         IRollupSchedulerLeaderLock? leaderLock = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
+        ArgumentNullException.ThrowIfNull(scopeFactory);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _dispatcher = dispatcher;
+        _scopeFactory = scopeFactory;
         _options = options;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -196,16 +202,30 @@ public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
         }
 
         var instanceId = Guid.NewGuid().ToString();
-        var request = new DispatchWorkflowDefinitionRequest(
-            HourlyAnalyticsRollupWorkflow.DefinitionId)
-        {
-            InstanceId = instanceId,
-            // No input variables — the workflow infers the target hour
-            // from the current clock.
-        };
 
         try
         {
+            // 2026-08-13 — the request ctor takes the VERSION id, not the
+            // definition id (see PublishedWorkflowDispatch: this dispatch died
+            // WorkflowGraphNotFound in the queue on every fire before this
+            // resolve existed). Resolved per-fire from a fresh scope — the
+            // definition service is scoped.
+            string definitionVersionId;
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                definitionVersionId = await Tamma.Activities.Core.PublishedWorkflowDispatch
+                    .ResolvePublishedVersionIdAsync(
+                        scope.ServiceProvider.GetRequiredService<Elsa.Workflows.Management.IWorkflowDefinitionService>(),
+                        HourlyAnalyticsRollupWorkflow.DefinitionId, ct);
+            }
+
+            var request = new DispatchWorkflowDefinitionRequest(definitionVersionId)
+            {
+                InstanceId = instanceId,
+                // No input variables — the workflow infers the target hour
+                // from the current clock.
+            };
+
             // Newer Elsa versions take a DispatchWorkflowOptions as the
             // second parameter (cancellation token lives in options).
             // The empty-options default keeps the call shape minimal.

@@ -64,14 +64,14 @@ public class EmitMergeEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? MergeEvents.Failed;
-        var issueNumber = IssueNumber.Get(context);
-        var prNumber = PrNumber.Get(context);
-        var repository = Repository.Get(context) ?? "";
-        var tenantId = MergeEvents.ParseTenantId(TenantId.Get(context));
-        var data = ParseData(DataJson.Get(context));
+        var type = EventType.GetOrDefault(context) ?? MergeEvents.Failed;
+        var issueNumber = IssueNumber.GetOrDefault(context);
+        var prNumber = PrNumber.GetOrDefault(context);
+        var repository = Repository.GetOrDefault(context) ?? "";
+        var tenantId = MergeEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var data = ParseData(DataJson.GetOrDefault(context));
 
         var evt = BuildTammaEvent(type, issueNumber, prNumber, repository, tenantId, data);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -80,7 +80,8 @@ public class EmitMergeEventActivity : Activity
             "Emitted {Type} for PR #{Pr} / issue #{Issue} in {Repo}",
             type, prNumber, issueNumber, repository);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

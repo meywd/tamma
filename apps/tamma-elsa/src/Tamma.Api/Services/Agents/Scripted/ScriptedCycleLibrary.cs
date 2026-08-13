@@ -38,6 +38,19 @@ public static class ScriptedCycleLibrary
     public const string ApproveReviewVerdict =
         """{"verdict":"approve","comments":"Scripted review: no blocking issues found; the artifact satisfies its contract.","suggestedChanges":"","issues":[]}""";
 
+    /// <summary>
+    /// 2026-08-13 (engine-driven E2E) — the CANONICAL approving Review, used
+    /// for every 39-7 PANEL reviewer cell. Reviewer llm-calls now declare
+    /// <c>documentType="review"</c> (SingleReviewerWorkflow — the call
+    /// produces a Review), so the API's 39-9 content-validation ring
+    /// validates the reply against the REVIEW registry validator, which the
+    /// legacy verdict shape does not satisfy. The subject is placeholder
+    /// data: 39-7's MapReviewerReply overrides it with the caller's
+    /// authoritative subject.
+    /// </summary>
+    public const string CanonicalReviewApprove =
+        """{"subject":{"kind":"document","documentId":"0192a8b0-0000-7abc-8def-00000000e2e0","documentType":"plan"},"decision":"approve","summary":"Scripted review: approved with no blocking issues.","issues":[]}""";
+
     /// <summary>Deploy/rollback stage reply — DeploymentPipelineWorkflow's
     /// ExtractStageResult is fail-closed and requires an explicit
     /// <c>status:"success"</c>.</summary>
@@ -70,17 +83,19 @@ public static class ScriptedCycleLibrary
             ["architect/context-scan"] = ContextScanFindings,
             ["product_owner/summarize-stakeholder"] = PoSummary,
 
-            // ── review cells (task review + the 39-7 reviewer panel roster;
-            //    one legacy-verdict approval serves both consumers) ──
-            ["architect/plan-review"] = ApproveReviewVerdict,
-            ["senior_developer/plan-review"] = ApproveReviewVerdict,
-            ["security/plan-review-security"] = ApproveReviewVerdict,
-            ["developer/review-feasibility"] = ApproveReviewVerdict,
-            ["tester/review-testability"] = ApproveReviewVerdict,
-            ["devops/review-operability"] = ApproveReviewVerdict,
-            ["product_owner/review-scope"] = ApproveReviewVerdict,
-            ["tech_writer/review-docs"] = ApproveReviewVerdict,
-            ["ux_designer/review-design"] = ApproveReviewVerdict,
+            // ── the 39-7 reviewer PANEL roster: CANONICAL Review approvals —
+            //    these calls declare documentType="review" and the 39-9 ring
+            //    validates them against the Review registry validator
+            //    (2026-08-13; the legacy verdict shape fails that ring) ──
+            ["architect/plan-review"] = CanonicalReviewApprove,
+            ["senior_developer/plan-review"] = CanonicalReviewApprove,
+            ["security/plan-review-security"] = CanonicalReviewApprove,
+            ["developer/review-feasibility"] = CanonicalReviewApprove,
+            ["tester/review-testability"] = CanonicalReviewApprove,
+            ["devops/review-operability"] = CanonicalReviewApprove,
+            ["product_owner/review-scope"] = CanonicalReviewApprove,
+            ["tech_writer/review-docs"] = CanonicalReviewApprove,
+            ["ux_designer/review-design"] = CanonicalReviewApprove,
 
             // ── code review + guidance (CodeReviewWorkflow stores the text) ──
             ["senior_developer/code-review"] = ApproveReviewVerdict,
@@ -109,8 +124,7 @@ public static class ScriptedCycleLibrary
             //    subject is placeholder data: every consumer (39-7's
             //    MapReviewerReply) overrides it with the caller's authoritative
             //    subject. ──
-            ["@review"] =
-                """{"subject":{"kind":"document","documentId":"0192a8b0-0000-7abc-8def-00000000e2e0","documentType":"plan"},"decision":"approve","summary":"Scripted review: approved with no blocking issues.","issues":[]}""",
+            ["@review"] = CanonicalReviewApprove,
         };
 
     /// <summary>

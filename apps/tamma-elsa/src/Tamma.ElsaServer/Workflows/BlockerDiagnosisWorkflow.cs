@@ -82,37 +82,37 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         // ============================================
         // Workflow Variables
         // ============================================
-        var sessionId = builder.WithVariable<Guid>();
-        var storyId = builder.WithVariable<string>();
-        var juniorId = builder.WithVariable<string>();
-        var tenantId = builder.WithVariable<string>();
-        var skillLevel = builder.WithVariable<int>();
-        var blockerContext = builder.WithVariable<string?>();
-        var repository = builder.WithVariable<string>();
-        var branchName = builder.WithVariable<string>();
+        var sessionId = builder.WithVariable<Guid>().Persisted();
+        var storyId = builder.WithVariable<string>().Persisted();
+        var juniorId = builder.WithVariable<string>().Persisted();
+        var tenantId = builder.WithVariable<string>().Persisted();
+        var skillLevel = builder.WithVariable<int>().Persisted();
+        var blockerContext = builder.WithVariable<string?>().Persisted();
+        var repository = builder.WithVariable<string>().Persisted();
+        var branchName = builder.WithVariable<string>().Persisted();
 
         // Signal variables
-        var gitSignal = builder.WithVariable<GitActivitySignal>();
-        var ciSignal = builder.WithVariable<CIStatusSignal>();
-        var inactivitySignal = builder.WithVariable<InactivitySignal>();
-        var communicationSignal = builder.WithVariable<CommunicationSignal>();
-        var aggregatedSignals = builder.WithVariable<AggregatedSignals>();
+        var gitSignal = builder.WithVariable<GitActivitySignal>().Persisted();
+        var ciSignal = builder.WithVariable<CIStatusSignal>().Persisted();
+        var inactivitySignal = builder.WithVariable<InactivitySignal>().Persisted();
+        var communicationSignal = builder.WithVariable<CommunicationSignal>().Persisted();
+        var aggregatedSignals = builder.WithVariable<AggregatedSignals>().Persisted();
 
         // Diagnosis variables
-        var llmDiagnosisOutput = builder.WithVariable<IDictionary<string, object>?>();
-        var diagnosisResult = builder.WithVariable<BlockerDiagnosisResult>();
+        var llmDiagnosisOutput = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var diagnosisResult = builder.WithVariable<BlockerDiagnosisResult>().Persisted();
 
         // Resolution tracking
-        var currentLevel = builder.WithVariable<string>("Hint");
-        var attempts = builder.WithVariable<int>(0);
-        var feedbackProvided = builder.WithVariable<List<string>>();
-        var startTime = builder.WithVariable<DateTime>();
-        var isResolved = builder.WithVariable<bool>(false);
-        var progressDetected = builder.WithVariable<bool>(false);
-        var progressTimedOut = builder.WithVariable<bool>(false);
-        var progressResult = builder.WithVariable<ProgressDetectionResult>();
+        var currentLevel = builder.WithVariable<string>("Hint").Persisted();
+        var attempts = builder.WithVariable<int>(0).Persisted();
+        var feedbackProvided = builder.WithVariable<List<string>>().Persisted();
+        var startTime = builder.WithVariable<DateTime>().Persisted();
+        var isResolved = builder.WithVariable<bool>(false).Persisted();
+        var progressDetected = builder.WithVariable<bool>(false).Persisted();
+        var progressTimedOut = builder.WithVariable<bool>(false).Persisted();
+        var progressResult = builder.WithVariable<ProgressDetectionResult>().Persisted();
         // Escalation SLA expired with no senior response → terminal Timeout (7-1G AC2).
-        var timedOut = builder.WithVariable<bool>(false);
+        var timedOut = builder.WithVariable<bool>(false).Persisted();
 
         // ============================================
         // Activities

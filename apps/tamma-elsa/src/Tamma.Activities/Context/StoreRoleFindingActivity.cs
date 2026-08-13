@@ -64,8 +64,14 @@ public class StoreRoleFindingActivity : TammaAsyncActivity
         var role = Role.Get(context);
         var findings = FindingsJson.Get(context);
 
-        var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (string.IsNullOrEmpty(callbackUrl) || _httpClientFactory == null)
+        // 2026-08-13 (engine-driven E2E): store-rehydrated activities are built
+        // by the [JsonConstructor] with NULL ctor-injected members — resolve
+        // from the execution context (ctor-or-GetService idiom).
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+        var httpClientFactory = _httpClientFactory ?? context.GetService<IHttpClientFactory>();
+
+        var callbackUrl = configuration?["Engine:CallbackUrl"];
+        if (string.IsNullOrEmpty(callbackUrl) || httpClientFactory == null)
         {
             // Mock: return fake context ID
             ContextId.Set(context, $"ctx:{issueNum}:{role}");
@@ -74,7 +80,7 @@ public class StoreRoleFindingActivity : TammaAsyncActivity
 
         try
         {
-            var httpClient = _httpClientFactory.CreateClient();
+            var httpClient = httpClientFactory.CreateClient();
 
             var response = await httpClient.PostAsJsonAsync(
                 $"{callbackUrl.TrimEnd('/')}/api/engine/store-context",

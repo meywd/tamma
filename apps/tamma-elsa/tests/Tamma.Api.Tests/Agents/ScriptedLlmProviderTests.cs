@@ -142,8 +142,17 @@ public class ScriptedLlmProviderTests
     }
 
     [Test]
-    public void Respond_KeyResolutionOrder_QualifiedThenTypeDefaultThenBareCell()
+    public void Respond_KeyResolutionOrder_QualifiedThenBareCellThenTypeDefault()
     {
+        // 2026-08-13 correction (found by the engine-driven E2E): the BARE
+        // role/action cell now outranks the @{documentType} default. A reviewer
+        // llm-call carries the SUBJECT's documentType (a plan review arrives as
+        // documentType='plan'), and the original order answered it with the PLAN
+        // example instead of the reviewer cell — every panel member's reply then
+        // failed Review validation until exhaustion (48× VALIDATED.FAILED, four
+        // REVIEW_PANEL_UNDECIDABLE in one run). An explicitly scripted
+        // role/action is always more specific than whatever document type the
+        // call happens to carry.
         var overrides = new Dictionary<string, string>
         {
             ["architect/plan-system-design@plan"] = "QUALIFIED",
@@ -161,7 +170,16 @@ public class ScriptedLlmProviderTests
             ["architect/plan-system-design"] = "BARE",
         });
         withoutQualified.Respond(new ScriptedLlmCall("scripted", "architect", "plan-system-design", "plan", "m", "c"))
-            .ResponseText.Should().Be("TYPE-DEFAULT");
+            .ResponseText.Should().Be("BARE",
+                "the scripted role/action cell must beat the per-document-type default");
+
+        var typeDefaultOnly = new ScriptedLlmResponder(new Dictionary<string, string>
+        {
+            ["@plan"] = "TYPE-DEFAULT",
+        });
+        typeDefaultOnly.Respond(new ScriptedLlmCall("scripted", "architect", "plan-system-design", "plan", "m", "c"))
+            .ResponseText.Should().Be("TYPE-DEFAULT",
+                "with no role/action cell the per-type default still serves");
 
         // No documentType ⇒ the bare cell serves.
         responder.Respond(new ScriptedLlmCall("scripted", "architect", "plan-system-design", null, "m", "c"))

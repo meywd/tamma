@@ -70,11 +70,27 @@ public static class CiWaitEndpoints
         string? TenantId,
         DateTimeOffset CreatedAt);
 
+    /// <summary>
+    /// 2026-08-13 (engine-driven E2E follow-up) — the optional result fields
+    /// are ADDITIVE: <c>WaitForCIResultsActivity.OnResumeAsync</c> has always
+    /// read TotalTests/PassedTests/FailedTests/CoveragePercentage/LintWarnings/
+    /// LintErrors from the resume input, but this endpoint only forwarded
+    /// Status+BuildPassed — so every DG-5 resume scored coverage 0 and the
+    /// quality gate classified a green build CRITICAL (coverage gap &gt; 20).
+    /// Null fields are omitted from the input, preserving the activity's
+    /// existing defaults byte-for-byte for old callers.
+    /// </summary>
     public sealed record ResumeRequest(
         string BookmarkId,
         string? RunId,
         string? Status,
-        bool BuildPassed);
+        bool BuildPassed,
+        int? TotalTests = null,
+        int? PassedTests = null,
+        int? FailedTests = null,
+        double? CoveragePercentage = null,
+        int? LintWarnings = null,
+        int? LintErrors = null);
 
     private static readonly JsonSerializerOptions PayloadJson = new()
     {
@@ -175,6 +191,15 @@ public static class CiWaitEndpoints
             ["Status"] = request.Status ?? "Unknown",
             ["BuildPassed"] = request.BuildPassed,
         };
+
+        // Additive result fields (2026-08-13) — forwarded ONLY when supplied,
+        // with the exact CLR types OnResumeAsync pattern-matches (int/double).
+        if (request.TotalTests is { } tt) input["TotalTests"] = tt;
+        if (request.PassedTests is { } pt) input["PassedTests"] = pt;
+        if (request.FailedTests is { } ft) input["FailedTests"] = ft;
+        if (request.CoveragePercentage is { } cp) input["CoveragePercentage"] = cp;
+        if (request.LintWarnings is { } lw) input["LintWarnings"] = lw;
+        if (request.LintErrors is { } le) input["LintErrors"] = le;
 
         var client = await workflowRuntime
             .CreateClientAsync(bookmark.WorkflowInstanceId, ct)

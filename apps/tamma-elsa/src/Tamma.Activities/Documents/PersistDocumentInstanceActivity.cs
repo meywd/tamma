@@ -87,6 +87,7 @@ public class PersistDocumentInstanceActivity : Activity
         }
 
         _logger?.LogInformation("Persisted document instance (tenant {Tenant})", tenantId);
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
     }
 
     private static TammaError Failed(string message, Exception? inner) => new(

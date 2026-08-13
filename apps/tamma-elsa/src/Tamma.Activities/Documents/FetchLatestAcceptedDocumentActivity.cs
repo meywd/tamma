@@ -84,6 +84,7 @@ public class FetchLatestAcceptedDocumentActivity : Activity
         {
             _logger?.LogWarning(
                 "No ILifecycleReEntryService registered; FetchLatestAcceptedDocument reports not-found (fail-closed).");
+            await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete
             return;
         }
 
@@ -92,7 +93,10 @@ public class FetchLatestAcceptedDocumentActivity : Activity
         var tenantId = DocumentEvents.ParseTenantId(TenantId.Get(context));
 
         if (string.IsNullOrWhiteSpace(issueId) || string.IsNullOrWhiteSpace(documentType))
+        {
+            await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete
             return;
+        }
 
         try
         {
@@ -103,13 +107,19 @@ public class FetchLatestAcceptedDocumentActivity : Activity
             // Only a Complete position carries an ACCEPTED revision (D8 compose path).
             if (position.ResumeAt != LifecycleResumeStage.Complete ||
                 position.ExistingDocumentId is not Guid docId)
+            {
+                await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete
                 return;
+            }
 
             var envelope = await service
                 .GetDocumentBodyAsync(tenantId, docId, context.CancellationToken)
                 .ConfigureAwait(false);
             if (envelope is null)
+            {
+                await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete
                 return;
+            }
 
             var revision = position.ExistingRevision ?? 1;
             var rounds = Enumerable.Range(1, Math.Max(revision, 1)).ToArray();
@@ -132,5 +142,6 @@ public class FetchLatestAcceptedDocumentActivity : Activity
                 "FetchLatestAcceptedDocument read failed for issue {IssueId} type {DocumentType}; reporting not-found.",
                 issueId, documentType);
         }
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
     }
 }

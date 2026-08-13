@@ -50,35 +50,35 @@ public class DebugDiagnosisWorkflow : WorkflowBase
         builder.Description = "Produce a typed root-cause Diagnosis via the generic document lifecycle (produce → validate → review → revise → accept)";
 
         // ── Inputs (debug context carried into the producer cell) ──────
-        var sessionId       = builder.WithVariable<string>("SessionId", "");
-        var issueId         = builder.WithVariable<string>("IssueId", "");
-        var mode            = builder.WithVariable<string>("Mode", "RuntimeError");
-        var errorContext    = builder.WithVariable<string>("ErrorContext", "");
-        var codeContext     = builder.WithVariable<string>("CodeContext", "");
-        var gitContext      = builder.WithVariable<string>("GitContext", "");
-        var testContext     = builder.WithVariable<string>("TestContext", "");
-        var reproContext    = builder.WithVariable<string>("ReproductionContext", "");
-        var previousContext = builder.WithVariable<string>("PreviousContext", "");
-        var supersedesDocId = builder.WithVariable<string>("SupersedesDocumentId", "");
-        var tenantId        = builder.WithVariable<string>("TenantId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+        var sessionId       = builder.WithVariable<string>("SessionId", "").Persisted();
+        var issueId         = builder.WithVariable<string>("IssueId", "").Persisted();
+        var mode            = builder.WithVariable<string>("Mode", "RuntimeError").Persisted();
+        var errorContext    = builder.WithVariable<string>("ErrorContext", "").Persisted();
+        var codeContext     = builder.WithVariable<string>("CodeContext", "").Persisted();
+        var gitContext      = builder.WithVariable<string>("GitContext", "").Persisted();
+        var testContext     = builder.WithVariable<string>("TestContext", "").Persisted();
+        var reproContext    = builder.WithVariable<string>("ReproductionContext", "").Persisted();
+        var previousContext = builder.WithVariable<string>("PreviousContext", "").Persisted();
+        var supersedesDocId = builder.WithVariable<string>("SupersedesDocumentId", "").Persisted();
+        var tenantId        = builder.WithVariable<string>("TenantId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
 
         // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
-        var assessmentFound = builder.WithVariable<bool>();
-        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
+        var assessmentFound = builder.WithVariable<bool>().Persisted();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}").Persisted();
 
         // ── 39-10 re-entry position (D8) ───────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson  = builder.WithVariable<string>();
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson  = builder.WithVariable<string>().Persisted();
 
         // ── Dispatched-workflow result + typed exit ────────────────────
-        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
-        var lifecycleAccepted = builder.WithVariable<bool>();
-        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
-        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
-        var hypothesesJson  = builder.WithVariable<string>("HypothesesJson", "[]");
-        var failureReason   = builder.WithVariable<string>("FailureReason", "");
-        var outputStatus    = builder.WithVariable<string>("OutputStatus", "");
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var lifecycleAccepted = builder.WithVariable<bool>().Persisted();
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "").Persisted();
+        var hypothesesJson  = builder.WithVariable<string>("HypothesesJson", "[]").Persisted();
+        var failureReason   = builder.WithVariable<string>("FailureReason", "").Persisted();
+        var outputStatus    = builder.WithVariable<string>("OutputStatus", "").Persisted();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable

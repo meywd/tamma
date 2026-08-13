@@ -85,8 +85,14 @@ public class CheckLimitsActivity : TammaOutcomeActivity
             return;
         }
 
-        // All checks passed
-        StopReason.Set(context, null);
+        // All checks passed.
+        // 2026-08-13 (found by the engine-driven E2E): a literal `null` here
+        // binds to Elsa's Set(Output<T>, ctx, Variable<T>) overload, whose null
+        // Variable dereference throws NRE — so the HAPPY path of this activity
+        // ALWAYS faulted and the orchestrator could never reach DispatchCycle.
+        // The typed empty string keeps the "empty if continuing" output
+        // contract while binding to the value overload.
+        StopReason.Set(context, string.Empty);
         Logger?.LogInformation(
             "Limits OK: {Active}/{Max} active instances",
             activeCount, maxConcurrent);

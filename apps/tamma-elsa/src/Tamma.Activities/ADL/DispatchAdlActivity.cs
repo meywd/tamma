@@ -60,14 +60,6 @@ public class DispatchAdlActivity : TammaAsyncActivity
 
         var configJson = ConfigJson.Get(context);
 
-        var request = new DispatchWorkflowDefinitionRequest("adl-orchestrator")
-        {
-            Input = new Dictionary<string, object>
-            {
-                ["configJson"] = configJson,
-            },
-        };
-
         // DURABILITY (loop restart) — this dispatch is the ONLY thing that starts the
         // next ADL cycle: there is no cron trigger and no watchdog re-dispatching
         // `adl-orchestrator`. It is also the LAST step of the instance it restarts, so
@@ -76,12 +68,27 @@ public class DispatchAdlActivity : TammaAsyncActivity
         // a human dispatches one by hand. A transient blip (broker/DB/dispatcher) must
         // therefore never propagate: retry with backoff, and if every attempt fails,
         // say so at Critical rather than throwing. Deliberately bounded and short —
-        // this is an in-process dispatch, not an external API call.
+        // this is an in-process dispatch, not an external API call. The version-id
+        // resolve (2026-08-13 — the request ctor takes the VERSION id, not the
+        // definition id; see PublishedWorkflowDispatch) lives INSIDE the retry for
+        // the same reason.
         const int maxAttempts = 3;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             try
             {
+                var definitionVersionId = await Tamma.Activities.Core.PublishedWorkflowDispatch
+                    .ResolvePublishedVersionIdAsync(
+                        context.GetRequiredService<Elsa.Workflows.Management.IWorkflowDefinitionService>(),
+                        "adl-orchestrator");
+                var request = new DispatchWorkflowDefinitionRequest(definitionVersionId)
+                {
+                    Input = new Dictionary<string, object>
+                    {
+                        ["configJson"] = configJson,
+                    },
+                };
+
                 await dispatcher.DispatchAsync(request, default);
                 Logger?.LogInformation("Dispatched new ADL Orchestrator cycle");
                 return;

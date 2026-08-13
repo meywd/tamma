@@ -79,26 +79,27 @@ public class EmitDomainLifecycleEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? "";
+        var type = EventType.GetOrDefault(context) ?? "";
         var evt = BuildTammaEvent(
             type,
-            IssueId.Get(context),
-            Repository.Get(context),
-            CorrelationId.Get(context),
-            ParseTenantId(TenantId.Get(context)),
-            DocumentId.Get(context),
-            Detail.Get(context),
-            DataJson.Get(context));
+            IssueId.GetOrDefault(context),
+            Repository.GetOrDefault(context),
+            CorrelationId.GetOrDefault(context),
+            ParseTenantId(TenantId.GetOrDefault(context)),
+            DocumentId.GetOrDefault(context),
+            Detail.GetOrDefault(context),
+            DataJson.GetOrDefault(context));
 
         TammaEventEmitter.Emit(context, this, _logger, evt);
 
         _logger?.LogInformation(
             "Emitted {Type} for issue {Issue} document {Doc}",
-            type, IssueId.Get(context), DocumentId.Get(context));
+            type, IssueId.GetOrDefault(context), DocumentId.GetOrDefault(context));
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

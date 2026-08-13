@@ -80,19 +80,19 @@ public class EmitTriageCycleEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? TriageCycleEvents.Failed;
-        var repository = Repository.Get(context) ?? "";
-        var itemKey = ItemKey.Get(context);
-        var itemNumber = ItemNumber.Get(context);
-        var tenantId = TriageCycleEvents.ParseTenantId(TenantId.Get(context));
-        var itemSource = ItemSource.Get(context);
-        var type2 = Type.Get(context);
-        var priority = Priority.Get(context);
-        var automation = Automation.Get(context);
-        var decisionStatus = DecisionStatus.Get(context);
-        var reason = Reason.Get(context);
+        var type = EventType.GetOrDefault(context) ?? TriageCycleEvents.Failed;
+        var repository = Repository.GetOrDefault(context) ?? "";
+        var itemKey = ItemKey.GetOrDefault(context);
+        var itemNumber = ItemNumber.GetOrDefault(context);
+        var tenantId = TriageCycleEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var itemSource = ItemSource.GetOrDefault(context);
+        var type2 = Type.GetOrDefault(context);
+        var priority = Priority.GetOrDefault(context);
+        var automation = Automation.GetOrDefault(context);
+        var decisionStatus = DecisionStatus.GetOrDefault(context);
+        var reason = Reason.GetOrDefault(context);
 
         var evt = BuildTammaEvent(
             type, repository, itemKey, itemNumber, tenantId, itemSource,
@@ -104,7 +104,8 @@ public class EmitTriageCycleEventActivity : Activity
             "Emitted {Type} for {ItemKey} in {Repo} (source={Source}, status={Status})",
             type, itemKey, repository, itemSource, decisionStatus);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

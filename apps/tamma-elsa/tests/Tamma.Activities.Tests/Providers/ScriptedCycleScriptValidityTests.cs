@@ -176,8 +176,26 @@ public class ScriptedCycleScriptValidityTests
             response.Success.Should().BeTrue(
                 $"reviewer cell ({role.ToWire()}, {action.ToWire()}) must be scripted — " +
                 "the 39-7 panel roster dispatches it");
-            response.ResponseText.Should().Be(ScriptedCycleLibrary.ApproveReviewVerdict);
+            // 2026-08-13: panel reviewer cells serve the CANONICAL Review —
+            // reviewer llm-calls declare documentType="review" and the 39-9
+            // ring validates them against the Review registry validator,
+            // which the legacy verdict shape does not satisfy.
+            response.ResponseText.Should().Be(ScriptedCycleLibrary.CanonicalReviewApprove);
         }
+    }
+
+    [Test]
+    public void CanonicalReviewApprove_PassesTheReviewRegistryValidator()
+    {
+        // The exact ring the reviewer replies now go through: the Review
+        // document type's registry validator (documentType="review").
+        var type = Tamma.Core.Documents.DocumentTypeRegistry.Resolve("review");
+        using var doc = JsonDocument.Parse(ScriptedCycleLibrary.CanonicalReviewApprove);
+        var result = type.Validate(doc.RootElement);
+        result.IsValid.Should().BeTrue(
+            "the scripted canonical approve must pass the Review validator, or every " +
+            $"panel member exhausts the 39-9 repair ring (violations: " +
+            $"[{string.Join("; ", result.Violations.Select(v => v.Message))}])");
     }
 
     // ── chain resolution: config-driven provider selection ──

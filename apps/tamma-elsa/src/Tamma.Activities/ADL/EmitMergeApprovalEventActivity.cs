@@ -68,15 +68,15 @@ public class EmitMergeApprovalEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? MergeApprovalEvents.Escalated;
-        var issueNumber = IssueNumber.Get(context);
-        var prNumber = PrNumber.Get(context);
-        var tenantId = MergeApprovalEvents.ParseTenantId(TenantId.Get(context));
-        var decision = Decision.Get(context);
-        var approver = Approver.Get(context);
-        var feedback = Feedback.Get(context);
+        var type = EventType.GetOrDefault(context) ?? MergeApprovalEvents.Escalated;
+        var issueNumber = IssueNumber.GetOrDefault(context);
+        var prNumber = PrNumber.GetOrDefault(context);
+        var tenantId = MergeApprovalEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var decision = Decision.GetOrDefault(context);
+        var approver = Approver.GetOrDefault(context);
+        var feedback = Feedback.GetOrDefault(context);
 
         var evt = BuildTammaEvent(type, issueNumber, prNumber, tenantId, decision, approver, feedback);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -85,7 +85,8 @@ public class EmitMergeApprovalEventActivity : Activity
             "Emitted {Type} for issue #{Issue} pr #{Pr} (decision={Decision}, approver={Approver})",
             type, issueNumber, prNumber, decision ?? "", approver ?? "");
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

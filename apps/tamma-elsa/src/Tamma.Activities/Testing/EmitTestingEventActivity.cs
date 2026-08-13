@@ -85,34 +85,35 @@ public class EmitTestingEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? TestingEvents.GateFailed;
+        var type = EventType.GetOrDefault(context) ?? TestingEvents.GateFailed;
 
         var evt = BuildTammaEvent(
             type,
-            sessionId: SessionId.Get(context),
-            repository: Repository.Get(context),
-            branch: Branch.Get(context),
-            runId: RunId.Get(context),
-            tenantId: TestingEvents.ParseTenantId(TenantId.Get(context)),
-            attempt: Attempt.Get(context),
-            maxAttempts: MaxAttempts.Get(context),
-            outcome: Outcome.Get(context),
-            score: Score.Get(context),
-            skillLevel: SkillLevel.Get(context),
-            filesChanged: FilesChanged.Get(context),
-            escalationReason: EscalationReason.Get(context),
-            errorDetail: ErrorDetail.Get(context));
+            sessionId: SessionId.GetOrDefault(context),
+            repository: Repository.GetOrDefault(context),
+            branch: Branch.GetOrDefault(context),
+            runId: RunId.GetOrDefault(context),
+            tenantId: TestingEvents.ParseTenantId(TenantId.GetOrDefault(context)),
+            attempt: Attempt.GetOrDefault(context),
+            maxAttempts: MaxAttempts.GetOrDefault(context),
+            outcome: Outcome.GetOrDefault(context),
+            score: Score.GetOrDefault(context),
+            skillLevel: SkillLevel.GetOrDefault(context),
+            filesChanged: FilesChanged.GetOrDefault(context),
+            escalationReason: EscalationReason.GetOrDefault(context),
+            errorDetail: ErrorDetail.GetOrDefault(context));
 
         TammaEventEmitter.Emit(context, this, _logger, evt);
 
         _logger?.LogInformation(
             "Emitted {Type} for session {Session} repo {Repo} (run={Run}, attempt={Attempt}/{Max}, outcome={Outcome})",
-            type, SessionId.Get(context), Repository.Get(context), RunId.Get(context),
-            Attempt.Get(context), MaxAttempts.Get(context), Outcome.Get(context));
+            type, SessionId.GetOrDefault(context), Repository.GetOrDefault(context), RunId.GetOrDefault(context),
+            Attempt.GetOrDefault(context), MaxAttempts.GetOrDefault(context), Outcome.GetOrDefault(context));
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

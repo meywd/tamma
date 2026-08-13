@@ -54,31 +54,31 @@ public class SingleReviewerWorkflow : WorkflowBase
 
         // ── Data-driven dispatch inputs (default "" so the drift scanner sees the
         //    one llm-call dispatch as DATA-DRIVEN, D9) ──
-        var reviewerRole = builder.WithVariable<string>("ReviewerRole", "");
-        var reviewerAction = builder.WithVariable<string>("ReviewerAction", "");
-        var variablesJson = builder.WithVariable<string>("VariablesJson", "{}");
-        var documentTypeKey = builder.WithVariable<string>("DocumentTypeKey", "");
+        var reviewerRole = builder.WithVariable<string>("ReviewerRole", "").Persisted();
+        var reviewerAction = builder.WithVariable<string>("ReviewerAction", "").Persisted();
+        var variablesJson = builder.WithVariable<string>("VariablesJson", "{}").Persisted();
+        var documentTypeKey = builder.WithVariable<string>("DocumentTypeKey", "").Persisted();
 
         // ── Lineage + config scalars ──
-        var subjectJson = builder.WithVariable<string>("SubjectJson", "");
-        var feedbackVariableName = builder.WithVariable<string>("FeedbackVariableName", ReviewProducerHelper.DefaultFeedbackVariable);
-        var issueId = builder.WithVariable<string>("IssueId", "");
-        var correlationId = builder.WithVariable<string>("CorrelationId", "");
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var maxRepairAttempts = builder.WithVariable<int>("MaxRepairAttempts", AcceptanceDefaults.DefaultMaxValidationRepairAttempts);
-        var attempts = builder.WithVariable<int>("Attempts", 0);
+        var subjectJson = builder.WithVariable<string>("SubjectJson", "").Persisted();
+        var feedbackVariableName = builder.WithVariable<string>("FeedbackVariableName", ReviewProducerHelper.DefaultFeedbackVariable).Persisted();
+        var issueId = builder.WithVariable<string>("IssueId", "").Persisted();
+        var correlationId = builder.WithVariable<string>("CorrelationId", "").Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
+        var maxRepairAttempts = builder.WithVariable<int>("MaxRepairAttempts", AcceptanceDefaults.DefaultMaxValidationRepairAttempts).Persisted();
+        var attempts = builder.WithVariable<int>("Attempts", 0).Persisted();
 
         // ── Dispatch result + routing ──
-        var llmResult = builder.WithVariable<IDictionary<string, object>?>();
-        var everSucceededCall = builder.WithVariable<bool>("EverSucceededCall", false);
-        var validationOk = builder.WithVariable<bool>("ValidationOk", false);
+        var llmResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var everSucceededCall = builder.WithVariable<bool>("EverSucceededCall", false).Persisted();
+        var validationOk = builder.WithVariable<bool>("ValidationOk", false).Persisted();
 
         // ── Outputs ──
-        var reviewJson = builder.WithVariable<string>("ReviewJson", "");
-        var reviewEnvelopeJson = builder.WithVariable<string>("ReviewEnvelopeJson", "");
-        var reviewDocumentId = builder.WithVariable<string>("ReviewDocumentId", "");
-        var violationsJson = builder.WithVariable<string>("ViolationsJson", "[]");
-        var failureKind = builder.WithVariable<string>("FailureKind", "");
+        var reviewJson = builder.WithVariable<string>("ReviewJson", "").Persisted();
+        var reviewEnvelopeJson = builder.WithVariable<string>("ReviewEnvelopeJson", "").Persisted();
+        var reviewDocumentId = builder.WithVariable<string>("ReviewDocumentId", "").Persisted();
+        var violationsJson = builder.WithVariable<string>("ViolationsJson", "[]").Persisted();
+        var failureKind = builder.WithVariable<string>("FailureKind", "").Persisted();
 
         // ================================================================
         // Init — resolve reviewer (role, action) fail-loud (AC4), seed config
@@ -134,7 +134,15 @@ public class SingleReviewerWorkflow : WorkflowBase
                 ["agentRole"] = reviewerRole.Get(ctx) ?? "",
                 ["action"] = reviewerAction.Get(ctx) ?? "",
                 ["tenantId"] = tenantId.Get(ctx) ?? "",
-                ["documentType"] = documentTypeKey.Get(ctx) ?? "",
+                // 2026-08-13 (engine-driven E2E): the llm-call's documentType
+                // names the type of document THIS CALL PRODUCES — a reviewer
+                // call produces a REVIEW, not the subject's type. Passing the
+                // SUBJECT type here made the API's 39-9 content-validation
+                // ring validate every reviewer reply against the subject's
+                // validator (a plan review was ring-validated as a PLAN), so
+                // every reviewer call exhausted the repair ring and failed
+                // CONTENT_VALIDATION_FAILED before MapAndValidate ever ran.
+                ["documentType"] = "review",
                 ["issueId"] = issueId.Get(ctx) ?? "",
                 ["variables"] = ParseVarsDict(variablesJson.Get(ctx)),
                 ["enableTools"] = false,

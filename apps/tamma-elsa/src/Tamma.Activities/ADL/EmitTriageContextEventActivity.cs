@@ -67,15 +67,15 @@ public class EmitTriageContextEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? TriageContextEvents.Failed;
-        var repository = Repository.Get(context) ?? "";
-        var itemNumber = ItemNumber.Get(context);
-        var tenantId = TriageContextEvents.ParseTenantId(TenantId.Get(context));
-        var itemType = ItemType.Get(context);
-        var contextStatus = ContextStatus.Get(context);
-        var contextJsonLength = ContextJsonLength.Get(context);
+        var type = EventType.GetOrDefault(context) ?? TriageContextEvents.Failed;
+        var repository = Repository.GetOrDefault(context) ?? "";
+        var itemNumber = ItemNumber.GetOrDefault(context);
+        var tenantId = TriageContextEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var itemType = ItemType.GetOrDefault(context);
+        var contextStatus = ContextStatus.GetOrDefault(context);
+        var contextJsonLength = ContextJsonLength.GetOrDefault(context);
 
         var evt = BuildTammaEvent(type, repository, itemNumber, tenantId, itemType, contextStatus, contextJsonLength);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -84,7 +84,8 @@ public class EmitTriageContextEventActivity : Activity
             "Emitted {Type} for item #{Item} in {Repo} (itemType={ItemType}, status={Status}, len={Len})",
             type, itemNumber, repository, itemType, contextStatus, contextJsonLength);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

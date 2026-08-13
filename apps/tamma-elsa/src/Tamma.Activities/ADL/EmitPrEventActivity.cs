@@ -74,14 +74,14 @@ public class EmitPrEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? PrEvents.CreatedFailed;
-        var issueNumber = IssueNumber.Get(context);
-        var repository = Repository.Get(context) ?? "";
-        var prNumber = PrNumber.Get(context);
-        var tenantId = PrEvents.ParseTenantId(TenantId.Get(context));
-        var dataJson = DataJson.Get(context);
+        var type = EventType.GetOrDefault(context) ?? PrEvents.CreatedFailed;
+        var issueNumber = IssueNumber.GetOrDefault(context);
+        var repository = Repository.GetOrDefault(context) ?? "";
+        var prNumber = PrNumber.GetOrDefault(context);
+        var tenantId = PrEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var dataJson = DataJson.GetOrDefault(context);
 
         var data = ParseData(dataJson);
 
@@ -98,7 +98,8 @@ public class EmitPrEventActivity : Activity
             "Emitted {Type} for issue #{Issue} pr #{Pr} in {Repo}",
             type, issueNumber, prNumber, repository);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

@@ -83,6 +83,35 @@ public class GitRepoAuthorizerTests
         result.Allowed.Should().BeTrue();
     }
 
+    [Test]
+    public async Task SingleUser_PersonalTenantActing_NullInstallTenant_Allows()
+    {
+        // 2026-08-13 (engine-driven E2E): single-user is grant-EXISTENCE, not id
+        // equality. The sole user's PERSONAL tenant now binds ambient on
+        // service-plane calls (EnsurePersonalTenantMiddleware), while grant rows
+        // registered before/outside that tenant carry TenantId=null — strict
+        // equality made the sole user "cross-tenant" against their own grant.
+        InstallationForRepo(tenantId: null);
+
+        var result = await Build(TammaMode.SingleUser)
+            .AuthorizeAsync(TenantA, Repo);
+
+        result.Allowed.Should().BeTrue(
+            "in single-user mode there is exactly one principal — the sole user "
+            + "owns every installation row regardless of which tenant id is acting");
+    }
+
+    [Test]
+    public async Task SingleUser_NoInstallation_StillDenies()
+    {
+        // The grant-existence deny is unchanged: no registry row, no access.
+        NoInstallationForRepo();
+
+        var result = await Build(TammaMode.SingleUser).AuthorizeAsync(TenantA, Repo);
+
+        result.Allowed.Should().BeFalse("no installation row means no grant, in every mode");
+    }
+
     // ── SaaS: the F1 fail-open cases ────────────────────────────────────
 
     [Test]

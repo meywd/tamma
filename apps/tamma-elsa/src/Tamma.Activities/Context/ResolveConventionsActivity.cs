@@ -134,13 +134,23 @@ public class ResolveConventionsActivity : TammaAsyncActivity
         // fail-fast (caller bug — same contract as the prompt activity).
         ValidateTaxonomy(role, action);
 
-        var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (string.IsNullOrEmpty(callbackUrl) || _httpClientFactory == null)
+        // 2026-08-13 (engine-driven E2E): a store-rehydrated activity is built
+        // by the [JsonConstructor], so the ctor-injected members are NULL in
+        // the real engine — resolve from the execution context (the
+        // ctor-or-GetService idiom TriggerCIActivity/ApplyTriageResultActivity
+        // use). The old code also DISCARDED a configured Engine:CallbackUrl
+        // whenever the factory was null, sending every resolve to the
+        // localhost:3100 default.
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+        var httpClientFactory = _httpClientFactory ?? context.GetService<IHttpClientFactory>();
+
+        var callbackUrl = configuration?["Engine:CallbackUrl"];
+        if (string.IsNullOrEmpty(callbackUrl))
         {
-            // No API base configured AND no DI-injected client — try the
-            // PromptRegistry fallback URL (matches prompt-activity behaviour
-            // for parity in dev/test bootstrap).
-            callbackUrl = _configuration?["PromptRegistry:BaseUrl"] ?? "http://localhost:3100";
+            // No API base configured — try the PromptRegistry fallback URL
+            // (matches prompt-activity behaviour for parity in dev/test
+            // bootstrap).
+            callbackUrl = configuration?["PromptRegistry:BaseUrl"] ?? "http://localhost:3100";
         }
 
         // Production blocker fix — use the named "tamma-engine" client (wired
@@ -150,7 +160,7 @@ public class ResolveConventionsActivity : TammaAsyncActivity
         // this, the API returns 401 in production and the activity maps that
         // to a non-retryable NO_ROW — permanently failing the workflow before
         // any LLM runs.
-        var httpClient = _httpClientFactory?.CreateClient("tamma-engine") ?? new HttpClient();
+        var httpClient = httpClientFactory?.CreateClient("tamma-engine") ?? new HttpClient();
 
         var (body, source, version) = await CallResolveAsync(httpClient, callbackUrl!, role, action, tenantId, Logger);
 

@@ -63,20 +63,20 @@ public class MergeWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repositoryVar = builder.WithVariable<string>("Repository", "");
-        var prNumberVar = builder.WithVariable<int>("PrNumber", 0);
-        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0);
-        var branchNameVar = builder.WithVariable<string>("BranchName", "");
-        var mergeStrategyVar = builder.WithVariable<string>("MergeStrategy", MergePullRequestActivity.DefaultStrategy);
-        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
+        var repositoryVar = builder.WithVariable<string>("Repository", "").Persisted();
+        var prNumberVar = builder.WithVariable<int>("PrNumber", 0).Persisted();
+        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var branchNameVar = builder.WithVariable<string>("BranchName", "").Persisted();
+        var mergeStrategyVar = builder.WithVariable<string>("MergeStrategy", MergePullRequestActivity.DefaultStrategy).Persisted();
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "").Persisted();
 
-        var mergeShaVar = builder.WithVariable<string>("MergeSha", "");
-        var issueClosedVar = builder.WithVariable<bool>("IssueClosed", false);
-        var branchDeletedVar = builder.WithVariable<bool>("BranchDeleted", false);
-        var alreadyMergedVar = builder.WithVariable<bool>("AlreadyMerged", false);
-        var failureCodeVar = builder.WithVariable<string>("FailureCode", "");
-        var failureReasonVar = builder.WithVariable<string>("FailureReason", "");
-        var startedAtTicksVar = builder.WithVariable<long>("StartedAtTicks", 0);
+        var mergeShaVar = builder.WithVariable<string>("MergeSha", "").Persisted();
+        var issueClosedVar = builder.WithVariable<bool>("IssueClosed", false).Persisted();
+        var branchDeletedVar = builder.WithVariable<bool>("BranchDeleted", false).Persisted();
+        var alreadyMergedVar = builder.WithVariable<bool>("AlreadyMerged", false).Persisted();
+        var failureCodeVar = builder.WithVariable<string>("FailureCode", "").Persisted();
+        var failureReasonVar = builder.WithVariable<string>("FailureReason", "").Persisted();
+        var startedAtTicksVar = builder.WithVariable<long>("StartedAtTicks", 0).Persisted();
 
         // ================================================================
         // 1. Read inputs (the merge-approval gate dispatches repository/prNumber/

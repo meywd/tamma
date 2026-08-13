@@ -46,42 +46,42 @@ public class ResearchWorkflow : WorkflowBase
         builder.Description = "Investigate an issue/topic and synthesize a ranked, confidence-scored findings document via the generic document lifecycle";
 
         // ── Inputs ─────────────────────────────────────────────────────
-        var sessionId       = builder.WithVariable<Guid>();
-        var issueId         = builder.WithVariable<string>();
-        var topic           = builder.WithVariable<string>();
-        var repository      = builder.WithVariable<string>();
-        var issueNumber     = builder.WithVariable<int>();
-        var workItemJson    = builder.WithVariable<string>();
-        var tenantId        = builder.WithVariable<string>("TenantId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+        var sessionId       = builder.WithVariable<Guid>().Persisted();
+        var issueId         = builder.WithVariable<string>().Persisted();
+        var topic           = builder.WithVariable<string>().Persisted();
+        var repository      = builder.WithVariable<string>().Persisted();
+        var issueNumber     = builder.WithVariable<int>().Persisted();
+        var workItemJson    = builder.WithVariable<string>().Persisted();
+        var tenantId        = builder.WithVariable<string>("TenantId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
 
         // ── Context (consumes side) ────────────────────────────────────
-        var researchContext = builder.WithVariable<string>();
-        var contextIds      = builder.WithVariable<string>("[]");
+        var researchContext = builder.WithVariable<string>().Persisted();
+        var contextIds      = builder.WithVariable<string>("[]").Persisted();
 
         // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
-        var assessmentFound = builder.WithVariable<bool>();
-        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
+        var assessmentFound = builder.WithVariable<bool>().Persisted();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}").Persisted();
 
         // ── 39-10 re-entry position ────────────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson  = builder.WithVariable<string>();
-        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson  = builder.WithVariable<string>().Persisted();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce").Persisted();
 
         // ── Dispatched-workflow result containers ──────────────────────
-        var contextGatherResult = builder.WithVariable<IDictionary<string, object>?>();
-        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
+        var contextGatherResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ── Typed lifecycle exit ───────────────────────────────────────
-        var lifecycleAccepted = builder.WithVariable<bool>();
-        var exitStatus      = builder.WithVariable<string>("ExitStatus", "");
-        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
-        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
-        var reportJson      = builder.WithVariable<string>("ReportJson", "{}");
-        var findingCount    = builder.WithVariable<int>();
-        var confidence      = builder.WithVariable<double>();
-        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
-        var outputStatus    = builder.WithVariable<string>();
+        var lifecycleAccepted = builder.WithVariable<bool>().Persisted();
+        var exitStatus      = builder.WithVariable<string>("ExitStatus", "").Persisted();
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "").Persisted();
+        var reportJson      = builder.WithVariable<string>("ReportJson", "{}").Persisted();
+        var findingCount    = builder.WithVariable<int>().Persisted();
+        var confidence      = builder.WithVariable<double>().Persisted();
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "").Persisted();
+        var outputStatus    = builder.WithVariable<string>().Persisted();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable

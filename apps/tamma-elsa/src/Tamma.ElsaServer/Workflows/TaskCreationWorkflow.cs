@@ -59,39 +59,39 @@ public class TaskCreationWorkflow : WorkflowBase
         builder.Description = "Break the approved plan into detailed implementation tasks via the generic document lifecycle (produce → validate → review → revise → accept)";
 
         // ── Inputs (compat set + additive) ─────────────────────────────
-        var repository      = builder.WithVariable<string>("Repository", "");
-        var issueNumber     = builder.WithVariable<int>("IssueNumber", 0);
-        var planJson        = builder.WithVariable<string>("PlanJson", "");
-        var contextIds      = builder.WithVariable<string>("ContextIds", "[]");
-        var workItemJson    = builder.WithVariable<string>("WorkItemJson", "");
-        var tenantId        = builder.WithVariable<string>("TenantId", "");
-        var issueId         = builder.WithVariable<string>("IssueId", "");
-        var scopedIssueId   = builder.WithVariable<string>("ScopedIssueId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+        var repository      = builder.WithVariable<string>("Repository", "").Persisted();
+        var issueNumber     = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var planJson        = builder.WithVariable<string>("PlanJson", "").Persisted();
+        var contextIds      = builder.WithVariable<string>("ContextIds", "[]").Persisted();
+        var workItemJson    = builder.WithVariable<string>("WorkItemJson", "").Persisted();
+        var tenantId        = builder.WithVariable<string>("TenantId", "").Persisted();
+        var issueId         = builder.WithVariable<string>("IssueId", "").Persisted();
+        var scopedIssueId   = builder.WithVariable<string>("ScopedIssueId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
 
         // ── Consumed system plan (D2 lineage anchor) ───────────────────
-        var consumedPlanFound = builder.WithVariable<bool>();
-        var consumedPlanDocId = builder.WithVariable<string>("ConsumedPlanDocId", "");
-        var consumedPlanJson  = builder.WithVariable<string>("ConsumedPlanJson", "");
-        var consumedPlanLineage = builder.WithVariable<string>();
+        var consumedPlanFound = builder.WithVariable<bool>().Persisted();
+        var consumedPlanDocId = builder.WithVariable<string>("ConsumedPlanDocId", "").Persisted();
+        var consumedPlanJson  = builder.WithVariable<string>("ConsumedPlanJson", "").Persisted();
+        var consumedPlanLineage = builder.WithVariable<string>().Persisted();
 
         // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
-        var assessmentFound = builder.WithVariable<bool>();
-        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
+        var assessmentFound = builder.WithVariable<bool>().Persisted();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}").Persisted();
 
         // ── 39-10 re-entry position (D8) ───────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson  = builder.WithVariable<string>();
-        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson  = builder.WithVariable<string>().Persisted();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce").Persisted();
 
         // ── Dispatched-workflow result + typed exit ────────────────────
-        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
-        var lifecycleAccepted = builder.WithVariable<bool>();
-        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
-        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
-        var tasksJson       = builder.WithVariable<string>("TasksJson", "[]");
-        var outputStatus    = builder.WithVariable<string>();
-        var outputError     = builder.WithVariable<string>("OutputError", "");
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var lifecycleAccepted = builder.WithVariable<bool>().Persisted();
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "").Persisted();
+        var tasksJson       = builder.WithVariable<string>("TasksJson", "[]").Persisted();
+        var outputStatus    = builder.WithVariable<string>().Persisted();
+        var outputError     = builder.WithVariable<string>("OutputError", "").Persisted();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable

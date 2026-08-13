@@ -146,12 +146,21 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
         // activity emits FAILED and rethrows.
         ValidateTaxonomy(role, action);
 
+        // 2026-08-13 (engine-driven E2E): a store-rehydrated activity is built
+        // by the [JsonConstructor], so the ctor-injected members are NULL in
+        // the real engine — resolve from the execution context (the
+        // ctor-or-GetService idiom). The old code also DISCARDED a configured
+        // Engine:CallbackUrl whenever the factory was null, sending every
+        // prompt render to the localhost:3100 default.
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+        var httpClientFactory = _httpClientFactory ?? context.GetService<IHttpClientFactory>();
+
         // Try the prompt registry
-        var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (string.IsNullOrEmpty(callbackUrl) || _httpClientFactory == null)
+        var callbackUrl = configuration?["Engine:CallbackUrl"];
+        if (string.IsNullOrEmpty(callbackUrl))
         {
             // No API available — try local prompt registry URL
-            callbackUrl = _configuration?["PromptRegistry:BaseUrl"] ?? "http://localhost:3100";
+            callbackUrl = configuration?["PromptRegistry:BaseUrl"] ?? "http://localhost:3100";
         }
 
         // Production blocker fix — use the named "tamma-engine" client (wired
@@ -161,7 +170,7 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
         // configured. Without this, the API returns 401 in production and
         // the activity maps that to a non-retryable NO_ROW — permanently
         // failing the workflow before any LLM runs.
-        var httpClient = _httpClientFactory?.CreateClient("tamma-engine") ?? new HttpClient();
+        var httpClient = httpClientFactory?.CreateClient("tamma-engine") ?? new HttpClient();
 
         // Parse variables
         Dictionary<string, object>? variables = null;

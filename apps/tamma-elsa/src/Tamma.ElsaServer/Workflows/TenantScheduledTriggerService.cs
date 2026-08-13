@@ -217,6 +217,10 @@ public sealed class TenantScheduledTriggerService : BackgroundService
         }
 
         var dispatcher = scope.ServiceProvider.GetRequiredService<IWorkflowDispatcher>();
+        // 2026-08-13 — resolves definition VERSION ids for dispatch (see
+        // PublishedWorkflowDispatch; the request ctor takes the version id).
+        var definitionService = scope.ServiceProvider
+            .GetRequiredService<Elsa.Workflows.Management.IWorkflowDefinitionService>();
         var events = scope.ServiceProvider.GetService<IPlatformEventPublisher>();
         var now = _timeProvider.GetUtcNow();
 
@@ -264,7 +268,7 @@ public sealed class TenantScheduledTriggerService : BackgroundService
 
             try
             {
-                if (await FireDueWindowAsync(repository, dispatcher, events, trigger, now, ct)
+                if (await FireDueWindowAsync(repository, dispatcher, definitionService, events, trigger, now, ct)
                         .ConfigureAwait(false))
                 {
                     dispatched++;
@@ -289,7 +293,7 @@ public sealed class TenantScheduledTriggerService : BackgroundService
 
         // Admin run-now claims (D8): drain manual:{timestamp} ledger rows the
         // API claimed, through the same dispatch + stamp path.
-        dispatched += await DrainManualFiresAsync(repository, dispatcher, events, opts, dispatched, ct)
+        dispatched += await DrainManualFiresAsync(repository, dispatcher, definitionService, events, opts, dispatched, ct)
             .ConfigureAwait(false);
 
         // LOW-8 — give the claim-then-crash contract a real surface.
@@ -307,6 +311,7 @@ public sealed class TenantScheduledTriggerService : BackgroundService
     private async Task<bool> FireDueWindowAsync(
         IScheduledTriggerRepository repository,
         IWorkflowDispatcher dispatcher,
+        Elsa.Workflows.Management.IWorkflowDefinitionService definitionService,
         IPlatformEventPublisher? events,
         ScheduledTrigger trigger,
         DateTimeOffset now,
@@ -425,7 +430,8 @@ public sealed class TenantScheduledTriggerService : BackgroundService
         }
 
         return await DispatchAndStampAsync(
-            repository, dispatcher, events, trigger, fire, now, ct).ConfigureAwait(false);
+            repository, dispatcher, definitionService, events, trigger, fire, now, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -571,6 +577,7 @@ public sealed class TenantScheduledTriggerService : BackgroundService
     private async Task<int> DrainManualFiresAsync(
         IScheduledTriggerRepository repository,
         IWorkflowDispatcher dispatcher,
+        Elsa.Workflows.Management.IWorkflowDefinitionService definitionService,
         IPlatformEventPublisher? events,
         TenantScheduledTriggerOptions opts,
         int alreadyDispatched,
@@ -604,7 +611,7 @@ public sealed class TenantScheduledTriggerService : BackgroundService
                 }
 
                 if (await DispatchAndStampAsync(
-                        repository, dispatcher, events, trigger, fire,
+                        repository, dispatcher, definitionService, events, trigger, fire,
                         _timeProvider.GetUtcNow(), ct).ConfigureAwait(false))
                 {
                     dispatched++;
@@ -635,6 +642,7 @@ public sealed class TenantScheduledTriggerService : BackgroundService
     private async Task<bool> DispatchAndStampAsync(
         IScheduledTriggerRepository repository,
         IWorkflowDispatcher dispatcher,
+        Elsa.Workflows.Management.IWorkflowDefinitionService definitionService,
         IPlatformEventPublisher? events,
         ScheduledTrigger trigger,
         ScheduledTriggerFire fire,
@@ -645,7 +653,12 @@ public sealed class TenantScheduledTriggerService : BackgroundService
         var instanceId = Guid.NewGuid().ToString();
         // The definition id is ROW DATA (AC3) — this service must never name
         // a consumer workflow's DefinitionId constant.
-        var request = new DispatchWorkflowDefinitionRequest(fire.DefinitionId)
+        // 2026-08-13 — the request ctor takes the VERSION id, not the definition
+        // id (see PublishedWorkflowDispatch); resolve the published version first
+        // or every fire dies WorkflowGraphNotFound in the dispatch queue.
+        var definitionVersionId = await Tamma.Activities.Core.PublishedWorkflowDispatch
+            .ResolvePublishedVersionIdAsync(definitionService, fire.DefinitionId, ct);
+        var request = new DispatchWorkflowDefinitionRequest(definitionVersionId)
         {
             InstanceId = instanceId,
             Input = input,

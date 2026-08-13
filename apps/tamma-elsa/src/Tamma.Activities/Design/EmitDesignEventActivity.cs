@@ -61,16 +61,16 @@ public class EmitDesignEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? DesignEvents.ProposalFailed;
-        var sessionId = SessionId.Get(context);
-        var issueId = IssueId.Get(context);
-        var tenantId = DesignEvents.ParseTenantId(TenantId.Get(context));
-        var channel = Channel.Get(context);
-        var alternativeCount = AlternativeCount.Get(context);
-        var detail = Detail.Get(context);
-        var reviewer = Reviewer.Get(context);
+        var type = EventType.GetOrDefault(context) ?? DesignEvents.ProposalFailed;
+        var sessionId = SessionId.GetOrDefault(context);
+        var issueId = IssueId.GetOrDefault(context);
+        var tenantId = DesignEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var channel = Channel.GetOrDefault(context);
+        var alternativeCount = AlternativeCount.GetOrDefault(context);
+        var detail = Detail.GetOrDefault(context);
+        var reviewer = Reviewer.GetOrDefault(context);
 
         var evt = BuildTammaEvent(type, sessionId, issueId, tenantId, channel, alternativeCount, detail, reviewer);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -79,7 +79,8 @@ public class EmitDesignEventActivity : Activity
             "Emitted {Type} for design session {Session} issue {Issue} (alternatives={Count})",
             type, sessionId, issueId, alternativeCount);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

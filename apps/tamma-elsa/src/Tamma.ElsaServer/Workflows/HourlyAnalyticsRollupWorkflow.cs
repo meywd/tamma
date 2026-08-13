@@ -67,12 +67,12 @@ public class HourlyAnalyticsRollupWorkflow : WorkflowBase
             "Rolls platform_events + per-tenant domain_events into platform_analytics_hourly.";
 
         // ── Variables ────────────────────────────────────────────────────
-        var targetHour = builder.WithVariable<DateTime>("TargetHour", DateTime.MinValue);
-        var tenantsSuccess = builder.WithVariable<int>("TenantsSuccess", 0);
-        var tenantsFailed = builder.WithVariable<int>("TenantsFailed", 0);
+        var targetHour = builder.WithVariable<DateTime>("TargetHour", DateTime.MinValue).Persisted();
+        var tenantsSuccess = builder.WithVariable<int>("TenantsSuccess", 0).Persisted();
+        var tenantsFailed = builder.WithVariable<int>("TenantsFailed", 0).Persisted();
         // Story 36-2 — dimensional fan-out success/failure counts.
-        var dimTenantsSuccess = builder.WithVariable<int>("DimTenantsSuccess", 0);
-        var dimTenantsFailed = builder.WithVariable<int>("DimTenantsFailed", 0);
+        var dimTenantsSuccess = builder.WithVariable<int>("DimTenantsSuccess", 0).Persisted();
+        var dimTenantsFailed = builder.WithVariable<int>("DimTenantsFailed", 0).Persisted();
 
         // ── Step 1: resolve the target hour from input or now-1 ─────────
         var initBucket = new SetVariable

@@ -74,30 +74,31 @@ public class EmitDebugEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? DebugEvents.Escalated;
+        var type = EventType.GetOrDefault(context) ?? DebugEvents.Escalated;
 
         var evt = BuildTammaEvent(
             type,
-            sessionId: SessionId.Get(context),
-            storyId: StoryId.Get(context),
-            mode: Mode.Get(context),
-            tenantId: DebugEvents.ParseTenantId(TenantId.Get(context)),
-            iteration: Iteration.Get(context),
-            maxIterations: MaxIterations.Get(context),
-            hypothesis: Hypothesis.Get(context),
-            fixSucceeded: FixSucceeded.Get(context),
-            reason: Reason.Get(context));
+            sessionId: SessionId.GetOrDefault(context),
+            storyId: StoryId.GetOrDefault(context),
+            mode: Mode.GetOrDefault(context),
+            tenantId: DebugEvents.ParseTenantId(TenantId.GetOrDefault(context)),
+            iteration: Iteration.GetOrDefault(context),
+            maxIterations: MaxIterations.GetOrDefault(context),
+            hypothesis: Hypothesis.GetOrDefault(context),
+            fixSucceeded: FixSucceeded.GetOrDefault(context),
+            reason: Reason.GetOrDefault(context));
 
         TammaEventEmitter.Emit(context, this, _logger, evt);
 
         _logger?.LogInformation(
             "Emitted {Type} for session {Session} story {Story} (mode={Mode}, iteration={Iteration}/{Max}, reason={Reason})",
-            type, SessionId.Get(context), StoryId.Get(context), Mode.Get(context),
-            Iteration.Get(context), MaxIterations.Get(context), Reason.Get(context));
+            type, SessionId.GetOrDefault(context), StoryId.GetOrDefault(context), Mode.GetOrDefault(context),
+            Iteration.GetOrDefault(context), MaxIterations.GetOrDefault(context), Reason.GetOrDefault(context));
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

@@ -93,59 +93,59 @@ public class BacklogPrioritizationWorkflow : WorkflowBase
         builder.Description = "Rank a candidate backlog item set into a typed BacklogOrdering (total order, rationale + value/effort per item, no ties) via the generic document lifecycle (produce → validate → review → revise → accept)";
 
         // ── Inputs ─────────────────────────────────────────────────────
-        var sessionId    = builder.WithVariable<Guid>();
-        var repository   = builder.WithVariable<string>("Repository", "");
-        var backlogScope = builder.WithVariable<string>("BacklogScope", "");
-        var itemsJson    = builder.WithVariable<string>("ItemsJson", "[]");
-        var repoContext  = builder.WithVariable<string>("RepoContext", "");
-        var tenantId     = builder.WithVariable<string>("TenantId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+        var sessionId    = builder.WithVariable<Guid>().Persisted();
+        var repository   = builder.WithVariable<string>("Repository", "").Persisted();
+        var backlogScope = builder.WithVariable<string>("BacklogScope", "").Persisted();
+        var itemsJson    = builder.WithVariable<string>("ItemsJson", "[]").Persisted();
+        var repoContext  = builder.WithVariable<string>("RepoContext", "").Persisted();
+        var tenantId     = builder.WithVariable<string>("TenantId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
 
         // ── D2 anchor + the parsed candidate set ───────────────────────
-        var backlogAnchor     = builder.WithVariable<string>("BacklogAnchor", "");
-        var evidenceAnchors   = builder.WithVariable<object>("EvidenceAnchors", new List<string>());
-        var producerItemsJson = builder.WithVariable<string>("ProducerItemsJson", "[]");
-        var itemCount         = builder.WithVariable<int>("ItemCount", 0);
+        var backlogAnchor     = builder.WithVariable<string>("BacklogAnchor", "").Persisted();
+        var evidenceAnchors   = builder.WithVariable<object>("EvidenceAnchors", new List<string>()).Persisted();
+        var producerItemsJson = builder.WithVariable<string>("ProducerItemsJson", "[]").Persisted();
+        var itemCount         = builder.WithVariable<int>("ItemCount", 0).Persisted();
 
         // ── D3 per-item evidence reads (bounded, fail-closed) ──────────
-        var currentItemIssueId = builder.WithVariable<string>("CurrentItemIssueId", "");
-        var evidence      = builder.WithVariable<string>("Evidence", "");
-        var evidenceHits  = builder.WithVariable<int>("EvidenceHits", 0);
+        var currentItemIssueId = builder.WithVariable<string>("CurrentItemIssueId", "").Persisted();
+        var evidence      = builder.WithVariable<string>("Evidence", "").Persisted();
+        var evidenceHits  = builder.WithVariable<int>("EvidenceHits", 0).Persisted();
 
-        var triageFound   = builder.WithVariable<bool>();
-        var triageDocId   = builder.WithVariable<string>("TriageDocId", "");
-        var triageJson    = builder.WithVariable<string>("TriageJson", "");
-        var triageLineage = builder.WithVariable<string>();
+        var triageFound   = builder.WithVariable<bool>().Persisted();
+        var triageDocId   = builder.WithVariable<string>("TriageDocId", "").Persisted();
+        var triageJson    = builder.WithVariable<string>("TriageJson", "").Persisted();
+        var triageLineage = builder.WithVariable<string>().Persisted();
 
-        var researchFindingsFound   = builder.WithVariable<bool>();
-        var researchFindingsDocId   = builder.WithVariable<string>("ResearchFindingsDocId", "");
-        var researchFindingsJson    = builder.WithVariable<string>("ResearchFindingsJson", "");
-        var researchFindingsLineage = builder.WithVariable<string>();
+        var researchFindingsFound   = builder.WithVariable<bool>().Persisted();
+        var researchFindingsDocId   = builder.WithVariable<string>("ResearchFindingsDocId", "").Persisted();
+        var researchFindingsJson    = builder.WithVariable<string>("ResearchFindingsJson", "").Persisted();
+        var researchFindingsLineage = builder.WithVariable<string>().Persisted();
 
-        var triageContextFindingsFound   = builder.WithVariable<bool>();
-        var triageContextFindingsDocId   = builder.WithVariable<string>("TriageContextFindingsDocId", "");
-        var triageContextFindingsJson    = builder.WithVariable<string>("TriageContextFindingsJson", "");
-        var triageContextFindingsLineage = builder.WithVariable<string>();
+        var triageContextFindingsFound   = builder.WithVariable<bool>().Persisted();
+        var triageContextFindingsDocId   = builder.WithVariable<string>("TriageContextFindingsDocId", "").Persisted();
+        var triageContextFindingsJson    = builder.WithVariable<string>("TriageContextFindingsJson", "").Persisted();
+        var triageContextFindingsLineage = builder.WithVariable<string>().Persisted();
 
         // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
-        var assessmentFound = builder.WithVariable<bool>();
-        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
+        var assessmentFound = builder.WithVariable<bool>().Persisted();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}").Persisted();
 
         // ── 39-10 re-entry position (D6) ───────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson  = builder.WithVariable<string>();
-        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson  = builder.WithVariable<string>().Persisted();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce").Persisted();
 
         // ── Dispatched-workflow result + typed exit ────────────────────
-        var lifecycleResult   = builder.WithVariable<IDictionary<string, object>?>();
-        var lifecycleAccepted = builder.WithVariable<bool>();
-        var lifecycleOrdered  = builder.WithVariable<bool>();
-        var exitOutcome   = builder.WithVariable<string>("ExitOutcome", "");
-        var exitDocId     = builder.WithVariable<string>("ExitDocId", "");
-        var orderingJson  = builder.WithVariable<string>("OrderingJson", "[]");
-        var orderedCount  = builder.WithVariable<int>("OrderedCount", 0);
-        var failureDetail = builder.WithVariable<string>("FailureDetail", "");
-        var outputStatus  = builder.WithVariable<string>();
+        var lifecycleResult   = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var lifecycleAccepted = builder.WithVariable<bool>().Persisted();
+        var lifecycleOrdered  = builder.WithVariable<bool>().Persisted();
+        var exitOutcome   = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var exitDocId     = builder.WithVariable<string>("ExitDocId", "").Persisted();
+        var orderingJson  = builder.WithVariable<string>("OrderingJson", "[]").Persisted();
+        var orderedCount  = builder.WithVariable<int>("OrderedCount", 0).Persisted();
+        var failureDetail = builder.WithVariable<string>("FailureDetail", "").Persisted();
+        var outputStatus  = builder.WithVariable<string>().Persisted();
 
         // ── Step 1: Read inputs, build the D2 anchor, parse the item set ──
         var readInputs = new SetVariable

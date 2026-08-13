@@ -64,17 +64,17 @@ public class EmitAmbiguityEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? AmbiguityEvents.Failed;
-        var sessionId = SessionId.Get(context);
-        var issueId = IssueId.Get(context);
-        var tenantId = AmbiguityEvents.ParseTenantId(TenantId.Get(context));
-        var score = Score.Get(context);
-        var ambiguityCount = AmbiguityCount.Get(context);
-        var confidence = Confidence.Get(context);
-        var threshold = Threshold.Get(context);
-        var detail = Detail.Get(context);
+        var type = EventType.GetOrDefault(context) ?? AmbiguityEvents.Failed;
+        var sessionId = SessionId.GetOrDefault(context);
+        var issueId = IssueId.GetOrDefault(context);
+        var tenantId = AmbiguityEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var score = Score.GetOrDefault(context);
+        var ambiguityCount = AmbiguityCount.GetOrDefault(context);
+        var confidence = Confidence.GetOrDefault(context);
+        var threshold = Threshold.GetOrDefault(context);
+        var detail = Detail.GetOrDefault(context);
 
         var evt = BuildTammaEvent(type, sessionId, issueId, tenantId, score, ambiguityCount, confidence, threshold, detail);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -83,7 +83,8 @@ public class EmitAmbiguityEventActivity : Activity
             "Emitted {Type} for ambiguity session {Session} issue {Issue} (score={Score})",
             type, sessionId, issueId, score);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

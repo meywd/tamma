@@ -59,13 +59,19 @@ public class ReportCycleResultActivity : TammaAsyncActivity
         context.WorkflowExecutionContext.Output["exitReason"] = reason;
         context.WorkflowExecutionContext.Output["issueNumber"] = issueNumber;
 
+        // 2026-08-13 (engine-driven E2E): store-rehydrated activities are built
+        // by the [JsonConstructor] with NULL ctor-injected members — resolve
+        // from the execution context (ctor-or-GetService idiom).
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+        var httpClientFactory = _httpClientFactory ?? context.GetService<IHttpClientFactory>();
+
         // Call engine callback if configured
-        var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (!string.IsNullOrEmpty(callbackUrl) && _httpClientFactory != null)
+        var callbackUrl = configuration?["Engine:CallbackUrl"];
+        if (!string.IsNullOrEmpty(callbackUrl) && httpClientFactory != null)
         {
             try
             {
-                var httpClient = _httpClientFactory.CreateClient();
+                var httpClient = httpClientFactory.CreateClient();
                 var payload = new
                 {
                     exitReason = reason,

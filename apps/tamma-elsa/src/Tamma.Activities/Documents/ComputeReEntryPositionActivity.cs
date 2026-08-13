@@ -108,6 +108,7 @@ public class ComputeReEntryPositionActivity : Activity
                 "Re-entering {DocumentType} for issue {IssueId} at {ResumeAt}: {Basis}",
                 documentType, issueId, position.ResumeAt, position.Basis);
         }
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
     }
 
     /// <summary>

@@ -101,5 +101,6 @@ public class PublishAcceptanceRequestActivity : Activity
                 "suspends (delivery is 39-18's outbox job), continuing.",
                 request.DecisionSessionId);
         }
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
     }
 }

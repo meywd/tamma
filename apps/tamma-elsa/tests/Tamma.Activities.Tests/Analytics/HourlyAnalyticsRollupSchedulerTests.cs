@@ -1,7 +1,11 @@
+using Elsa.Common.Models;
+using Elsa.Workflows.Management;
+using Elsa.Workflows.Management.Entities;
 using Elsa.Workflows.Runtime;
 using Elsa.Workflows.Runtime.Requests;
 using Elsa.Workflows.Runtime.Responses;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -83,8 +87,23 @@ public class HourlyAnalyticsRollupSchedulerTests
             FireAtMinute = 5,
             PollInterval = TimeSpan.FromSeconds(30),
         });
+        // 2026-08-13 — the scheduler now resolves the PUBLISHED definition
+        // VERSION id per fire (PublishedWorkflowDispatch); give it a scope
+        // factory whose IWorkflowDefinitionService answers a published row.
+        var definitionService = new Mock<IWorkflowDefinitionService>();
+        definitionService
+            .Setup(d => d.FindWorkflowDefinitionAsync(
+                It.IsAny<string>(), It.IsAny<VersionOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string id, VersionOptions _, CancellationToken _) =>
+                new WorkflowDefinition { Id = $"{id}:v1", DefinitionId = id });
+        var services = new ServiceCollection();
+        services.AddScoped(_ => definitionService.Object);
+        var scopeFactory = services.BuildServiceProvider()
+            .GetRequiredService<IServiceScopeFactory>();
+
         var scheduler = new HourlyAnalyticsRollupScheduler(
             dispatcher.Object,
+            scopeFactory,
             opts,
             time,
             NullLogger<HourlyAnalyticsRollupScheduler>.Instance,

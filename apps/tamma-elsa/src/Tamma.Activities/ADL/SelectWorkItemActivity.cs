@@ -94,7 +94,15 @@ public class SelectWorkItemActivity : TammaOutcomeActivity
         var excludeLabels = ExcludeLabels.Get(context);
         var bot = BotAssignee.Get(context);
 
-        var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
+        // 2026-08-13 (engine-driven E2E): store-rehydrated activities are built
+        // by the [JsonConstructor] with NULL ctor-injected members — resolve
+        // from the execution context (ctor-or-GetService idiom). Without this
+        // the real engine SILENTLY fell back to SimulateCandidates (null Logger
+        // swallowed the warning) instead of selecting real work via the API.
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+        var httpClientFactory = _httpClientFactory ?? context.GetService<IHttpClientFactory>();
+
+        var useMock = configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
 
         List<WorkItem> candidates;
         int untriaged;
@@ -106,7 +114,8 @@ public class SelectWorkItemActivity : TammaOutcomeActivity
         }
         else
         {
-            (candidates, untriaged) = await FetchCandidates(repo, autoLabels, excludeLabels, bot);
+            (candidates, untriaged) = await FetchCandidates(
+                configuration, httpClientFactory, repo, autoLabels, excludeLabels, bot);
         }
 
         UntriagedCount.Set(context, untriaged);
@@ -116,9 +125,11 @@ public class SelectWorkItemActivity : TammaOutcomeActivity
             if (untriaged > 0)
             {
                 // No auto-labeled issues, but untriaged ones exist → triage them
-                WorkItemJson.Set(context, null);
-                WorkItemType.Set(context, null);
-                WorkItemTitle.Set(context, null);
+                // 2026-08-13 (same trap as CheckLimitsActivity.StopReason): a literal
+                // null binds to Elsa's Set(Output, ctx, Variable) overload and NREs.
+                WorkItemJson.Set(context, (string?)null);
+                WorkItemType.Set(context, (string?)null);
+                WorkItemTitle.Set(context, (string?)null);
                 Priority.Set(context, "normal");
 
                 Logger?.LogInformation("No work items ready, but {Count} untriaged issues found", untriaged);
@@ -126,9 +137,9 @@ public class SelectWorkItemActivity : TammaOutcomeActivity
                 return;
             }
 
-            WorkItemJson.Set(context, null);
-            WorkItemType.Set(context, null);
-            WorkItemTitle.Set(context, null);
+            WorkItemJson.Set(context, (string?)null);
+            WorkItemType.Set(context, (string?)null);
+            WorkItemTitle.Set(context, (string?)null);
             Priority.Set(context, "none");
 
             Logger?.LogInformation("No work items found — repo is clean");
@@ -160,6 +171,7 @@ public class SelectWorkItemActivity : TammaOutcomeActivity
     }
 
     private async Task<(List<WorkItem> candidates, int untriaged)> FetchCandidates(
+        IConfiguration? configuration, IHttpClientFactory? httpClientFactory,
         string repo, string[] autoLabels, string[] excludeLabels, string bot)
     {
         var candidates = new List<WorkItem>();
@@ -167,14 +179,14 @@ public class SelectWorkItemActivity : TammaOutcomeActivity
 
         try
         {
-            var callbackUrl = _configuration?["Engine:CallbackUrl"];
-            if (string.IsNullOrEmpty(callbackUrl))
+            var callbackUrl = configuration?["Engine:CallbackUrl"];
+            if (string.IsNullOrEmpty(callbackUrl) || httpClientFactory == null)
             {
                 Logger?.LogWarning("No Engine:CallbackUrl configured, using mock candidates");
                 return (SimulateCandidates(), 0);
             }
 
-            var httpClient = _httpClientFactory!.CreateClient();
+            var httpClient = httpClientFactory.CreateClient();
 
             // Fetch issues via engine callback
             var response = await httpClient.GetAsync(
@@ -306,9 +318,72 @@ public class WorkItem
     public string? Body { get; set; }
     public string Type { get; set; } = "issue";
     public string Priority { get; set; } = "normal";
+
+    /// <summary>
+    /// 2026-08-13 (engine-driven E2E): <c>GET /api/engine/issues</c> serves
+    /// GitHub-shaped label OBJECTS (<c>[{"name":"tamma-auto"}]</c> — the shape
+    /// pinned by <c>EngineCallbackContractTests</c> / <c>IssueToJson</c>), but
+    /// this model declared <c>List&lt;string&gt;</c>, so BOTH consumers
+    /// (SelectWorkItem / FetchUntriagedItems) threw <see cref="JsonException"/>
+    /// inside a log-and-swallow catch and the real intake path returned zero
+    /// candidates on every tick. The converter accepts both shapes (plain
+    /// strings keep working for the internal WorkItemJson round-trip).
+    /// </summary>
+    [JsonConverter(typeof(LabelNamesConverter))]
     public List<string> Labels { get; set; } = new();
+
     public string? Assignee { get; set; }
+
+    [JsonPropertyName("html_url")]
     public string? Url { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public Dictionary<string, object?> Metadata { get; set; } = new();
+}
+
+/// <summary>
+/// Reads a labels array whose elements are either plain strings
+/// (<c>["a"]</c> — the internal WorkItemJson round-trip shape) or objects with
+/// a <c>name</c> property (<c>[{"name":"a"}]</c> — the platform-proxy shape of
+/// <c>GET /api/engine/issues</c>). Always writes plain strings.
+/// </summary>
+public sealed class LabelNamesConverter : JsonConverter<List<string>>
+{
+    public override List<string> Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var labels = new List<string>();
+        if (reader.TokenType != JsonTokenType.StartArray)
+            throw new JsonException("labels must be an array");
+
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.String:
+                    labels.Add(reader.GetString() ?? string.Empty);
+                    break;
+                case JsonTokenType.StartObject:
+                    using (var doc = JsonDocument.ParseValue(ref reader))
+                    {
+                        if (doc.RootElement.TryGetProperty("name", out var name)
+                            && name.ValueKind == JsonValueKind.String)
+                        {
+                            labels.Add(name.GetString() ?? string.Empty);
+                        }
+                    }
+                    break;
+                default:
+                    throw new JsonException($"Unexpected labels element token: {reader.TokenType}");
+            }
+        }
+
+        return labels;
+    }
+
+    public override void Write(Utf8JsonWriter writer, List<string> value, JsonSerializerOptions options)
+    {
+        writer.WriteStartArray();
+        foreach (var label in value) writer.WriteStringValue(label);
+        writer.WriteEndArray();
+    }
 }

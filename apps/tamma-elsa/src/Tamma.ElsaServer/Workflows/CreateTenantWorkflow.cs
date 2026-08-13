@@ -63,13 +63,13 @@ public class CreateTenantWorkflow : WorkflowBase
             "Provision a new tenant: placement + role + schema + migration + encrypted creds + activate.";
 
         // ── Workflow variables ───────────────────────────────────────────
-        var tenantId = builder.WithVariable<Guid>("TenantId", Guid.Empty);
-        var attempt = builder.WithVariable<int>("Attempt", 1);
-        var databaseId = builder.WithVariable<string>("DatabaseId", "");
-        var schemaName = builder.WithVariable<string>("SchemaName", "");
-        var roleName = builder.WithVariable<string>("RoleName", "");
-        var generatedPassword = builder.WithVariable<string>("GeneratedPassword", "");
-        var tenantConnectionString = builder.WithVariable<string>("TenantConnectionString", "");
+        var tenantId = builder.WithVariable<Guid>("TenantId", Guid.Empty).Persisted();
+        var attempt = builder.WithVariable<int>("Attempt", 1).Persisted();
+        var databaseId = builder.WithVariable<string>("DatabaseId", "").Persisted();
+        var schemaName = builder.WithVariable<string>("SchemaName", "").Persisted();
+        var roleName = builder.WithVariable<string>("RoleName", "").Persisted();
+        var generatedPassword = builder.WithVariable<string>("GeneratedPassword", "").Persisted();
+        var tenantConnectionString = builder.WithVariable<string>("TenantConnectionString", "").Persisted();
 
         // ── Inputs ────────────────────────────────────────────────────────
         var initInputs = new SetVariable

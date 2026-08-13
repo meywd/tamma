@@ -123,19 +123,19 @@ public class ReviewFixWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repositoryVar = builder.WithVariable<string>("Repository", "");
-        var branchNameVar = builder.WithVariable<string>("BranchName", "");
-        var prNumberVar = builder.WithVariable<int>("PrNumber", 0);
-        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0);
-        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
+        var repositoryVar = builder.WithVariable<string>("Repository", "").Persisted();
+        var branchNameVar = builder.WithVariable<string>("BranchName", "").Persisted();
+        var prNumberVar = builder.WithVariable<int>("PrNumber", 0).Persisted();
+        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "").Persisted();
 
-        var hasActionableVar = builder.WithVariable<bool>("HasActionable", false);
-        var analysisJsonVar = builder.WithVariable<string>("AnalysisJson", "");
-        var fixesAppliedVar = builder.WithVariable<bool>("FixesApplied", false);
-        var generateSucceededVar = builder.WithVariable<bool>("GenerateSucceeded", false);
-        var iterationVar = builder.WithVariable<int>("Iteration", 0);
-        var fixResultVar = builder.WithVariable<ReviewFixResult?>();
-        var llmResultVar = builder.WithVariable<IDictionary<string, object>?>();
+        var hasActionableVar = builder.WithVariable<bool>("HasActionable", false).Persisted();
+        var analysisJsonVar = builder.WithVariable<string>("AnalysisJson", "").Persisted();
+        var fixesAppliedVar = builder.WithVariable<bool>("FixesApplied", false).Persisted();
+        var generateSucceededVar = builder.WithVariable<bool>("GenerateSucceeded", false).Persisted();
+        var iterationVar = builder.WithVariable<int>("Iteration", 0).Persisted();
+        var fixResultVar = builder.WithVariable<ReviewFixResult?>().Persisted();
+        var llmResultVar = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ================================================================
         // 0. Seed the fail-closed default outcome (success=false)

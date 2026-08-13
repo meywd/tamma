@@ -61,59 +61,59 @@ public class LlmCallWorkflow : WorkflowBase
         // ============================================================
 
         // Input variables (populated from workflow input)
-        var agentRoleVar = builder.WithVariable<string>("AgentRole", "assistant");
-        var actionVar = builder.WithVariable<string>("Action", "");
-        var variablesJsonVar = builder.WithVariable<string>("VariablesJson", "{}");
-        var taskPromptVar = builder.WithVariable<string>("TaskPrompt", "");
-        var contextVar = builder.WithVariable<string>("Context", "");
-        var sessionIdVar = builder.WithVariable<string>("SessionId", "");
-        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
+        var agentRoleVar = builder.WithVariable<string>("AgentRole", "assistant").Persisted();
+        var actionVar = builder.WithVariable<string>("Action", "").Persisted();
+        var variablesJsonVar = builder.WithVariable<string>("VariablesJson", "{}").Persisted();
+        var taskPromptVar = builder.WithVariable<string>("TaskPrompt", "").Persisted();
+        var contextVar = builder.WithVariable<string>("Context", "").Persisted();
+        var sessionIdVar = builder.WithVariable<string>("SessionId", "").Persisted();
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "").Persisted();
 
         // Story 39-9 (D10) — additive/optional repair-ring inputs. Default empty ⇒
         // zero behaviour change for the 30+ existing dispatchers. documentType is the
         // wire KEY gating the server-side repair ring; issueId rides through for the
         // LLM.* event tags; contentValidation surfaces the wire block back to callers.
-        var documentTypeVar = builder.WithVariable<string>("DocumentType", "");
-        var issueIdVar = builder.WithVariable<string>("IssueId", "");
-        var contentValidationVar = builder.WithVariable<string>("ContentValidationJson", "");
+        var documentTypeVar = builder.WithVariable<string>("DocumentType", "").Persisted();
+        var issueIdVar = builder.WithVariable<string>("IssueId", "").Persisted();
+        var contentValidationVar = builder.WithVariable<string>("ContentValidationJson", "").Persisted();
 
         // Legacy input support
-        var inputVar = builder.WithVariable<string>("InputJson", "");
+        var inputVar = builder.WithVariable<string>("InputJson", "").Persisted();
 
         // State variables
-        var circuitBreakerStatesVar = builder.WithVariable<string>("CircuitBreakerStatesJson", "{}");
-        var budgetStateVar = builder.WithVariable<string>("BudgetStateJson", "{}");
-        var diagnosticsListVar = builder.WithVariable<string>("DiagnosticsListJson", "[]");
-        var workflowOutputVar = builder.WithVariable<string>("WorkflowOutputJson", "");
-        var successVar = builder.WithVariable<bool>("CallSucceeded", false);
-        var currentProviderVar = builder.WithVariable<string>("CurrentProvider", "");
-        var lastDiagnosticVar = builder.WithVariable<string>("LastDiagnostic", "");
-        var lastResponseVar = builder.WithVariable<string>("LastResponse", "");
-        var attemptNumberVar = builder.WithVariable<int>("AttemptNumber", 1);
-        var maxRetriesVar = builder.WithVariable<int>("MaxRetries", 3);
-        var providerChainVar = builder.WithVariable<object>("ProviderChain", new List<string>());
-        var systemPromptOverrideVar = builder.WithVariable<string>("SystemPromptOverride", "");
-        var resolvedSystemPromptVar = builder.WithVariable<string>("ResolvedSystemPrompt", "");
-        var resolvedToolsJsonVar = builder.WithVariable<string>("ResolvedToolsJson", "");
+        var circuitBreakerStatesVar = builder.WithVariable<string>("CircuitBreakerStatesJson", "{}").Persisted();
+        var budgetStateVar = builder.WithVariable<string>("BudgetStateJson", "{}").Persisted();
+        var diagnosticsListVar = builder.WithVariable<string>("DiagnosticsListJson", "[]").Persisted();
+        var workflowOutputVar = builder.WithVariable<string>("WorkflowOutputJson", "").Persisted();
+        var successVar = builder.WithVariable<bool>("CallSucceeded", false).Persisted();
+        var currentProviderVar = builder.WithVariable<string>("CurrentProvider", "").Persisted();
+        var lastDiagnosticVar = builder.WithVariable<string>("LastDiagnostic", "").Persisted();
+        var lastResponseVar = builder.WithVariable<string>("LastResponse", "").Persisted();
+        var attemptNumberVar = builder.WithVariable<int>("AttemptNumber", 1).Persisted();
+        var maxRetriesVar = builder.WithVariable<int>("MaxRetries", 3).Persisted();
+        var providerChainVar = builder.WithVariable<object>("ProviderChain", new List<string>()).Persisted();
+        var systemPromptOverrideVar = builder.WithVariable<string>("SystemPromptOverride", "").Persisted();
+        var resolvedSystemPromptVar = builder.WithVariable<string>("ResolvedSystemPrompt", "").Persisted();
+        var resolvedToolsJsonVar = builder.WithVariable<string>("ResolvedToolsJson", "").Persisted();
 
         // Registry-resolved MaxTokens (ResolvePromptFromRegistryActivity output).
         // 0 = not yet resolved; the activity always writes ≥ 4096 once it runs.
         // Applied to the wire Params.MaxTokens only on the registry path (non-
         // empty action) — see CallLlmInlineActivity.BuildLlmCallRequest.
-        var registryMaxTokensVar = builder.WithVariable<int>("RegistryMaxTokens", 0);
+        var registryMaxTokensVar = builder.WithVariable<int>("RegistryMaxTokens", 0).Persisted();
 
         // Story 27-13 — conventions resolved from the convention store (or the
         // legacy `.tamma/config.json` string for the empty-action passthrough
         // path). Feeds {{conventions}} in the prompt-render variables.
-        var legacyConventionsVar = builder.WithVariable<string>("LegacyConventions", "");
-        var resolvedConventionsVar = builder.WithVariable<string>("ResolvedConventions", "");
+        var legacyConventionsVar = builder.WithVariable<string>("LegacyConventions", "").Persisted();
+        var resolvedConventionsVar = builder.WithVariable<string>("ResolvedConventions", "").Persisted();
 
         // Tool loop variables
-        var enableToolLoopVar = builder.WithVariable<bool>("EnableToolLoop", false);
-        var toolLoopConfigJsonVar = builder.WithVariable<string>("ToolLoopConfigJson", "");
-        var toolLoopTokensVar = builder.WithVariable<int>("ToolLoopTokens", 0);
-        var toolLoopTurnsVar = builder.WithVariable<int>("ToolLoopTurns", 0);
-        var toolLoopExhaustedVar = builder.WithVariable<bool>("ToolLoopExhausted", false);
+        var enableToolLoopVar = builder.WithVariable<bool>("EnableToolLoop", false).Persisted();
+        var toolLoopConfigJsonVar = builder.WithVariable<string>("ToolLoopConfigJson", "").Persisted();
+        var toolLoopTokensVar = builder.WithVariable<int>("ToolLoopTokens", 0).Persisted();
+        var toolLoopTurnsVar = builder.WithVariable<int>("ToolLoopTurns", 0).Persisted();
+        var toolLoopExhaustedVar = builder.WithVariable<bool>("ToolLoopExhausted", false).Persisted();
 
         // ============================================================
         // Activities

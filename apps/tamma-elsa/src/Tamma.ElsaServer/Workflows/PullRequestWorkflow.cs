@@ -45,29 +45,29 @@ public class PullRequestWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repository = builder.WithVariable<string>("Repository", "");
-        var branchName = builder.WithVariable<string>("BranchName", "");
-        var baseBranchVar = builder.WithVariable<string>("BaseBranch", "main");
-        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0);
-        var issueTitleVar = builder.WithVariable<string>("IssueTitle", "");
-        var planJsonVar = builder.WithVariable<string>("PlanJson", "");
-        var draftVar = builder.WithVariable<bool>("Draft", false);
-        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
-        var changeSummaryVar = builder.WithVariable<string>("ChangeSummaryJson", "");
-        var testSummaryVar = builder.WithVariable<string>("TestSummaryJson", "");
-        var issueLabelsVar = builder.WithVariable<string>("IssueLabelsJson", "");
-        var reviewersVar = builder.WithVariable<string>("ReviewersJson", "");
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var branchName = builder.WithVariable<string>("BranchName", "").Persisted();
+        var baseBranchVar = builder.WithVariable<string>("BaseBranch", "main").Persisted();
+        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var issueTitleVar = builder.WithVariable<string>("IssueTitle", "").Persisted();
+        var planJsonVar = builder.WithVariable<string>("PlanJson", "").Persisted();
+        var draftVar = builder.WithVariable<bool>("Draft", false).Persisted();
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "").Persisted();
+        var changeSummaryVar = builder.WithVariable<string>("ChangeSummaryJson", "").Persisted();
+        var testSummaryVar = builder.WithVariable<string>("TestSummaryJson", "").Persisted();
+        var issueLabelsVar = builder.WithVariable<string>("IssueLabelsJson", "").Persisted();
+        var reviewersVar = builder.WithVariable<string>("ReviewersJson", "").Persisted();
 
-        var aiBodyVar = builder.WithVariable<string>("AiBody", "");
-        var llmResult = builder.WithVariable<IDictionary<string, object>?>();
+        var aiBodyVar = builder.WithVariable<string>("AiBody", "").Persisted();
+        var llmResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
-        var prNumberVar = builder.WithVariable<int>("PrNumber", 0);
-        var prUrlVar = builder.WithVariable<string>("PrUrl", "");
-        var reusedVar = builder.WithVariable<bool>("Reused", false);
-        var isDraftVar = builder.WithVariable<bool>("IsDraft", false);
-        var appliedLabelsVar = builder.WithVariable<string>("AppliedLabels", "[]");
-        var errorCodeVar = builder.WithVariable<string>("ErrorCode", "");
-        var startedAtTicksVar = builder.WithVariable<long>("StartedAtTicks", 0);
+        var prNumberVar = builder.WithVariable<int>("PrNumber", 0).Persisted();
+        var prUrlVar = builder.WithVariable<string>("PrUrl", "").Persisted();
+        var reusedVar = builder.WithVariable<bool>("Reused", false).Persisted();
+        var isDraftVar = builder.WithVariable<bool>("IsDraft", false).Persisted();
+        var appliedLabelsVar = builder.WithVariable<string>("AppliedLabels", "[]").Persisted();
+        var errorCodeVar = builder.WithVariable<string>("ErrorCode", "").Persisted();
+        var startedAtTicksVar = builder.WithVariable<long>("StartedAtTicks", 0).Persisted();
 
         // ================================================================
         // 1. Read inputs

@@ -13,8 +13,8 @@ namespace Tamma.Api.Services.Agents.Scripted;
 ///
 /// <para><b>Key resolution order</b> (first hit wins; keys normalized to
 /// lowercase): <c>{role}/{action}@{documentType}</c> →
-/// <c>@{documentType}</c> → registry example for the document type →
-/// <c>{role}/{action}</c> → <c>*</c>. A miss returns a FAILED response
+/// <c>{role}/{action}</c> → <c>@{documentType}</c> → registry example for the
+/// document type → <c>*</c>. A miss returns a FAILED response
 /// (HTTP 422-shaped, non-retryable) whose error message names every key
 /// tried — the "unscripted cell" contract, never a silent default.</para>
 /// </summary>
@@ -145,7 +145,23 @@ public sealed class ScriptedLlmResponder : IScriptedLlmResponder
             var qualified = $"{cell}@{docType}";
             tried.Add(qualified);
             if (TryGet(qualified, out var t1)) return t1;
+        }
 
+        // 2026-08-13 (engine-driven E2E): the BARE role/action cell outranks the
+        // per-document-type default. A REVIEWER llm-call carries the SUBJECT's
+        // documentType (a plan review arrives as documentType='plan'), and the
+        // original order (@{doc} before {role}/{action}) answered it with the
+        // PLAN document example instead of the reviewer cell — every panel
+        // member's reply then failed Review validation until exhaustion
+        // (48× DOCUMENT.VALIDATED.FAILED documentType=review, four
+        // REVIEW_PANEL_UNDECIDABLE, run 22). A role/action the library scripts
+        // explicitly is ALWAYS more specific than "whatever document type the
+        // call happens to carry".
+        tried.Add(cell);
+        if (TryGet(cell, out var t3)) return t3;
+
+        if (docType.Length > 0)
+        {
             var typeDefault = $"@{docType}";
             tried.Add(typeDefault);
             if (TryGet(typeDefault, out var t2)) return t2;
@@ -156,9 +172,6 @@ public sealed class ScriptedLlmResponder : IScriptedLlmResponder
             var example = ScriptedCycleLibrary.DocumentExampleFor(docType);
             if (example is not null) return example;
         }
-
-        tried.Add(cell);
-        if (TryGet(cell, out var t3)) return t3;
 
         tried.Add("*");
         return TryGet("*", out var t4) ? t4 : null;

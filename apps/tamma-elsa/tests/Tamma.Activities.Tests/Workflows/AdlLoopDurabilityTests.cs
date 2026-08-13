@@ -9,6 +9,7 @@ using Elsa.Workflows.Runtime.Requests;
 using Elsa.Workflows.Runtime.Responses;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using NUnit.Framework;
 using Tamma.Activities.ADL;
 using Tamma.Activities.Core;
@@ -198,6 +199,24 @@ public class AdlLoopDurabilityTests
         // fallback resolves it — the same path a rehydrated (JSON-constructed)
         // activity takes in production.
         services.AddSingleton(dispatcher);
+
+        // 2026-08-13 — the dispatch activities now resolve the PUBLISHED
+        // definition VERSION id first (PublishedWorkflowDispatch); stub the
+        // definition service to answer "<definitionId>" verbatim (AddElsa's
+        // real one has no published definitions in this harness).
+        var definitionService = new Moq.Mock<Elsa.Workflows.Management.IWorkflowDefinitionService>();
+        definitionService
+            .Setup(d => d.FindWorkflowDefinitionAsync(
+                Moq.It.IsAny<string>(),
+                Moq.It.IsAny<Elsa.Common.Models.VersionOptions>(),
+                Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string id, Elsa.Common.Models.VersionOptions _, CancellationToken _) =>
+                new Elsa.Workflows.Management.Entities.WorkflowDefinition
+                {
+                    Id = id,
+                    DefinitionId = id,
+                });
+        services.AddSingleton(definitionService.Object);
 
         await using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();

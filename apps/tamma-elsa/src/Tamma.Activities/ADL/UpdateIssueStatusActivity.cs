@@ -104,14 +104,19 @@ public class UpdateIssueStatusActivity : Activity
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
+        // 2026-08-13 (found by the engine-driven E2E): OPTIONAL inputs must be
+        // read with GetOrDefault — literal-null Input defaults are dropped by
+        // the workflow-definition store's JSON round-trip, and .Get on the
+        // materialized null input throws "<name> is required." (which faulted
+        // every notify child that did not wire removeLabels/prNumber/…).
         var repo = Repository.Get(context);
-        var issueNum = IssueNumber.Get(context);
-        var message = Message.Get(context) ?? "";
-        var addLabels = AddLabels.Get(context);
-        var removeLabels = RemoveLabels.Get(context);
-        var prNumber = PrNumber.Get(context);
-        var prUrl = PrUrl.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var issueNum = IssueNumber.GetOrDefault(context);
+        var message = Message.GetOrDefault(context) ?? "";
+        var addLabels = AddLabels.GetOrDefault(context);
+        var removeLabels = RemoveLabels.GetOrDefault(context);
+        var prNumber = PrNumber.GetOrDefault(context);
+        var prUrl = PrUrl.GetOrDefault(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
 
         var body = ComposeBody(message, prNumber, prUrl);
 

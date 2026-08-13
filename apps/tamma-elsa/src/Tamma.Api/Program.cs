@@ -1138,30 +1138,37 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = 429;
 
+    // 2026-08-13 (engine-driven E2E): the four generic policies are
+    // config-overridable (shipped defaults unchanged). The engine's OWN
+    // mediated traffic (agent-config resolves — one per llm-call) rides
+    // "ConfigRead"; a busy autonomous cycle (7-role review panels × rounds)
+    // exceeds 100/min and the engine then churns retries against 429s. A
+    // single-box deployment can raise RateLimits:ConfigRead rather than
+    // throttling its own engine.
     options.AddFixedWindowLimiter("ConfigRead", o =>
     {
-        o.PermitLimit = 100;
+        o.PermitLimit = builder.Configuration.GetValue("RateLimits:ConfigRead", 100);
         o.Window = TimeSpan.FromMinutes(1);
         o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
         o.QueueLimit = 0;
     });
     options.AddFixedWindowLimiter("ConfigWrite", o =>
     {
-        o.PermitLimit = 30;
+        o.PermitLimit = builder.Configuration.GetValue("RateLimits:ConfigWrite", 30);
         o.Window = TimeSpan.FromMinutes(1);
         o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
         o.QueueLimit = 0;
     });
     options.AddFixedWindowLimiter("ProviderIngest", o =>
     {
-        o.PermitLimit = 500;
+        o.PermitLimit = builder.Configuration.GetValue("RateLimits:ProviderIngest", 500);
         o.Window = TimeSpan.FromMinutes(1);
         o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
         o.QueueLimit = 0;
     });
     options.AddFixedWindowLimiter("ProviderExecute", o =>
     {
-        o.PermitLimit = 50;
+        o.PermitLimit = builder.Configuration.GetValue("RateLimits:ProviderExecute", 50);
         o.Window = TimeSpan.FromMinutes(1);
         o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
         o.QueueLimit = 0;

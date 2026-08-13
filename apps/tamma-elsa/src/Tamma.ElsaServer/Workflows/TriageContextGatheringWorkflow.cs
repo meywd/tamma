@@ -50,31 +50,31 @@ public class TriageContextGatheringWorkflow : WorkflowBase
         builder.Description = "Gather triage context and synthesize a typed Findings document via the generic document lifecycle";
 
         // ── Inputs ─────────────────────────────────────────────────────
-        var repository = builder.WithVariable<string>("Repository", "");
-        var itemJson = builder.WithVariable<string>("ItemJson", "");
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var issueId = builder.WithVariable<string>("IssueId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
-        var itemType = builder.WithVariable<string>("ItemType", TriageContextHelper.ItemTypeIssue);
-        var itemNumber = builder.WithVariable<int>("ItemNumber", 0);
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var itemJson = builder.WithVariable<string>("ItemJson", "").Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
+        var issueId = builder.WithVariable<string>("IssueId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
+        var itemType = builder.WithVariable<string>("ItemType", TriageContextHelper.ItemTypeIssue).Persisted();
+        var itemNumber = builder.WithVariable<int>("ItemNumber", 0).Persisted();
 
         // ── 39-10 re-entry position ────────────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson = builder.WithVariable<string>();
-        var positionStage = builder.WithVariable<string>("PositionStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson = builder.WithVariable<string>().Persisted();
+        var positionStage = builder.WithVariable<string>("PositionStage", "produce").Persisted();
 
         // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
-        var assessmentFound = builder.WithVariable<bool>();
-        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
+        var assessmentFound = builder.WithVariable<bool>().Persisted();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}").Persisted();
 
         // ── Dispatched lifecycle result + typed exit ───────────────────
-        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
-        var lifecycleAccepted = builder.WithVariable<bool>();
-        var exitOutcome = builder.WithVariable<string>("ExitOutcome", "");
-        var findingsDocumentId = builder.WithVariable<string>("FindingsDocumentId", "");
-        var contextJson = builder.WithVariable<string>("ContextJson", "{}");
-        var contextStatus = builder.WithVariable<string>("ContextStatus", TriageBindingHelper.ContextStatusFailed);
-        var failureDetail = builder.WithVariable<string>("FailureDetail", "");
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var lifecycleAccepted = builder.WithVariable<bool>().Persisted();
+        var exitOutcome = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var findingsDocumentId = builder.WithVariable<string>("FindingsDocumentId", "").Persisted();
+        var contextJson = builder.WithVariable<string>("ContextJson", "{}").Persisted();
+        var contextStatus = builder.WithVariable<string>("ContextStatus", TriageBindingHelper.ContextStatusFailed).Persisted();
+        var failureDetail = builder.WithVariable<string>("FailureDetail", "").Persisted();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable

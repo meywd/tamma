@@ -53,13 +53,13 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var configJson = builder.WithVariable<string>("ConfigJson", "{}");
-        var repository = builder.WithVariable<string>("Repository", "");
-        var issueLabels = builder.WithVariable<string[]>("IssueLabels", Array.Empty<string>());
-        var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot");
-        var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
-        var cooldownSeconds = builder.WithVariable<int>("CooldownSeconds", 10);
-        var maxConcurrent = builder.WithVariable<int>("MaxConcurrent", 1);
+        var configJson = builder.WithVariable<string>("ConfigJson", "{}").Persisted();
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var issueLabels = builder.WithVariable<string[]>("IssueLabels", Array.Empty<string>()).Persisted();
+        var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot").Persisted();
+        var baseBranch = builder.WithVariable<string>("BaseBranch", "main").Persisted();
+        var cooldownSeconds = builder.WithVariable<int>("CooldownSeconds", 10).Persisted();
+        var maxConcurrent = builder.WithVariable<int>("MaxConcurrent", 1).Persisted();
 
         // Deployment mode + tenant threaded to each dispatched cycle (and from
         // there into the deployment pipeline's production-approval gate). These
@@ -69,12 +69,12 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         // empty and DispatchCycleActivity derives the real mode from configuration
         // (mirrors TammaModeProvider). A SaaS dispatcher / operator may still set
         // `mode`/`tenantId` on the orchestrator input to override per-instance.
-        var mode = builder.WithVariable<string>("Mode", "");
-        var tenantId = builder.WithVariable<string>("TenantId", "");
+        var mode = builder.WithVariable<string>("Mode", "").Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
 
         // Selected work item data
-        var selectedItemJson = builder.WithVariable<string?>("SelectedItemJson", null);
-        var selectedIssueNumber = builder.WithVariable<int>("SelectedIssueNumber", 0);
+        var selectedItemJson = builder.WithVariable<string?>("SelectedItemJson", null).Persisted();
+        var selectedIssueNumber = builder.WithVariable<int>("SelectedIssueNumber", 0).Persisted();
 
         // ================================================================
         // 1. Load Config

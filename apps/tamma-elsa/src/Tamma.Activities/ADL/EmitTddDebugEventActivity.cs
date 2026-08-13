@@ -73,17 +73,17 @@ public class EmitTddDebugEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? TddDebugEvents.RetryExhausted;
-        var storyId = StoryId.Get(context);
-        var issueNumber = IssueNumber.Get(context);
-        var repository = Repository.Get(context);
-        var tenantId = TddDebugEvents.ParseTenantId(TenantId.Get(context));
-        var attempt = Attempt.Get(context);
-        var maxRetries = MaxRetries.Get(context);
-        var finishReason = FinishReason.Get(context);
-        var errorDetail = ErrorDetail.Get(context);
+        var type = EventType.GetOrDefault(context) ?? TddDebugEvents.RetryExhausted;
+        var storyId = StoryId.GetOrDefault(context);
+        var issueNumber = IssueNumber.GetOrDefault(context);
+        var repository = Repository.GetOrDefault(context);
+        var tenantId = TddDebugEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var attempt = Attempt.GetOrDefault(context);
+        var maxRetries = MaxRetries.GetOrDefault(context);
+        var finishReason = FinishReason.GetOrDefault(context);
+        var errorDetail = ErrorDetail.GetOrDefault(context);
 
         var evt = BuildTammaEvent(type, storyId, issueNumber, repository, tenantId, attempt, maxRetries, finishReason, errorDetail);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -92,7 +92,8 @@ public class EmitTddDebugEventActivity : Activity
             "Emitted {Type} for story {Story} issue #{Issue} (attempt={Attempt}/{Max}, reason={Reason})",
             type, storyId, issueNumber, attempt, maxRetries, finishReason);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

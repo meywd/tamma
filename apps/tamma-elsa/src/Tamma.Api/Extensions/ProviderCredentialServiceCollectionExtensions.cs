@@ -56,12 +56,21 @@ public static class ProviderCredentialServiceCollectionExtensions
         // shape so IRuntimeSecretResolver (the platform-key leg) is OPTIONAL:
         // single-user / no-secrets hosts may not have it registered, and the
         // resolver tolerates null (degrading the platform leg to "unset").
+        //
+        // 2026-08-13 (engine-driven E2E): IEventRepository is SCOPED, and this
+        // singleton's factory resolved it from the root provider — a captive
+        // dependency. Production silently promoted it (a single DbContext-backed
+        // repository living forever inside the singleton); a Development host
+        // (ValidateScopes) throws "Cannot resolve scoped service ... from root
+        // provider" on FIRST llm/call, 500ing the endpoint. The resolver keeps
+        // its singleton lifetime (the BYOK cache contract) and now audits
+        // through a scope-per-append adapter.
         services.TryAddSingleton<IProviderCredentialResolver>(sp =>
             new DefaultProviderCredentialResolver(
                 sp.GetRequiredService<ITenantProviderKeyReader>(),
                 sp.GetService<IRuntimeSecretResolver>(),
                 sp.GetRequiredService<IPlatformFallbackPolicy>(),
-                sp.GetRequiredService<IEventRepository>(),
+                new ScopePerCallEventRepository(sp.GetRequiredService<IServiceScopeFactory>()),
                 sp.GetRequiredService<ITammaModeProvider>(),
                 sp.GetRequiredService<ProviderAllowlist>(),
                 sp.GetRequiredService<ILogger<DefaultProviderCredentialResolver>>(),
@@ -71,5 +80,52 @@ public static class ProviderCredentialServiceCollectionExtensions
         services.TryAddSingleton<ProviderCredentialCacheInvalidator>();
 
         return services;
+    }
+
+    /// <summary>
+    /// 2026-08-13 — scope-per-call <see cref="IEventRepository"/> adapter for the
+    /// SINGLETON credential resolver (which only appends audit events). Each call
+    /// creates a DI scope, resolves the real scoped repository, and delegates —
+    /// the same pattern <c>TenantScheduledTriggerService</c> uses for its scoped
+    /// dependencies. Default-interface members (agent trail / time-travel reads)
+    /// are NOT forwarded: the resolver never calls them, and their defaults throw
+    /// loudly if that ever changes.
+    /// </summary>
+    private sealed class ScopePerCallEventRepository(IServiceScopeFactory scopes) : IEventRepository
+    {
+        private async Task<T> RunAsync<T>(Func<IEventRepository, Task<T>> call)
+        {
+            using var scope = scopes.CreateScope();
+            return await call(scope.ServiceProvider.GetRequiredService<IEventRepository>())
+                .ConfigureAwait(false);
+        }
+
+        public Task<Tamma.Data.Entities.DomainEvent> AppendAsync(Tamma.Data.Entities.DomainEvent evt)
+            => RunAsync(r => r.AppendAsync(evt));
+
+        public Task<Tamma.Data.Entities.DomainEvent?> GetByIdAsync(Guid id)
+            => RunAsync(r => r.GetByIdAsync(id));
+
+        public Task<List<Tamma.Data.Entities.DomainEvent>> QueryAsync(
+            Guid? tenantId, string? type, int? issueNumber, int limit)
+            => RunAsync(r => r.QueryAsync(tenantId, type, issueNumber, limit));
+
+        public Task<Tamma.Data.Entities.DomainEvent?> GetLastByTypeAsync(Guid tenantId, string type)
+            => RunAsync(r => r.GetLastByTypeAsync(tenantId, type));
+
+        public async Task ClearAsync(Guid tenantId)
+        {
+            using var scope = scopes.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<IEventRepository>()
+                .ClearAsync(tenantId).ConfigureAwait(false);
+        }
+
+        public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)> QueryWithPaginationAsync(
+            Guid? tenantId, string? type, int? issueNumber, int limit, int offset)
+            => RunAsync(r => r.QueryWithPaginationAsync(tenantId, type, issueNumber, limit, offset));
+
+        public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)> ListByTenantAsync(
+            Guid tenantId, string? typePrefix, int limit, int offset)
+            => RunAsync(r => r.ListByTenantAsync(tenantId, typePrefix, limit, offset));
     }
 }

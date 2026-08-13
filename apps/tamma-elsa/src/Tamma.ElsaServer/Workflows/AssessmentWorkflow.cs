@@ -52,48 +52,48 @@ public class AssessmentWorkflow : WorkflowBase
         builder.Description = "Evaluate junior developer's understanding of story requirements";
 
         // ── Workflow variables ──────────────────────────────────────────
-        var sessionId        = builder.WithVariable<Guid>();
-        var storyId          = builder.WithVariable<string>();
-        var juniorId         = builder.WithVariable<string>();
-        var skillLevel       = builder.WithVariable<int>();
-        var previousAttemptJson = builder.WithVariable<string>();
-        var tenantId         = builder.WithVariable<string>("TenantId", "");
-        var storyContext     = builder.WithVariable<string>();
-        var questionsJson    = builder.WithVariable<string>();
-        var juniorResponse   = builder.WithVariable<string>();
-        var analysisResultJson = builder.WithVariable<string>();
-        var responseReceived = builder.WithVariable<bool>();
-        var assessmentStatus = builder.WithVariable<AssessmentOutcomeStatus>();
-        var confidence       = builder.WithVariable<decimal>();
-        var nextState        = builder.WithVariable<MentorshipState>();
-        var gapsJson         = builder.WithVariable<string>();
-        var strengthsJson    = builder.WithVariable<string>();
-        var attemptNumber    = builder.WithVariable<int>();
+        var sessionId        = builder.WithVariable<Guid>().Persisted();
+        var storyId          = builder.WithVariable<string>().Persisted();
+        var juniorId         = builder.WithVariable<string>().Persisted();
+        var skillLevel       = builder.WithVariable<int>().Persisted();
+        var previousAttemptJson = builder.WithVariable<string>().Persisted();
+        var tenantId         = builder.WithVariable<string>("TenantId", "").Persisted();
+        var storyContext     = builder.WithVariable<string>().Persisted();
+        var questionsJson    = builder.WithVariable<string>().Persisted();
+        var juniorResponse   = builder.WithVariable<string>().Persisted();
+        var analysisResultJson = builder.WithVariable<string>().Persisted();
+        var responseReceived = builder.WithVariable<bool>().Persisted();
+        var assessmentStatus = builder.WithVariable<AssessmentOutcomeStatus>().Persisted();
+        var confidence       = builder.WithVariable<decimal>().Persisted();
+        var nextState        = builder.WithVariable<MentorshipState>().Persisted();
+        var gapsJson         = builder.WithVariable<string>().Persisted();
+        var strengthsJson    = builder.WithVariable<string>().Persisted();
+        var attemptNumber    = builder.WithVariable<int>().Persisted();
 
         // llm-call result containers
-        var contextGatherResult = builder.WithVariable<IDictionary<string, object>?>();
-        var questionLlm         = builder.WithVariable<IDictionary<string, object>?>();
-        var analysisLlm         = builder.WithVariable<IDictionary<string, object>?>();
+        var contextGatherResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var questionLlm         = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var analysisLlm         = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // Success flags (fail-closed guards)
-        var questionsLlmOk  = builder.WithVariable<bool>();
-        var analysisLlmOk   = builder.WithVariable<bool>();
+        var questionsLlmOk  = builder.WithVariable<bool>().Persisted();
+        var analysisLlmOk   = builder.WithVariable<bool>().Persisted();
 
         // Variables to capture activity outputs via binding
-        var generatedQuestionSet = builder.WithVariable<QuestionSet>();
-        var deliveryResult       = builder.WithVariable<DeliveryResult>();
-        var waitJuniorResponse   = builder.WithVariable<string>();
-        var waitResponseReceived = builder.WithVariable<bool>();
-        var analysisOutput       = builder.WithVariable<AnalysisResult>();
-        var classifiedStatus     = builder.WithVariable<AssessmentOutcomeStatus>();
-        var classifiedConfidence = builder.WithVariable<decimal>();
-        var classifiedNextState  = builder.WithVariable<MentorshipState>();
+        var generatedQuestionSet = builder.WithVariable<QuestionSet>().Persisted();
+        var deliveryResult       = builder.WithVariable<DeliveryResult>().Persisted();
+        var waitJuniorResponse   = builder.WithVariable<string>().Persisted();
+        var waitResponseReceived = builder.WithVariable<bool>().Persisted();
+        var analysisOutput       = builder.WithVariable<AnalysisResult>().Persisted();
+        var classifiedStatus     = builder.WithVariable<AssessmentOutcomeStatus>().Persisted();
+        var classifiedConfidence = builder.WithVariable<decimal>().Persisted();
+        var classifiedNextState  = builder.WithVariable<MentorshipState>().Persisted();
 
         // Output variables (readable by parent workflow)
-        var outputResultJson  = builder.WithVariable<string>();
-        var outputNextState   = builder.WithVariable<string>();
-        var outputStatus      = builder.WithVariable<string>();
-        var outputSkillLevel  = builder.WithVariable<int>();
+        var outputResultJson  = builder.WithVariable<string>().Persisted();
+        var outputNextState   = builder.WithVariable<string>().Persisted();
+        var outputStatus      = builder.WithVariable<string>().Persisted();
+        var outputSkillLevel  = builder.WithVariable<int>().Persisted();
 
         // ── Step 1: Read inputs into variables ─────────────────────────
         var readInputs = new SetVariable

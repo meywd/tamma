@@ -68,11 +68,20 @@ public sealed class GitRepoAuthorizer : IGitRepoAuthorizer
         // The null/null allowance is legit ONLY in single-user mode; in SaaS a
         // null acting tenant or a null-TenantId (orphan) install fails OPEN under
         // plain nullable equality, so SaaS requires BOTH ids present and equal.
+        //
+        // 2026-08-13 (engine-driven E2E): single-user is grant-existence, not id
+        // equality. There is exactly ONE principal in single-user mode — the sole
+        // user owns every installation row — and the acting tenant may now be
+        // their PERSONAL tenant (bound ambient by EnsurePersonalTenantMiddleware
+        // for service-plane calls) while grant rows registered before/outside
+        // that tenant carry TenantId=null. Strict equality made the sole user
+        // "cross-tenant" against their own grant the moment the personal tenant
+        // bound. The no-installation deny above still applies unchanged.
         var authorized = _mode.Mode == TammaMode.SaaS
             ? tenantId is { } actingTenant
                 && installation.TenantId is { } installTenant
                 && installTenant == actingTenant
-            : installation.TenantId == tenantId;
+            : true;
 
         if (!authorized)
         {

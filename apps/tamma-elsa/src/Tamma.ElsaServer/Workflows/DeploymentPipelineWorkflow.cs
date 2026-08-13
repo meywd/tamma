@@ -122,43 +122,43 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repository = builder.WithVariable<string>("Repository", "");
-        var mergeSha = builder.WithVariable<string>("MergeSha", "");
-        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
-        var branchName = builder.WithVariable<string>("BranchName", "");
-        var mode = builder.WithVariable<string>("Mode", "");
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var requireProdApproval = builder.WithVariable<bool>("RequireProdApproval", false);
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var mergeSha = builder.WithVariable<string>("MergeSha", "").Persisted();
+        var issueNumber = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var branchName = builder.WithVariable<string>("BranchName", "").Persisted();
+        var mode = builder.WithVariable<string>("Mode", "").Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
+        var requireProdApproval = builder.WithVariable<bool>("RequireProdApproval", false).Persisted();
 
         // Fail-closed default — overwritten only by an explicit terminal.
-        var deploymentStatus = builder.WithVariable<string>("DeploymentStatus", "failed");
-        var completedStages = builder.WithVariable<string>("CompletedStages", "[]");
-        var currentStage = builder.WithVariable<string>("CurrentStage", "");
-        var stageResult = builder.WithVariable<string>("StageResult", "");
-        var stageError = builder.WithVariable<string>("StageError", "");
-        var rollbackStatus = builder.WithVariable<string>("RollbackStatus", "");
-        var releaseTag = builder.WithVariable<string>("ReleaseTag", "");
+        var deploymentStatus = builder.WithVariable<string>("DeploymentStatus", "failed").Persisted();
+        var completedStages = builder.WithVariable<string>("CompletedStages", "[]").Persisted();
+        var currentStage = builder.WithVariable<string>("CurrentStage", "").Persisted();
+        var stageResult = builder.WithVariable<string>("StageResult", "").Persisted();
+        var stageError = builder.WithVariable<string>("StageError", "").Persisted();
+        var rollbackStatus = builder.WithVariable<string>("RollbackStatus", "").Persisted();
+        var releaseTag = builder.WithVariable<string>("ReleaseTag", "").Persisted();
         // Epic 38 follow-up #21 — the real release-step outputs (was the hardcoded
         // "deferred"). CreateReleaseActivity sets these on its outcome.
-        var releaseStatus = builder.WithVariable<string>("ReleaseStatus", "");
-        var releaseUrl = builder.WithVariable<string>("ReleaseUrl", "");
+        var releaseStatus = builder.WithVariable<string>("ReleaseStatus", "").Persisted();
+        var releaseUrl = builder.WithVariable<string>("ReleaseUrl", "").Persisted();
         // #21 audit fidelity — CreateRelease's ErrorCode is captured in its OWN
         // variable, kept SEPARATE from the shared `stageError` that seeds a
         // PIPELINE.SUCCESS `reason`. A release-step failure is surfaced via
         // releaseStatus="failed" + the loud RELEASE.CREATED.FAILED event, never as the
         // success event's reason (which stays reserved for genuine stage failures).
-        var releaseError = builder.WithVariable<string>("ReleaseError", "");
+        var releaseError = builder.WithVariable<string>("ReleaseError", "").Persisted();
 
-        var decisionVar = builder.WithVariable<string>("Decision", "");
-        var feedbackVar = builder.WithVariable<string>("Feedback", "");
-        var approverVar = builder.WithVariable<string>("Approver", "");
+        var decisionVar = builder.WithVariable<string>("Decision", "").Persisted();
+        var feedbackVar = builder.WithVariable<string>("Feedback", "").Persisted();
+        var approverVar = builder.WithVariable<string>("Approver", "").Persisted();
 
         // Per-stage retry counters (FR-16 — bounded retry + escalation).
-        var qaRetries = builder.WithVariable<int>("QaRetries", 0);
-        var uatRetries = builder.WithVariable<int>("UatRetries", 0);
-        var prodRetries = builder.WithVariable<int>("ProdRetries", 0);
+        var qaRetries = builder.WithVariable<int>("QaRetries", 0).Persisted();
+        var uatRetries = builder.WithVariable<int>("UatRetries", 0).Persisted();
+        var prodRetries = builder.WithVariable<int>("ProdRetries", 0).Persisted();
 
-        var llmResult = builder.WithVariable<IDictionary<string, object>?>();
+        var llmResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ================================================================
         // 1. Init
@@ -295,8 +295,8 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         //    silently disagreed with the edges, so the predicate is now monotone on
         //    its own — if a future author re-points the Denied edge back at this
         //    decision, the worst case is an extra human wait, never a free deploy.
-        var gateOutcome = builder.WithVariable<string>("ProdGateOutcome", "");
-        var gateReason = builder.WithVariable<string>("ProdGateReason", "");
+        var gateOutcome = builder.WithVariable<string>("ProdGateOutcome", "").Persisted();
+        var gateReason = builder.WithVariable<string>("ProdGateReason", "").Persisted();
         var checkProdGate = new CheckActionGateActivity
         {
             Id = "CheckProdDeployGate", Name = "Check Prod Deploy Gate",
