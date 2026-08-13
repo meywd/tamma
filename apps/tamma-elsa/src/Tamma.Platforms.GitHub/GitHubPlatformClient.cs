@@ -878,6 +878,16 @@ public sealed class GitHubPlatformClient : IGitPlatformClient
     }
 
     /// <inheritdoc />
+    /// <remarks>GitHub issues and PRs share one number space and one
+    /// discussion-comment surface (<c>/issues/{n}/comments</c>), so the PR
+    /// verb IS the issue verb here — the split exists for GitLab, whose MR
+    /// iids are a separate sequence.</remarks>
+    public Task<PlatformResult<IssueComment>> CreatePullRequestCommentAsync(
+        string owner, string repoName, string prNumber, string body,
+        CancellationToken ct = default) =>
+        CreateIssueCommentAsync(owner, repoName, prNumber, body, ct);
+
+    /// <inheritdoc />
     public async Task<PlatformResult<WebhookRegistration>> RegisterWebhookAsync(
         RegisterWebhookRequest request, CancellationToken ct = default)
     {

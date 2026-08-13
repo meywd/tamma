@@ -835,6 +835,16 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
     }
 
     /// <inheritdoc />
+    /// <remarks>Gitea/Forgejo issues and PRs share one number space and one
+    /// comment surface (<c>/issues/{n}/comments</c> — pinned by
+    /// <c>CreateIssueCommentAsync_PostsToOpenPr</c> in the integration
+    /// tests), so the PR verb delegates; the split exists for GitLab.</remarks>
+    public Task<PlatformResult<IssueComment>> CreatePullRequestCommentAsync(
+        string owner, string repoName, string prNumber, string body,
+        CancellationToken ct = default) =>
+        CreateIssueCommentAsync(owner, repoName, prNumber, body, ct);
+
+    /// <inheritdoc />
     public async Task<PlatformResult<WebhookRegistration>> RegisterWebhookAsync(
         RegisterWebhookRequest request, CancellationToken ct = default)
     {

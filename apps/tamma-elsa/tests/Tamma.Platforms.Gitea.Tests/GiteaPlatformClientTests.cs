@@ -437,6 +437,29 @@ public class GiteaPlatformClientTests
         post.Body.Should().Contain("\"body\":\"comment\"");
     }
 
+    [Test]
+    public async Task CreatePullRequestCommentAsync_DelegatesToTheSharedIssueCommentSurface()
+    {
+        // Epic 31 review (F-high) — the PR-comment verb exists because GitLab
+        // MR iids are a separate sequence; on Gitea/Forgejo issues and PRs
+        // share one number space and one comment surface, so the verb rides
+        // /issues/{n}/comments (the shared-space behavior is proven live by
+        // GiteaIntegrationTests.CreateIssueCommentAsync_PostsToOpenPr).
+        var (client, _, handler, _) = GiteaTestFixtures.Build();
+        handler.EnqueueJson(HttpMethod.Post,
+            "https://gitea.example.com/api/v1/repos/octo/repo/issues/12/comments",
+            HttpStatusCode.Created,
+            """
+            {"id":77,"body":"pr feedback","user":{"login":"bot"},
+              "created_at":"2026-04-21T00:00:00Z"}
+            """);
+
+        var result = await client.CreatePullRequestCommentAsync("octo", "repo", "12", "pr feedback");
+
+        result.Should().BeOfType<PlatformResult<IssueComment>.Ok>()
+            .Which.Value.Id.Should().Be("77");
+    }
+
     // ───────────── RegisterWebhookAsync ─────────────
 
     [Test]

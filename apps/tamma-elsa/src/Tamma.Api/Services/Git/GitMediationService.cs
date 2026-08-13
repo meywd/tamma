@@ -948,9 +948,10 @@ public sealed class GitMediationService : IGitMediationService
             return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrCommentedFailed, body.CorrelationId, ct).ConfigureAwait(false);
 
         var (owner, repoName) = GitRepoName.Split(repo);
-        // A PR IS an issue on every supported platform's comment surface —
-        // reuse the issue-comment verb with the PR number.
-        var res = await cred.Client.CreateIssueCommentAsync(
+        // Epic 31 review (F-high) — a PR is only "an issue" where the number
+        // space is shared (GitHub/Gitea); GitLab MR iids are a separate
+        // sequence. The PR-comment verb lets each driver route by surface.
+        var res = await cred.Client.CreatePullRequestCommentAsync(
             owner, repoName, prNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), body.Body, ct).ConfigureAwait(false);
 
         if (res is not PlatformResult<PModels.IssueComment>.Ok)
@@ -1065,7 +1066,10 @@ public sealed class GitMediationService : IGitMediationService
         var op = GitEventTypes.PrReviewCommentOperation;
         var downgradedBody = BuildDowngradedReviewCommentBody(body.Path, body.Line, body.Body);
 
-        var posted = await cred.Client.CreateIssueCommentAsync(
+        // Epic 31 review (F-high) — the downgraded feedback targets the PR's
+        // own thread: on GitLab the issue-comment verb would misdeliver to an
+        // unrelated issue while emitting DOWNGRADED + success.
+        var posted = await cred.Client.CreatePullRequestCommentAsync(
             owner, repoName, prText, downgradedBody, ct).ConfigureAwait(false);
         if (posted is not PlatformResult<PModels.IssueComment>.Ok postedOk)
             return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrReviewCommentedFailed, body.CorrelationId, cred.Source, Describe(posted), new { prNumber, downgraded = true }, ct).ConfigureAwait(false);

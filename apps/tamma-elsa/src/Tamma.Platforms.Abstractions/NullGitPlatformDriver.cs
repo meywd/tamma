@@ -184,6 +184,11 @@ public sealed class NullGitPlatformDriver : IGitPlatformDriver
             CancellationToken ct = default) =>
             Task.FromResult(PlatformResult<IssueComment>.FromServiceUnavailable());
 
+        public Task<PlatformResult<IssueComment>> CreatePullRequestCommentAsync(
+            string owner, string repoName, string prNumber, string body,
+            CancellationToken ct = default) =>
+            Task.FromResult(PlatformResult<IssueComment>.FromServiceUnavailable());
+
         public Task<PlatformResult<WebhookRegistration>> RegisterWebhookAsync(
             RegisterWebhookRequest request, CancellationToken ct = default) =>
             Task.FromResult(PlatformResult<WebhookRegistration>.FromServiceUnavailable());

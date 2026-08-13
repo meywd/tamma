@@ -261,10 +261,30 @@ public interface IGitPlatformClient
         string owner, string repoName, string alertType, CancellationToken ct = default);
 
     /// <summary>
-    /// Post a top-level comment on an issue or PR.
+    /// Post a top-level comment on an ISSUE. On platforms with a shared
+    /// issue/PR number space (GitHub, Gitea/Forgejo) this also reaches a
+    /// PR's discussion thread, but callers holding a PR number MUST use
+    /// <see cref="CreatePullRequestCommentAsync"/> instead — see its doc.
     /// </summary>
     Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
         string owner, string repoName, string issueOrPrNumber, string body,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Post a top-level comment on a PULL REQUEST's discussion thread.
+    ///
+    /// <para>Epic 31 review (F-high) — this verb exists because "a PR is an
+    /// issue" is only true where issues and PRs share one number space
+    /// (GitHub, Gitea/Forgejo — their drivers delegate to the issue-comment
+    /// surface). On GitLab, issue iids and MR iids are SEPARATE per-project
+    /// sequences with separate notes endpoints: routing a PR number through
+    /// <see cref="CreateIssueCommentAsync"/> there delivers the comment to an
+    /// unrelated issue (or 404s). Mediation's PR-comment paths (the plain
+    /// PR-comment verb and the DG-2 review-comment downgrade) call THIS
+    /// method so the driver can route by surface, not by name.</para>
+    /// </summary>
+    Task<PlatformResult<IssueComment>> CreatePullRequestCommentAsync(
+        string owner, string repoName, string prNumber, string body,
         CancellationToken ct = default);
 
     /// <summary>

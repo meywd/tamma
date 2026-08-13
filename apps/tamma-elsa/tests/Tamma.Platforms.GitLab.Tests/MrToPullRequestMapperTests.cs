@@ -127,8 +127,11 @@ public sealed class MrToPullRequestMapperTests
         del.Should().Be(0);
     }
 
-    // ── Epic 31 P6 M1 — draft inferred from the title prefix when the
-    //    booleans are absent (older instances / thin webhook payloads). ──
+    // ── Epic 31 P6 M1 — draft inferred from the title prefix ONLY when the
+    //    booleans are absent (older instances / thin webhook payloads).
+    //    Epic 31 review (F-medium) amended the semantics: these cases now
+    //    leave Draft/WorkInProgress NULL (payload omitted them) — booleans,
+    //    when present, are authoritative (see the test below). ──
 
     [TestCase("Draft: fix the thing", true)]
     [TestCase("[Draft] fix the thing", true)]
@@ -139,17 +142,48 @@ public sealed class MrToPullRequestMapperTests
     [TestCase("fix the thing", false)]
     [TestCase("Undrafted: not a draft marker", false)]
     [TestCase("Drafting a fix", false)]
-    public void Map_infers_IsDraft_from_title_prefix(string title, bool expected)
+    public void Map_infers_IsDraft_from_title_prefix_WhenBooleansAbsent(string title, bool expected)
     {
         var mr = new GitLabMergeRequest
         {
             Iid = 7,
             Title = title,
             State = "opened",
+            // Draft / WorkInProgress deliberately left null: the payload
+            // omitted the booleans — the only case where inference may run.
+        };
+        MrToPullRequestMapper.Map(mr).IsDraft.Should().Be(expected);
+    }
+
+    // ── Epic 31 review (F-medium) — when the payload CARRIES the booleans
+    //    they are authoritative; a stale prefix never vetoes them. GitLab
+    //    ≥14.8 treats "WIP:" as ordinary title text, so a WIP-titled MR with
+    //    an explicit draft:false is a READY MR. ──
+
+    [Test]
+    public void Map_booleansPresent_AreAuthoritative_PrefixNeverVetoes()
+    {
+        var wipTitledReady = new GitLabMergeRequest
+        {
+            Iid = 7,
+            Title = "WIP: refactor auth",
+            State = "opened",
             Draft = false,
             WorkInProgress = false,
         };
-        MrToPullRequestMapper.Map(mr).IsDraft.Should().Be(expected);
+        MrToPullRequestMapper.Map(wipTitledReady).IsDraft.Should().BeFalse(
+            "the server said draft:false — on ≥14.8 the WIP prefix is just title text, and "
+            + "reporting IsDraft=true here made SetDraft(true) silently no-op on a ready MR");
+
+        var draftWithoutPrefix = new GitLabMergeRequest
+        {
+            Iid = 7,
+            Title = "fix the thing",
+            State = "opened",
+            Draft = true,
+            WorkInProgress = false,
+        };
+        MrToPullRequestMapper.Map(draftWithoutPrefix).IsDraft.Should().BeTrue();
     }
 
     // ── Epic 31 P6 M2 — merge read-backs (the merge activity fails loud on
@@ -170,6 +204,43 @@ public sealed class MrToPullRequestMapperTests
         };
         MrToPullRequestMapper.Map(squashed).MergeCommitSha.Should().Be("squash111",
             "a squash merge reports squash_commit_sha; merge_commit_sha can be null there");
+    }
+
+    // ── Epic 31 review (F-medium) — the THIRD merge shape: a fast-forward
+    //    merge (project merge method "ff", squash off) creates no merge
+    //    commit and no squash commit, so BOTH SHA fields are null; the merged
+    //    head is only in `sha`. Verified against gitlab-org/gitlab
+    //    merge_strategies/from_source_branch.rb (fast_forward! returns only
+    //    commit_sha, which lands in neither API field). ──
+
+    [Test]
+    public void Map_fastForwardMerge_BothShasNull_FallsBackToSha()
+    {
+        var fastForwarded = new GitLabMergeRequest
+        {
+            Iid = 5,
+            State = "merged",
+            Sha = "ffhead222",
+            MergeCommitSha = null,
+            SquashCommitSha = null,
+        };
+        MrToPullRequestMapper.Map(fastForwarded).MergeCommitSha.Should().Be("ffhead222",
+            "after an ff merge the MR's sha IS the new target tip — without this fallback a "
+            + "successful merge was reported as MergeOutcome.Failed(\"api_error\")");
+    }
+
+    [Test]
+    public void Map_openMr_NeverReportsHeadShaAsMergeSha()
+    {
+        var open = new GitLabMergeRequest
+        {
+            Iid = 5,
+            State = "opened",
+            Sha = "headsha333",
+        };
+        MrToPullRequestMapper.Map(open).MergeCommitSha.Should().BeNull(
+            "the sha fallback is gated on state=merged — an open MR's head SHA must never "
+            + "masquerade as a merge SHA");
     }
 
     [TestCase("mergeable", null, true)]

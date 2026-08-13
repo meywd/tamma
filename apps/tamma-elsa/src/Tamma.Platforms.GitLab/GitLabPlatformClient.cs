@@ -786,7 +786,13 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
         }
 
         var title = dto.Title ?? string.Empty;
-        var isDraftNow = dto.Draft || dto.WorkInProgress || GitLabDraftTitle.HasDraftPrefix(title);
+        // Booleans-first (Epic 31 review, F-medium): this is a direct REST
+        // read, so draft/work_in_progress are authoritative when present;
+        // prefix inference only fills in when the payload omits both. The
+        // old OR let a human-habit "WIP:" title on a READY MR (GitLab ≥14.8
+        // ignores WIP) veto an explicit draft:false — SetDraft(true) then
+        // no-oped while reporting the MR as parked.
+        var isDraftNow = GitLabDraftTitle.IsDraft(dto.Draft, dto.WorkInProgress, title);
         if (isDraftNow == request.Draft)
         {
             return PlatformResult<PullRequest>.FromOk(MrToPullRequestMapper.Map(dto));
@@ -895,17 +901,37 @@ internal sealed class GitLabPlatformClient : IGitPlatformClient
     public async Task<PlatformResult<IssueComment>> CreateIssueCommentAsync(
         string owner, string repoName, string issueOrPrNumber, string body, CancellationToken ct = default)
     {
+        // ISSUE-thread comment ONLY. GitLab issue iids and MR iids are
+        // separate per-project sequences: a PR/MR number must go through
+        // CreatePullRequestCommentAsync (the MR notes surface) or the
+        // comment lands on an unrelated issue (Epic 31 review, F-high).
+        return await CreateNoteAsync(owner, repoName, "issues", issueOrPrNumber, body, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<PlatformResult<IssueComment>> CreatePullRequestCommentAsync(
+        string owner, string repoName, string prNumber, string body, CancellationToken ct = default)
+    {
+        // The MR discussion surface — projects/{pid}/merge_requests/{iid}/notes.
+        return await CreateNoteAsync(owner, repoName, "merge_requests", prNumber, body, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Shared notes POST for the two per-noteable comment surfaces
+    /// (<c>issues</c> / <c>merge_requests</c> — same payload, same response
+    /// shape, DIFFERENT iid sequences).</summary>
+    private async Task<PlatformResult<IssueComment>> CreateNoteAsync(
+        string owner, string repoName, string noteableSegment, string iid, string body,
+        CancellationToken ct)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
         var pid = EncodeProjectRef(owner, repoName);
         var payload = new { body };
         try
         {
-            // Notes endpoint also covers MRs, but for parity with the
-            // method name we route to /issues/. PR comments use the
-            // CreatePullRequestReviewCommentAsync entrypoint; this is
-            // the issue-thread comment.
             var (resp, note) = await _http.PostJsonAsync<object, GitLabNote>(
-                $"projects/{pid}/issues/{issueOrPrNumber}/notes", payload, ct).ConfigureAwait(false);
+                $"projects/{pid}/{noteableSegment}/{iid}/notes", payload, ct).ConfigureAwait(false);
             using (resp)
             {
                 if (!resp.Response.IsSuccessStatusCode)

@@ -63,8 +63,16 @@ internal sealed class GitLabMergeRequest
     public string? SourceBranch { get; set; }
     public string? TargetBranch { get; set; }
     public string? State { get; set; }
-    public bool WorkInProgress { get; set; }
-    public bool Draft { get; set; }
+    /// <summary>Nullable ON PURPOSE (Epic 31 review, F-medium): "the payload
+    /// omitted the boolean" must be distinguishable from an explicit server
+    /// <c>false</c>. When either boolean is present it is authoritative —
+    /// GitLab ≥14.8 no longer treats WIP titles as drafts, so title-prefix
+    /// inference may only run when BOTH are absent (see
+    /// <see cref="GitLabDraftTitle.IsDraft"/>).</summary>
+    public bool? WorkInProgress { get; set; }
+
+    /// <inheritdoc cref="WorkInProgress"/>
+    public bool? Draft { get; set; }
     public string? WebUrl { get; set; }
     public GitLabUser? Author { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

@@ -307,6 +307,35 @@ public class GitLabPrLifecycleTests
         handler.Requests.Should().NotContain(r => r.Method == HttpMethod.Put);
     }
 
+    // ── Epic 31 review (F-medium) — the booleans-vs-prefix conflict. On
+    //    GitLab ≥14.8 a "WIP:" title is ordinary text: the server's explicit
+    //    draft:false makes the MR READY, and SetDraft(true) must actually
+    //    draft it (PUT "Draft: " onto the title), not no-op on stale prefix
+    //    inference while reporting IsDraft=true. ──
+
+    [Test]
+    public async Task SetDraftAsync_WipTitledReadyMr_BooleansWin_AndItGetsDrafted()
+    {
+        var (client, handler) = BuildLive();
+        handler.AddRoute(HttpMethod.Get, "/merge_requests/5",
+            _ => FakeHttpMessageHandler.Json(HttpStatusCode.OK,
+                MrJson(title: "WIP: refactor auth", draft: false)));
+        handler.AddRoute(HttpMethod.Put, "/merge_requests/5",
+            _ => FakeHttpMessageHandler.Json(HttpStatusCode.OK,
+                MrJson(title: "Draft: WIP: refactor auth", draft: true)));
+
+        var result = await client.SetDraftAsync(
+            new SetPullRequestDraftRequest("octo", "repo", "5", Draft: true));
+
+        result.Should().BeOfType<PlatformResult<PullRequest>.Ok>()
+            .Which.Value.IsDraft.Should().BeTrue();
+        handler.Requests.Single(r => r.Method == HttpMethod.Put)
+            .Body.Should().Contain("\"title\":\"Draft: WIP: refactor auth\"",
+                "only a current-generation Draft prefix actually drafts the MR on ≥14.8 — "
+                + "the legacy WIP prefix must neither satisfy the idempotency check nor "
+                + "suppress the write");
+    }
+
     // ───────────── The version gate (both directions) ─────────────
 
     [Test]

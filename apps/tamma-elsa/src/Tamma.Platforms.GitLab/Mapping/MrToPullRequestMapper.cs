@@ -39,17 +39,32 @@ internal static class MrToPullRequestMapper
             SourceBranch: mr.SourceBranch ?? string.Empty,
             TargetBranch: mr.TargetBranch ?? string.Empty,
             State: MapState(mr.State),
-            IsDraft: mr.Draft || mr.WorkInProgress || GitLabDraftTitle.HasDraftPrefix(mr.Title),
+            // Booleans-first (Epic 31 review, F-medium): prefix inference only
+            // when the payload omits both booleans — see GitLabDraftTitle.IsDraft.
+            IsDraft: GitLabDraftTitle.IsDraft(mr.Draft, mr.WorkInProgress, mr.Title),
             HtmlUrl: mr.WebUrl ?? string.Empty,
             AuthorLogin: mr.Author?.Username ?? mr.Author?.Name ?? string.Empty,
             CreatedAt: mr.CreatedAt,
             UpdatedAt: mr.UpdatedAt)
         {
             // Epic 31 P6 M2 — merge read-backs. The merge activity fails loud
-            // on a missing SHA, so both merge shapes are covered: a merge
+            // on a missing SHA, so ALL THREE merge shapes are covered: a merge
             // commit reports merge_commit_sha; a squash merge reports
-            // squash_commit_sha (merge_commit_sha can be null there).
-            MergeCommitSha = mr.MergeCommitSha ?? mr.SquashCommitSha,
+            // squash_commit_sha (merge_commit_sha can be null there); and a
+            // FAST-FORWARD merge (project merge method "ff", no squash) sets
+            // NEITHER — the merged head is only in `sha` (diff_head_sha, which
+            // IS the new target-branch tip after an ff merge). Without the
+            // third fallback a successful ff merge was reported as
+            // MergeOutcome.Failed("api_error") (Epic 31 review, F-medium;
+            // verified against gitlab-org/gitlab merge_strategies/
+            // from_source_branch.rb — the fast_forward path returns only
+            // commit_sha). Gated on state=merged so an OPEN MR's head SHA
+            // never masquerades as a merge SHA.
+            MergeCommitSha = mr.MergeCommitSha
+                ?? mr.SquashCommitSha
+                ?? (string.Equals(mr.State, "merged", StringComparison.OrdinalIgnoreCase)
+                    ? mr.Sha
+                    : null),
             Mergeable = MapMergeable(mr),
             MergeableState = mr.DetailedMergeStatus ?? mr.MergeStatus,
         };

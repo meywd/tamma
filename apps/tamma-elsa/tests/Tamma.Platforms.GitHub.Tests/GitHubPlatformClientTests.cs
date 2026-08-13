@@ -583,6 +583,23 @@ public sealed class GitHubPlatformClientTests
     }
 
     [Test]
+    public async Task CreatePullRequestComment_delegates_to_the_shared_issue_comment_surface()
+    {
+        // Epic 31 review (F-high) — the PR-comment verb exists because GitLab
+        // MR iids are a separate sequence; GitHub issues and PRs share one
+        // number space and one discussion-comment surface (/issues/{n}/comments).
+        var (client, handler) = Build();
+        handler.EnqueueJson(HttpMethod.Post, $"{Api}/repos/o/r/issues/12/comments",
+            HttpStatusCode.Created,
+            """{ "id": 3, "body": "pr feedback", "user": { "login": "bot" }, "created_at": "2026-08-01T00:00:00Z" }""");
+
+        var result = await client.CreatePullRequestCommentAsync("o", "r", "12", "pr feedback");
+
+        result.GetValueOrDefault()!.Body.Should().Be("pr feedback");
+        handler.Requests.Single().Url.Should().Contain("/issues/12/comments");
+    }
+
+    [Test]
     public async Task RegisterWebhook_posts_secret_config()
     {
         var (client, handler) = Build();

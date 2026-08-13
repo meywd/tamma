@@ -583,13 +583,18 @@ public class GitMediationServiceTests
     {
         Allow();
         ResolveDriver(GitCredentialSources.Byok);
-        _client.Setup(c => c.CreateIssueCommentAsync("acme", "widgets", "15", "hello", It.IsAny<CancellationToken>()))
+        // Epic 31 review (F-high) — the PR-comment path rides the PR-comment
+        // verb (GitLab MR iids are a separate sequence from issue iids).
+        _client.Setup(c => c.CreatePullRequestCommentAsync("acme", "widgets", "15", "hello", It.IsAny<CancellationToken>()))
             .ReturnsAsync(Ok(new IssueComment("9", "hello", "bot", DateTimeOffset.UtcNow)));
 
         var result = await _sut.CommentOnPullRequestAsync(_tenant, Repo, 15, new PrCommentRequest { Body = "hello", CorrelationId = "corr-cmt" });
 
         result.Success.Should().BeTrue();
         result.Outcome.Should().Be("Commented");
+        _client.Verify(c => c.CreateIssueCommentAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "routing a PR number through the issue-comment verb misdelivers on GitLab");
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrCommentedSuccess);
     }
 
@@ -770,7 +775,9 @@ public class GitMediationServiceTests
         ResolveDriver(GitCredentialSources.Byok,
             new HashSet<PlatformCapability> { PlatformCapability.PrLifecycle });
         string? postedBody = null;
-        _client.Setup(c => c.CreateIssueCommentAsync("acme", "widgets", "15", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        // Epic 31 review (F-high) — the downgraded feedback targets the PR's
+        // own thread via the PR-comment verb (MR notes surface on GitLab).
+        _client.Setup(c => c.CreatePullRequestCommentAsync("acme", "widgets", "15", It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Callback<string, string, string, string, CancellationToken>((_, _, _, b, _) => postedBody = b)
             .ReturnsAsync(Ok(new IssueComment("88", "x", "bot", DateTimeOffset.UtcNow)));
 
@@ -802,7 +809,7 @@ public class GitMediationServiceTests
                 It.IsAny<CreatePullRequestReviewCommentRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Fail<IssueComment>(new PlatformError.InvalidRequest(
                 "invalid_request", "line 5 is not part of the diff")));
-        _client.Setup(c => c.CreateIssueCommentAsync("acme", "widgets", "15", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _client.Setup(c => c.CreatePullRequestCommentAsync("acme", "widgets", "15", It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Ok(new IssueComment("89", "x", "bot", DateTimeOffset.UtcNow)));
 
         var body = new PrReviewCommentRequest { Body = "nit", CommitId = "sha1", Path = "a.cs", Line = 5, CorrelationId = "corr-rc" };
@@ -828,6 +835,8 @@ public class GitMediationServiceTests
         var result = await _sut.ReviewCommentOnPullRequestAsync(_tenant, Repo, 15, body);
 
         result.Success.Should().BeFalse();
+        _client.Verify(c => c.CreatePullRequestCommentAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         _client.Verify(c => c.CreateIssueCommentAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.PrReviewCommentedFailed);
@@ -839,7 +848,7 @@ public class GitMediationServiceTests
         Allow();
         ResolveDriver(GitCredentialSources.Byok,
             new HashSet<PlatformCapability> { PlatformCapability.PrLifecycle });
-        _client.Setup(c => c.CreateIssueCommentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _client.Setup(c => c.CreatePullRequestCommentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Fail<IssueComment>(new PlatformError.NotFound()));
 
         var body = new PrReviewCommentRequest { Body = "nit", CommitId = "sha1", Path = "a.cs", Line = 5, CorrelationId = "corr-rc" };
