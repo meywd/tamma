@@ -1,6 +1,6 @@
 # 2026-08-13 — external CI-run cancellations on PR #511 (and #512)
 
-**Status:** open — prime suspect identified, identity unconfirmed. Recorded so it is not re-litigated.
+**Status:** open — repository-wide (branch-scoping refuted 2026-08-14), identity unconfirmed. Recorded so it is not re-litigated.
 
 ## What happened
 
@@ -30,6 +30,27 @@ explains it.
 - **No concurrency-group collision** — every workflow's `concurrency` group was
   checked and all groups are distinct; none of the five cancellations can be a
   same-group preemption.
+
+## The branch-name hypothesis was tested and REFUTED (2026-08-14)
+
+Commit `755d1b0` was pushed a second time to a differently-named branch
+(`verify/epic31-ci-probe`, throwaway PR #513) to test whether the canceller
+keyed on the `claude/*` branch name or on whatever watches that branch.
+
+| Run | Branch | Started | Outcome |
+|---|---|---|---|
+| `755d1b0` | `claude/wiki-docs-sync-r31nvo` | 2026-08-14T01:53:33Z | cancelled |
+| `755d1b0` | `verify/epic31-ci-probe` | 2026-08-14T02:29:34Z | **cancelled 02:54:49Z (~25 min in)** |
+
+Identical commit, different branch, no competing push on either — both cancelled.
+**The canceller is not branch-scoped**; it acts on this repository's workflow
+runs generally. The consistent signature is a cancellation roughly 25–50 minutes
+into a long run, while short runs and (earlier in the same period) some full runs
+completed normally.
+
+Practical consequence: while this actor is running, a long CI run on this
+repository cannot be relied on to reach a verdict, on ANY branch. Verification
+has to come from local suites or from whoever can stop the canceller.
 
 ## Prime suspect
 
