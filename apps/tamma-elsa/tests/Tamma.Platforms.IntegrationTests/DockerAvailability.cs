@@ -23,13 +23,13 @@ internal static class DockerAvailability
     /// True if <c>docker info</c> returned exit code 0 within 5s at
     /// type init. Cached for the test run lifetime.
     /// </summary>
-    public static bool IsAvailable { get; }
+    public static bool IsAvailable { get; private set; }
 
     /// <summary>
     /// Reason string surfaced in skip messages — empty when
     /// <see cref="IsAvailable"/> is true.
     /// </summary>
-    public static string SkipReason { get; }
+    public static string SkipReason { get; private set; } = string.Empty;
 
     /// <summary>
     /// True when CI has set <c>PLATFORMS_REQUIRE_DOCKER=true</c>. In
