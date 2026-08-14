@@ -1,19 +1,26 @@
-# 2026-08-13 — external CI-run cancellations on PR #511
+# 2026-08-13 — external CI-run cancellations on PR #511 (and #512)
 
 **Status:** open — prime suspect identified, identity unconfirmed. Recorded so it is not re-litigated.
 
 ## What happened
 
-Five CI runs on branch `claude/wiki-docs-sync-r31nvo` (PR #511, the Epic 31 merge branch)
-were cancelled **externally, mid-run**:
+Six CI runs on branch `claude/wiki-docs-sync-r31nvo` were cancelled
+**externally, mid-run** — five while the branch carried PR #511 (the Epic 31
+merge branch) and one after it was restarted from `main` for PR #512, which
+shows the pattern follows the BRANCH (or the actor watching it), not one PR:
 
-| Date | Head commit |
-|---|---|
-| 2026-08-09 | `316d170` |
-| 2026-08-09 | `cffb83f` |
-| 2026-08-09 | `5659446` |
-| 2026-08-13 | `7474d97` |
-| 2026-08-13 | `fde545c` |
+| Date | Head commit | PR |
+|---|---|---|
+| 2026-08-09 | `316d170` | #511 |
+| 2026-08-09 | `cffb83f` | #511 |
+| 2026-08-09 | `5659446` | #511 |
+| 2026-08-13 | `7474d97` | #511 |
+| 2026-08-13 | `fde545c` | #511 |
+| 2026-08-13 | `43a85a0` (20:39Z) | #512 |
+
+One further #512 cancellation — `c0c518f` (17:25Z) — is NOT counted here: the
+next checkpoint pushed while it ran, so ordinary superseded-run concurrency
+explains it.
 
 ## What was ruled out (verified at the time)
 

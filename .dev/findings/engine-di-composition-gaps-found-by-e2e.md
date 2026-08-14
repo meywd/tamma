@@ -470,3 +470,59 @@ not fixed here. Mitigation direction: serialize dispatch inputs eagerly
 (deep-copy at enqueue), or upstream fix. A cycle that stalls with a dispatched
 child that never appears in the instance list + this queue crash in the log is
 THIS defect.
+
+## 32. The provider allowlist's config extension point was DEAD on the main LLM path — FIXED
+
+`Security:ProviderAllowlist:AdditionalProviders` is the documented way to
+admit a self-hosted or custom provider, and `ProviderAllowlist` binds it
+correctly — but `InlineToolLoopRunner.LoadProviderConfig` validated against
+`ProviderAllowlist.IsAllowedDefault`, a static convenience built from a
+`DefaultInstance` that is constructed with NO options. So a configured
+provider passed selection (chain resolution, agent config) and was then
+rejected at the last moment with "Provider 'x' is not in the allowlist,
+rejecting", after which the caller silently fell back to the platform default
+— in the E2E, a real vendor with no credentials, so every LLM call answered
+200 with empty content and the loop produced nothing. No deployment could ever
+have used the extension point on this path. **Fixed (2026-08-14):** the runner
+binds `Security:ProviderAllowlist` from its injected `IConfiguration` (cached
+per runner) and consults that instance; the built-in defaults still apply when
+nothing is configured. The E2E fixture now sets the entry as well — enablement,
+chain selection AND allowlisting are all required for a provider to serve a
+call, and it had only the first two.
+
+## 33. Nine MORE `Output.Set(context, null)` NRE sites (item 3's class was not fully swept) — FIXED
+
+Item 3 fixed the sites the first pass found; nine survived and each NRE'd at
+runtime the moment its activity ran: `UpdateIssueStatusActivity` (×2 — this one
+faulted mid-cycle in run 47), `WaitForPRMergedActivity`, `EscalateReviewActivity`,
+`DeliverGuidanceActivity` (×2), `WaitForFixesActivity` (×2),
+`DispatchAgentWorkflowActivity`. The compiler flags every instance as CS8625
+("cannot convert null literal to non-nullable reference type") because the
+literal binds the `Variable<T>` overload, so the warning list IS the detector.
+**Fixed (2026-08-14):** all nine pass a typed null; `grep -rn "\.Set(context,
+null)" src/` now returns zero.
+
+## 34. Background ticks are TENANT-LESS, so every background actor in a single-user deployment is gated off forever — FIXED
+
+A background tick has no HTTP scope, so `EnsurePersonalTenantMiddleware` (the
+item-12 fix) never runs and the ambient tenant is null. Every tenant-resident
+read the autonomy gate performs then throws ("AcceptanceRulesRepository
+requires an ambient tenant id"), the gate CORRECTLY reads unreadable policy as
+fail-closed, and `Apply` skips the tick — permanently, for every actor
+(`outbox-smtp-sender`, `task-queue-processor`, ...), at one ERROR log per tick
+(818 in a single 14-minute E2E run). This is a production defect in any
+single-user deployment, not a test artifact. **Fixed (2026-08-14):**
+`BackgroundActionGate` binds the sole user's EXISTING personal tenant onto the
+tick's scope before evaluating (`ISoleUserProvider` + membership lookup — the
+same seam the middleware uses). Read-only on purpose: minting a tenant belongs
+to a user request, so pre-setup deployments behave exactly as before, and the
+gate's fail-closed posture is untouched.
+
+## 35. Harness: one 5s docker probe failed 23 tests on a cold CI runner — FIXED
+
+`DockerAvailability` probed `docker info` exactly once with a 5s budget. A
+cold GitHub runner exceeded it, `RequireOrSkip` threw under
+`PLATFORMS_REQUIRE_DOCKER=true`, and all 23 Gitea+Forgejo tests failed
+OneTimeSetUp on an infrastructure hiccup (PR #512, 2026-08-14). **Fixed:**
+where docker is required (CI) the probe retries within a 60s budget; on a
+laptop it keeps the single fast probe so test discovery never stalls.

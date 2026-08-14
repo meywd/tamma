@@ -202,3 +202,44 @@ AdlOrchestrator → SingleIssueCycle workflows drive one seeded issue:
   posture made every cycle terminate needs-human. The full defect
   inventory this suite surfaced (23 items) is recorded in
   `.dev/findings/engine-di-composition-gaps-found-by-e2e.md`.
+
+## Running these suites in a locked-down sandbox (2026-08-14)
+
+A cloud dev sandbox may have neither the .NET SDK nor open registry access, and
+container resets can remove both mid-session. The recipe that works — recorded
+so the next run does not rediscover it:
+
+1. **No local SDK, and the installer host is blocked by network policy.** Run
+   every `dotnet` command inside the official SDK image instead, with the agent
+   proxy, the CA bundle, the NuGet cache, the docker socket AND the host's
+   `docker` binary mounted (the SDK image has no docker CLI, so the availability
+   probe throws `Win32Exception` and every fixture skips):
+
+   ```bash
+   docker run --rm --network host \
+     -e HTTP_PROXY -e HTTPS_PROXY -e NO_PROXY -e SSL_CERT_FILE=/ca/ca-bundle.crt \
+     -e TESTCONTAINERS_RYUK_DISABLED=true -e TMPDIR=/e2e-tmp \
+     -v /root/.ccr:/ca:ro -v <repo>:/src -v /root/.nuget:/root/.nuget \
+     -v <host-log-dir>:/e2e-tmp \
+     -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker:ro \
+     -w /src/apps/tamma-elsa mcr.microsoft.com/dotnet/sdk:8.0 dotnet test ...
+   ```
+
+   `TMPDIR` matters: the fixtures write their API/engine logs to the temp
+   directory, and without the mount those logs die with the container — which is
+   exactly what you need when a run fails.
+
+2. **Docker Hub blob downloads answer 403 through the proxy.** Pull from the
+   GCR mirror and retag to the names the fixtures request:
+
+   ```bash
+   docker pull mirror.gcr.io/library/postgres:17-alpine
+   docker tag  mirror.gcr.io/library/postgres:17-alpine postgres:17-alpine
+   docker pull mirror.gcr.io/gitea/gitea:1.21
+   docker tag  mirror.gcr.io/gitea/gitea:1.21 gitea/gitea:1.21
+   ```
+
+3. **The docker daemon stops on its own.** `docker info || ((sudo -n dockerd
+   >/tmp/dockerd.log 2>&1 &); sleep 15)` before any run.
+
+None of this applies to CI, which has a real SDK and registry access.
