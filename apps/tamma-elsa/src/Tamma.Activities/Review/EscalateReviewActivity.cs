@@ -239,7 +239,7 @@ public class EscalateReviewActivity : Activity
             "Senior-response SLA expired (durable timeout) for PR #{PRNumber}, session {SessionId} — taking the TimedOut outcome",
             prNumber, sessionId);
 
-        EscalationResponse.Set(context, null);
+        EscalationResponse.Set(context, (EscalationResponsePayload?)null);
         await context.CompleteActivityWithOutcomesAsync("TimedOut");
     }
 

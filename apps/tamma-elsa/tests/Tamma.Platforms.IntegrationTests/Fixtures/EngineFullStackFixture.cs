@@ -184,9 +184,15 @@ public sealed class EngineFullStackFixture : IAsyncDisposable
             // (no prod-approval human gate in the deployment pipeline).
             psi.Environment["Tamma__Mode"] = "single-user";
 
-            // The scripted LLM provider: enabled + selected as THE chain.
+            // The scripted LLM provider: enabled + selected as THE chain, and
+            // ALLOW-LISTED. All three are required: enablement registers it,
+            // the chain selects it, and the egress allowlist admits it — the
+            // tool-loop rejects any provider outside the allowlist and falls
+            // back to the platform default (which, in this fixture, is a real
+            // vendor with no credentials, so every call returned empty).
             psi.Environment["Llm__EnableScriptedProvider"] = "true";
             psi.Environment["Llm__DefaultProviderChain__0"] = "scripted";
+            psi.Environment["Security__ProviderAllowlist__AdditionalProviders__0"] = "scripted";
 
             // CI stub: TriggerCI succeeds with a synthetic run id; the test
             // resumes the suspended wait through /elsa/api/ci/waits.

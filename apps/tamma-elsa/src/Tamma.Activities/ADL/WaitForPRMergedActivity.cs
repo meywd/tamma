@@ -191,7 +191,7 @@ public class WaitForPRMergedActivity : TammaOutcomeActivity
     /// </summary>
     private async ValueTask OnTimeoutAsync(ActivityExecutionContext context)
     {
-        MergeSha.Set(context, null);
+        MergeSha.Set(context, (string?)null);
 
         Logger?.LogWarning(
             "Merge SLA expired (durable timeout) for PR #{PRNumber} — taking the TimedOut edge",

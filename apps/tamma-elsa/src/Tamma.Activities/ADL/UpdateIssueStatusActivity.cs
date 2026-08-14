@@ -168,8 +168,8 @@ public class UpdateIssueStatusActivity : Activity
     private void SetSuccess(ActivityExecutionContext context)
     {
         Updated.Set(context, true);
-        ErrorCode.Set(context, null);
-        Error.Set(context, null);
+        ErrorCode.Set(context, (string?)null);
+        Error.Set(context, (string?)null);
     }
 
     /// <summary>

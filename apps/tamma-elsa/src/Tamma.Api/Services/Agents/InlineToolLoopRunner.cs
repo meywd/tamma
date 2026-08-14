@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Credentials;
@@ -1322,6 +1323,22 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     /// config → descriptor). With no settings store wired — or no rows saved —
     /// the output is byte-identical to the pre-46-1 resolution.
     /// </summary>
+    private ProviderAllowlist? _allowlist;
+
+    /// <summary>
+    /// The allowlist bound from <c>Security:ProviderAllowlist</c>, cached for
+    /// the runner's lifetime. Falls back to the built-in defaults when no
+    /// configuration is present (the pre-2026-08-14 behaviour).
+    /// </summary>
+    private ProviderAllowlist ResolveAllowlist()
+    {
+        if (_allowlist is not null) return _allowlist;
+
+        var options = new ProviderAllowlistOptions();
+        _configuration?.GetSection("Security:ProviderAllowlist").Bind(options);
+        return _allowlist = new ProviderAllowlist(Options.Create(options));
+    }
+
     internal LlmProviderConfig LoadProviderConfig(string providerName, Guid? tenantId)
     {
         // F5 — the allowlist carries CANONICAL keys only; catalogue aliases
@@ -1334,8 +1351,15 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             ?? ProviderCatalog.ResolveNonHttp(providerName)?.Key
             ?? providerName;
 
-        // Validate the canonical provider name against the allowlist
-        if (!ProviderAllowlist.IsAllowedDefault(canonicalName))
+        // Validate the canonical provider name against the allowlist.
+        // 2026-08-14 (engine-driven E2E): this used the CONFIG-BLIND static
+        // helper, so `Security:ProviderAllowlist:AdditionalProviders` — the
+        // documented extension point for self-hosted/custom providers — was
+        // dead on the main LLM path: a configured provider passed selection
+        // and then got rejected here, and the caller silently fell back to the
+        // platform default. Bind the configured allowlist instead (built once;
+        // the defaults still apply when nothing is configured).
+        if (!ResolveAllowlist().IsAllowed(canonicalName))
         {
             _logger?.LogWarning("Provider '{Provider}' is not in the allowlist, rejecting", providerName);
             return new LlmProviderConfig { Name = providerName, Enabled = false };

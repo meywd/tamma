@@ -104,7 +104,7 @@ public class DeliverGuidanceActivity : Activity
             _logger?.LogWarning(
                 "No LLM guidance text for PR #{PRNumber}, iteration {Iteration}; routing to escalation",
                 prNumber, iteration);
-            Result.Set(context, null);
+            Result.Set(context, (FixGuidance?)null);
             await context.CompleteActivityWithOutcomesAsync("Failed");
             return;
         }
@@ -158,7 +158,7 @@ public class DeliverGuidanceActivity : Activity
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error delivering guidance for session {SessionId}", sessionId);
-            Result.Set(context, null);
+            Result.Set(context, (FixGuidance?)null);
             await context.CompleteActivityWithOutcomesAsync("Failed");
         }
     }
