@@ -71,7 +71,7 @@ public class GenerateQuestionsActivity : CodeActivity<QuestionSet>
         var storyId = StoryId.Get(context);
         var skillLevel = Math.Clamp(SkillLevel.Get(context), 1, 5);
         var storyContext = StoryContext.Get(context) ?? string.Empty;
-        var previousAttemptJson = PreviousAttemptJson.Get(context);
+        var previousAttemptJson = PreviousAttemptJson.GetOrDefault(context);
 
         _logger?.LogInformation(
             "Generating assessment questions for session {SessionId}, skill level {SkillLevel}",

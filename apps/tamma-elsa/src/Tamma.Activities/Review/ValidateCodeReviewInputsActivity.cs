@@ -71,10 +71,10 @@ public class ValidateCodeReviewInputsActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var result = Validate(
-            StoryId.Get(context),
-            RepositoryUrl.Get(context),
-            JuniorId.Get(context),
-            ReviewerIdsJson.Get(context),
+            StoryId.GetOrDefault(context),
+            RepositoryUrl.GetOrDefault(context),
+            JuniorId.GetOrDefault(context),
+            ReviewerIdsJson.GetOrDefault(context),
             LoadReviewerPool());
 
         if (!result.IsValid)

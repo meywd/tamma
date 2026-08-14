@@ -62,6 +62,42 @@ public static class ScriptedCycleLibrary
     public const string PoSummary =
         """{"summary":"Scripted PO summary: implement the seeded issue exactly as titled; scope is a single small change with tests.","links":[]}""";
 
+    // ── TDD single-shot cells (2026-08-13, engine-driven E2E run 34) ─────
+    // MediatedLlmText now threads the taxonomy action, so the TDD/debug
+    // activities' single-shot calls land on real {role}/{action} keys. Each
+    // payload matches ITS caller's parser exactly (pinned by
+    // ScriptedCycleScriptValidityTests):
+
+    /// <summary>tester/write-tests — WriteTestsActivity.ParseTestGenerationResponse.</summary>
+    public const string TddTestGeneration =
+        """{"testCode":"// scripted TDD tests (RED): assert the scripted feature contract\ndescribe('scripted feature', () => {\n  it('implements the required behavior', () => {\n    expect(true).toBe(false); // fails until the implementation lands\n  });\n  it('handles the edge case', () => {\n    expect(true).toBe(false);\n  });\n});","testFiles":["src/scripted/scripted-feature.test.js"],"testCount":2}""";
+
+    /// <summary>developer/implement-feature — WriteImplementationActivity.ParseImplementationResponse.</summary>
+    public const string TddImplementation =
+        """{"implementationCode":"// scripted implementation: minimum code to satisfy the scripted tests\nfunction scriptedFeature() {\n  return true;\n}","implementationFiles":["src/scripted/scripted-feature.js"]}""";
+
+    /// <summary>senior_developer/plan-refactor — AnalyzeCodeActivity: no suggestions,
+    /// so the TDD loop deterministically skips the refactor leg.</summary>
+    public const string TddNoRefactorNeeded =
+        """{"hasSuggestions":false,"confidence":0.2,"suggestions":[]}""";
+
+    /// <summary>developer/refactor — ApplyRefactoringActivity (only reachable if a
+    /// refactor is ever requested; a no-op keeps the loop deterministic).</summary>
+    public const string TddRefactorNoop =
+        """{"refactoredCode":"// scripted refactor: no changes required","filesChanged":[]}""";
+
+    /// <summary>senior_developer/debug-rootcause — RefineHypothesisActivity.ParseRefinementResponse.</summary>
+    public const string DebugHypotheses =
+        """{"analysis_summary":"Scripted diagnosis: the failure is the not-yet-implemented scripted feature.","hypotheses":[{"rank":1,"description":"Implementation missing for the scripted feature","confidence":0.9,"suggested_fix":"Implement scriptedFeature() to satisfy the failing tests","affected_files":["src/scripted/scripted-feature.js"]}]}""";
+
+    /// <summary>tester/write-regression-test — WriteRegressionTestActivity.ParseTestResponse.</summary>
+    public const string DebugRegressionTest =
+        """{"test_file_path":"src/scripted/scripted-regression.test.js","test_name":"scripted regression: feature contract holds","fails_as_expected":true}""";
+
+    /// <summary>developer/implement-fix — ApplyReviewFixesActivity.ParseFixResponse.</summary>
+    public const string ReviewFixGeneration =
+        """{"fixedCode":"// scripted fix: address the review comment with the minimum change","filesFixed":["src/scripted/scripted-feature.js"],"fixDescriptions":[]}""";
+
     private const string ContextScanFindings =
         "Scripted context scan: repository follows its documented conventions; no blockers, " +
         "no ambiguity; the change is small and self-contained.";
@@ -83,19 +119,43 @@ public static class ScriptedCycleLibrary
             ["architect/context-scan"] = ContextScanFindings,
             ["product_owner/summarize-stakeholder"] = PoSummary,
 
-            // ── the 39-7 reviewer PANEL roster: CANONICAL Review approvals —
-            //    these calls declare documentType="review" and the 39-9 ring
-            //    validates them against the Review registry validator
-            //    (2026-08-13; the legacy verdict shape fails that ring) ──
-            ["architect/plan-review"] = CanonicalReviewApprove,
-            ["senior_developer/plan-review"] = CanonicalReviewApprove,
-            ["security/plan-review-security"] = CanonicalReviewApprove,
-            ["developer/review-feasibility"] = CanonicalReviewApprove,
-            ["tester/review-testability"] = CanonicalReviewApprove,
-            ["devops/review-operability"] = CanonicalReviewApprove,
-            ["product_owner/review-scope"] = CanonicalReviewApprove,
-            ["tech_writer/review-docs"] = CanonicalReviewApprove,
-            ["ux_designer/review-design"] = CanonicalReviewApprove,
+            // ── review cells — TWO consumers, TWO shapes (2026-08-13):
+            //    * the 39-7 single-reviewer/panel path declares
+            //      documentType="review" (the 39-9 ring validates the reply
+            //      against the Review registry validator) → the QUALIFIED
+            //      {role}/{action}@review cells serve the CANONICAL Review;
+            //    * the cycle's own plan-review/task-review workflows parse the
+            //      LEGACY verdict JSON directly (no documentType) → the BARE
+            //      cells keep the verdict shape. Serving canonical to the
+            //      legacy parser turned every plan review into needs-human. ──
+            ["architect/plan-review@review"] = CanonicalReviewApprove,
+            ["senior_developer/plan-review@review"] = CanonicalReviewApprove,
+            ["security/plan-review-security@review"] = CanonicalReviewApprove,
+            ["developer/review-feasibility@review"] = CanonicalReviewApprove,
+            ["tester/review-testability@review"] = CanonicalReviewApprove,
+            ["devops/review-operability@review"] = CanonicalReviewApprove,
+            ["product_owner/review-scope@review"] = CanonicalReviewApprove,
+            ["tech_writer/review-docs@review"] = CanonicalReviewApprove,
+            ["ux_designer/review-design@review"] = CanonicalReviewApprove,
+
+            ["architect/plan-review"] = ApproveReviewVerdict,
+            ["senior_developer/plan-review"] = ApproveReviewVerdict,
+            ["security/plan-review-security"] = ApproveReviewVerdict,
+            ["developer/review-feasibility"] = ApproveReviewVerdict,
+            ["tester/review-testability"] = ApproveReviewVerdict,
+            ["devops/review-operability"] = ApproveReviewVerdict,
+            ["product_owner/review-scope"] = ApproveReviewVerdict,
+            ["tech_writer/review-docs"] = ApproveReviewVerdict,
+            ["ux_designer/review-design"] = ApproveReviewVerdict,
+
+            // ── TDD single-shot cells (MediatedLlmText, action threaded) ──
+            ["tester/write-tests"] = TddTestGeneration,
+            ["developer/implement-feature"] = TddImplementation,
+            ["senior_developer/plan-refactor"] = TddNoRefactorNeeded,
+            ["developer/refactor"] = TddRefactorNoop,
+            ["senior_developer/debug-rootcause"] = DebugHypotheses,
+            ["tester/write-regression-test"] = DebugRegressionTest,
+            ["developer/implement-fix"] = ReviewFixGeneration,
 
             // ── code review + guidance (CodeReviewWorkflow stores the text) ──
             ["senior_developer/code-review"] = ApproveReviewVerdict,

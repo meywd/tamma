@@ -467,8 +467,15 @@ development_status:
   #   P3 CI/agent-dispatch/engine callbacks on the driver plane + CI completion poller (DG-5); P4 webhook handlers + registration + CI secrets;
   #   P5 Gitea lifecycle + degradation pairs + full-stack Gitea E2E (headline: the cycle's git surface completes on Gitea, zero GitHub config);
   #   P6 GitLab lifecycle + diff_refs hardening + GitLab harness real (nightly) + mediation-level GitLab acceptance (full-stack GitLab E2E deferred per §7 owner default).
-  # Recorded follow-ups (outside the epic): (a) engine-DRIVEN E2E blocked on an LLM stub — no fake/echo LLM provider exists, so a fully autonomous
-  #   no-network-LLM cycle cannot execute anywhere incl. nightly CI (GiteaFullStackE2ETests documents this honestly);
+  # Recorded follow-ups (outside the epic): (a) CLOSED 2026-08-13 — the engine-DRIVEN E2E is no longer blocked: the scripted LLM provider landed
+  #   (opt-in "scripted" key, Llm:EnableScriptedProvider, deterministic role/action/document-type-keyed responses that pass the real 39-x validators;
+  #   structurally un-enablable on production-shaped hosts) and GiteaEngineDrivenE2ETests + EngineFullStackFixture now run the REAL Tamma.ElsaServer
+  #   against the P5 topology: seeded issue → AdlOrchestrator selects → SingleIssueCycle drives plan/tasks/test-spec (typed docs accepted) → branch +
+  #   draft PR → scripted agent commits → CI-stub leg (DG-5 resume, result fields now forwarded) → un-draft → merge decision → REAL Gitea squash-merge →
+  #   merged-PR webhook resumes WaitForPRMerged → scripted deployment pipeline → CYCLE.COMPLETED; zero GitHub config, zero network LLM. The harness
+  #   plays only the by-design external actors (document decider, CI system, human merge approver) through their shipped seams. The 23 real engine/API
+  #   defects the E2E surfaced en route (all fixed in the same change except two open DI composition gaps) are recorded in
+  #   .dev/findings/engine-di-composition-gaps-found-by-e2e.md;
   #   (b) github_installations naming — the guard-registry table is GitHub-named but carries non-GitHub single-user grants (P5 finding);
   #   (c) GitLab loop verbs (issue lifecycle/releases/commits/security-alerts) stay typed-unsupported by design — the DG degradation paths keep cycles alive.
   epic-31-retrospective: optional

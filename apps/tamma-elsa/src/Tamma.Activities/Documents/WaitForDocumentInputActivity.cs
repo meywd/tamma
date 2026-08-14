@@ -101,7 +101,7 @@ public class WaitForDocumentInputActivity : Activity
     protected override void Execute(ActivityExecutionContext context)
     {
         var sessionId = SessionId.Get(context);
-        var tenantId = TenantId.Get(context);
+        var tenantId = TenantId.GetOrDefault(context);
         var bookmarkName = InputBookmarkName(tenantId, sessionId);
 
         _logger?.LogInformation(
@@ -124,7 +124,7 @@ public class WaitForDocumentInputActivity : Activity
         var slaMinutes = supplied;
         if (slaMinutes <= 0)
         {
-            var configKey = TimeoutConfigKey.Get(context);
+            var configKey = TimeoutConfigKey.GetOrDefault(context);
             if (!string.IsNullOrWhiteSpace(configKey))
                 slaMinutes = _configuration?.GetValue<int?>(configKey) ?? 0;
         }

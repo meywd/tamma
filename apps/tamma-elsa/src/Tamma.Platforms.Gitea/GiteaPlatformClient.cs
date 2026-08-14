@@ -376,7 +376,27 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
             },
             MergeMessage = request.CommitMessage,
         };
-        var mergeResult = await _http.PostNoContentAsync(path, body, ct).ConfigureAwait(false);
+        // 2026-08-13 (engine-driven E2E run 37): Gitea's mergeability is computed
+        // ASYNC — after any head-branch push or PR edit (the cycle un-drafts via a
+        // title PATCH seconds before merging) the merge endpoint answers
+        // "405 Please try again later" until the checker settles. That 405 is
+        // Gitea SAYING it is transient, so a bounded retry with a short backoff
+        // belongs in the driver — treating it as terminal escalated a perfectly
+        // mergeable squash to a human. Non-405 failures return immediately.
+        PlatformResult<bool> mergeResult = null!;
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            if (attempt > 0)
+                await Task.Delay(TimeSpan.FromSeconds(2 * attempt), ct).ConfigureAwait(false);
+
+            mergeResult = await _http.PostNoContentAsync(path, body, ct).ConfigureAwait(false);
+            if (mergeResult is not PlatformResult<bool>.Failed retryProbe
+                || !IsMergeabilityStillComputing(retryProbe.Error))
+            {
+                break;
+            }
+        }
+
         return mergeResult switch
         {
             PlatformResult<bool>.Ok => await GetPullRequestAsync(
@@ -386,6 +406,14 @@ public sealed class GiteaPlatformClient : IGitPlatformClient
             _ => throw new InvalidOperationException("unhandled merge result"),
         };
     }
+
+    /// <summary>Gitea's transient not-yet-computed mergeability answer: HTTP 405
+    /// with "Please try again later" in the body (both the code and the hint are
+    /// probed — the mapper's heuristic classifier may rewrite the code).</summary>
+    internal static bool IsMergeabilityStillComputing(PlatformError error) =>
+        error is PlatformError.InvalidRequest ir
+        && (string.Equals(ir.Code, "405", StringComparison.Ordinal)
+            || (ir.Hint?.Contains("try again later", StringComparison.OrdinalIgnoreCase) ?? false));
 
     // ================================================================
     // Story 31-13 verbs, made REAL in Epic 31 P5 M1. Below the version

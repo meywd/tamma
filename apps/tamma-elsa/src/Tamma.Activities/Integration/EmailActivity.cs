@@ -79,7 +79,7 @@ public class EmailActivity : CodeActivity<EmailOperationResult>
         var body = Body.Get(context);
         var template = Template.Get(context);
         var templateData = TemplateData.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;

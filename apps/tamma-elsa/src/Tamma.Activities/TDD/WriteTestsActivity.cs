@@ -86,10 +86,10 @@ public class WriteTestsActivity : CodeActivity<TestGenerationResult>
         var storyId = StoryId.Get(context);
         var taskDescription = TaskDescription.Get(context);
         var taskFiles = TaskFiles.Get(context) ?? new List<string>();
-        var codeContext = CodeContext.Get(context);
+        var codeContext = CodeContext.GetOrDefault(context);
         var skillLevel = Math.Clamp(SkillLevel.Get(context), 1, 5);
         var isRewrite = IsRewrite.Get(context);
-        var previousTestCode = PreviousTestCode.Get(context);
+        var previousTestCode = PreviousTestCode.GetOrDefault(context);
 
         _logger?.LogInformation(
             "TDD RED phase: Writing {Action} tests for task in story {StoryId}, session {SessionId}, skill level {SkillLevel}",
@@ -103,7 +103,7 @@ public class WriteTestsActivity : CodeActivity<TestGenerationResult>
 
             var response = useMock
                 ? SimulateTestGeneration(taskDescription, taskFiles, isRewrite)
-                : await MediatedLlmText.CompleteAsync(context, "tester", prompt, context.CancellationToken);
+                : await MediatedLlmText.CompleteAsync(context, "tester", prompt, context.CancellationToken, action: "write-tests");
 
             var result = ParseTestGenerationResponse(response, taskFiles);
 

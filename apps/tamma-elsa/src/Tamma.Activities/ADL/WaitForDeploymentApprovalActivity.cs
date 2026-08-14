@@ -122,9 +122,9 @@ public class WaitForDeploymentApprovalActivity : TammaOutcomeActivity
     protected override Task RunAsync(ActivityExecutionContext context)
     {
         var issueNumber = IssueNumber.Get(context);
-        var mergeSha = MergeSha.Get(context);
-        var tenantId = TenantId.Get(context);
-        var repository = Repository.Get(context);
+        var mergeSha = MergeSha.GetOrDefault(context);
+        var tenantId = TenantId.GetOrDefault(context);
+        var repository = Repository.GetOrDefault(context);
         var bookmarkName = BookmarkName(tenantId, repository, issueNumber, mergeSha);
 
         Logger?.LogInformation(
@@ -183,7 +183,7 @@ public class WaitForDeploymentApprovalActivity : TammaOutcomeActivity
     public override Dictionary<string, object?> BuildStartData(ActivityExecutionContext context) => new()
     {
         ["issueNumber"] = IssueNumber.Get(context),
-        ["mergeSha"] = MergeSha.Get(context) ?? "",
+        ["mergeSha"] = MergeSha.GetOrDefault(context) ?? "",
         ["stage"] = "production",
     };
 

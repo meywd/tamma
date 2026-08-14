@@ -67,7 +67,7 @@ public class CollectTestResultsActivity : CodeActivity<TestResultsContext>
         var branchName = BranchName.Get(context);
         var mode = DebugContextMode.Get(context);
         var errorOutput = ErrorOutput.Get(context) ?? string.Empty;
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;

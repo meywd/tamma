@@ -104,11 +104,11 @@ public class EscalateReviewActivity : Activity
         var sessionId = SessionId.Get(context);
         var prNumber = PRNumber.Get(context);
         var juniorId = JuniorId.Get(context);
-        var storyId = StoryId.Get(context);
-        var tenantId = TenantId.Get(context);
+        var storyId = StoryId.GetOrDefault(context);
+        var tenantId = TenantId.GetOrDefault(context);
         var reason = Reason.Get(context);
         var iterations = IterationsAttempted.Get(context);
-        var message = EscalationMessage.Get(context);
+        var message = EscalationMessage.GetOrDefault(context);
 
         _logger?.LogInformation(
             "Escalating review for PR #{PRNumber}, reason: {Reason}, session {SessionId}",

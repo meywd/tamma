@@ -19,7 +19,7 @@ namespace Tamma.Platforms.IntegrationTests;
 /// (LocalExecutor's process seam). One issue is seeded in Gitea; the ACTUAL
 /// AdlOrchestrator → SingleIssueCycle workflows drive it.
 ///
-/// <para><b>What the harness plays, and why that is honest.</b> Three seams
+/// <para><b>What the harness plays, and why that is honest.</b> Four seams
 /// are, BY DESIGN, external actors the deployed product also waits on — the
 /// test drives each through its shipped public seam, never a shortcut:</para>
 /// <list type="bullet">
@@ -37,6 +37,11 @@ namespace Tamma.Platforms.IntegrationTests;
 ///   <c>merge</c> decision on the engine's merge-approval resume seam once
 ///   the PR is un-drafted and mergeable — the gate is a HUMAN wait by design;
 ///   autonomy here would be a product change, not a test fidelity gap.</item>
+///   <item><b>the production-deploy approver</b> (43-9 Seam E): at the
+///   default autonomy dial the deploy-control effect gate routes the PROD
+///   deploy to a human; the test approves it through the shipped
+///   <c>/elsa/api/adl/deploy-approval/resume</c> seam after the merge —
+///   same rationale as the merge approver.</item>
 /// </list>
 ///
 /// <para><b>What is then proven end-to-end with no human and no network
@@ -195,9 +200,24 @@ public class GiteaEngineDrivenE2ETests
         }
 
         // ── 7. the cycle runs to COMPLETION (post-merge deployment included) ──
-        await WaitForEventAsync("CYCLE.COMPLETED", TimeSpan.FromMinutes(5),
-            "after the merge webhook resumes WaitForPRMerged, the deployment pipeline "
-            + "(scripted qa/uat/prod deploys) must finish and the cycle must emit its terminal");
+        // The FOURTH by-design external actor (2026-08-13, run 43): the
+        // deploy-control effect gate (43-9 Seam E) routes the PRODUCTION deploy
+        // to a human at the default autonomy dial — approve it through the
+        // shipped resume seam (/elsa/api/adl/deploy-approval/resume), exactly
+        // like the merge approver seat, then the scripted prod deploy runs and
+        // the cycle emits its terminal.
+        // Gitea's PR JSON spells it `merge_commit_sha` (run 45: the misspelled
+        // read produced a "none" sha segment and the resume 404'd forever).
+        var mergeShaForDeploy = pr.TryGetProperty("merge_commit_sha", out var msha)
+            ? msha.GetString()
+            : pr.TryGetProperty("merged_commit_sha", out var msha2) ? msha2.GetString() : null;
+        var completed = await ApproveProdDeployAndAwaitCompletionAsync(
+            issueNumber, mergeShaForDeploy, TimeSpan.FromMinutes(5));
+        completed.Should().BeTrue(
+            "after the merge webhook resumes WaitForPRMerged and the harness approves the "
+            + "production-deploy gate, the deployment pipeline (scripted qa/uat/prod deploys) "
+            + "must finish and the cycle must emit CYCLE.COMPLETED. "
+            + $"api log tail:\n{_stack.ApiLogTail(1500)}\nengine log tail:\n{_stack.EngineLogTail(2000)}");
 
         // ── 8. audit trail: every leg left its durable event ──
         var types = await EventTypesAsync();
@@ -313,6 +333,44 @@ public class GiteaEngineDrivenE2ETests
         return false;
     }
 
+    /// <summary>
+    /// The production-deploy approver seat (2026-08-13, run 43): poll for
+    /// CYCLE.COMPLETED while approving the deployment pipeline's prod-approval
+    /// gate through its shipped resume seam once it suspends (404 = not
+    /// suspended yet — retry next tick, the merge-approval convention).
+    /// </summary>
+    private async Task<bool> ApproveProdDeployAndAwaitCompletionAsync(
+        int issueNumber, string? mergeSha, TimeSpan budget)
+    {
+        var deadline = DateTimeOffset.UtcNow.Add(budget);
+        var approved = false;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if ((await EventTypesAsync()).Contains("CYCLE.COMPLETED")) return true;
+
+            if (!approved)
+            {
+                using var resp = await _engine.PostAsJsonAsync(
+                    "/elsa/api/adl/deploy-approval/resume", new
+                    {
+                        issueNumber,
+                        decision = "approve",
+                        feedback = "e2e harness: production deploy approved",
+                        approver = "e2e-harness",
+                        tenantId = (string?)null,
+                        repository = RepoSlug,
+                        mergeSha,
+                    }, Json);
+                TestContext.Out.WriteLine(
+                    $"[pump] deploy approval issue={issueNumber} sha={mergeSha} -> {(int)resp.StatusCode}");
+                if (resp.StatusCode != HttpStatusCode.NotFound) approved = true;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(3));
+        }
+        return false;
+    }
+
     /// <summary>Session ids of APPROVAL.REQUESTED audit rows (the cycle's own
     /// durable trace of suspended accept gates).</summary>
     private async Task<IReadOnlyList<string>> PendingDecisionSessionsAsync()
@@ -364,7 +422,15 @@ public class GiteaEngineDrivenE2ETests
         foreach (var pr in doc.RootElement.EnumerateArray())
         {
             var head = pr.GetProperty("head").GetProperty("ref").GetString() ?? "";
-            if (head.StartsWith("adl/", StringComparison.Ordinal))
+            var title = pr.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "";
+            // 2026-08-13 (run 44): the cycle DELETES the head branch after a
+            // successful merge, and Gitea then rewrites the closed PR's
+            // head.ref to "refs/pull/{n}/head" — the branch-prefix match alone
+            // never sees the merged PR and the pump loops past its own
+            // terminal. The cycle's PR title prefix is the stable identity.
+            if (head.StartsWith("adl/", StringComparison.Ordinal)
+                || title.StartsWith("[ADL]", StringComparison.Ordinal)
+                || title.StartsWith("WIP: [ADL]", StringComparison.Ordinal))
             {
                 return pr.Clone();
             }

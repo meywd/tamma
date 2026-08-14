@@ -119,14 +119,14 @@ public class CreatePullRequestActivity : Activity
         var baseBranch = BaseBranch.Get(context) ?? "main";
         var issueNumber = IssueNumber.Get(context);
         var issueTitle = IssueTitle.Get(context) ?? "";
-        var planJson = PlanJson.Get(context);
+        var planJson = PlanJson.GetOrDefault(context);
         var draft = Draft.Get(context);
-        var aiBody = AiBody.Get(context);
-        var changeSummary = ChangeSummary.Parse(ChangeSummaryJson.Get(context));
-        var testSummary = TestSummary.Parse(TestSummaryJson.Get(context));
-        var issueLabels = ParseStringList(IssueLabelsJson.Get(context));
-        var reviewers = ParseStringList(ReviewersJson.Get(context));
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var aiBody = AiBody.GetOrDefault(context);
+        var changeSummary = ChangeSummary.Parse(ChangeSummaryJson.GetOrDefault(context));
+        var testSummary = TestSummary.Parse(TestSummaryJson.GetOrDefault(context));
+        var issueLabels = ParseStringList(IssueLabelsJson.GetOrDefault(context));
+        var reviewers = ParseStringList(ReviewersJson.GetOrDefault(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
 
         var title = BuildTitle(issueNumber, issueTitle);
         var body = BuildBody(issueNumber, aiBody, planJson, changeSummary, testSummary);

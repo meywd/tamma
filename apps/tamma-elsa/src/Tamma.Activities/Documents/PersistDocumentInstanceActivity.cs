@@ -65,8 +65,8 @@ public class PersistDocumentInstanceActivity : Activity
             ?? throw Failed(
                 "TammaApiClient is not registered — the engine cannot reach the document store.", null);
 
-        Guid? correlatingEventId = Guid.TryParse(CorrelatingEventId.Get(context), out var g) ? g : null;
-        var tenantId = TenantId.Get(context);
+        Guid? correlatingEventId = Guid.TryParse(CorrelatingEventId.GetOrDefault(context), out var g) ? g : null;
+        var tenantId = TenantId.GetOrDefault(context);
 
         try
         {

@@ -50,7 +50,7 @@ public class CheckCoverageActivity : CodeActivity<CoverageCheckResult>
     {
         var ciResults = CIResults.Get(context);
         var skillLevel = Math.Clamp(SkillLevel.Get(context), 1, 5);
-        var coverageOverride = MinCoverageOverride.Get(context);
+        var coverageOverride = MinCoverageOverride.GetOrDefault(context);
 
         var thresholds = QualityThresholds.ForSkillLevel(skillLevel);
         var requiredCoverage = coverageOverride ?? thresholds.MinCoveragePercent;

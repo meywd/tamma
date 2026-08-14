@@ -72,13 +72,13 @@ public class BuildCodeReviewResultActivity : CodeActivity<CodeReviewWorkflowResu
             Success = Success.Get(context),
             FinalStatus = FinalStatus.Get(context),
             PRNumber = prNumber > 0 ? prNumber : null,
-            PRUrl = PRUrl.Get(context),
-            MergeSha = MergeSha.Get(context),
+            PRUrl = PRUrl.GetOrDefault(context),
+            MergeSha = MergeSha.GetOrDefault(context),
             TotalIterations = totalIterations,
             ReviewRounds = totalIterations + 1,
             WasEscalated = WasEscalated.Get(context),
-            EscalationResolution = EscalationResolution.Get(context),
-            Message = Message.Get(context),
+            EscalationResolution = EscalationResolution.GetOrDefault(context),
+            Message = Message.GetOrDefault(context),
             CompletedAt = DateTime.UtcNow
         };
 

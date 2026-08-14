@@ -92,7 +92,7 @@ public class ApplyRefactoringActivity : CodeActivity<RefactoringResult>
 
             var response = useMock
                 ? SimulateRefactoring(implementationCode)
-                : await MediatedLlmText.CompleteAsync(context, "implementer", prompt, context.CancellationToken);
+                : await MediatedLlmText.CompleteAsync(context, "developer", prompt, context.CancellationToken, action: "refactor");
 
             var result = ParseRefactoringResponse(response);
 

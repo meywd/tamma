@@ -149,11 +149,56 @@ Topology (one logical deployment):
   dotnet test tests/Tamma.Platforms.IntegrationTests --filter "TestCategory=GiteaE2E"
   ```
 
-Recorded gap (see the explicitly-Ignored
-`FullEngineCycle_SingleIssue_CompletesOnGitea`): driving the cycle from
-the Tamma.ElsaServer engine process needs an LLM stub — the plan/review/
-task steps run through `POST /api/v1/llm/call` and no fake/echo provider
-exists in the codebase. The scripted no-LLM seam that DOES exist
-(`LocalExecutor`'s `IProcessRunner` / CLI exec-request protocol) covers
-only the agent plane. Until an LLM stub lands, the engine-driven variant
-cannot run anywhere, nightly CI included.
+## The engine-driven autonomous E2E (2026-08-13 — the recorded gap, closed)
+
+`GiteaEngineDrivenE2ETests` (+ `Fixtures/EngineFullStackFixture`) is the
+formerly-Ignored headline made real: the LLM stub the gap was recorded
+against now exists (the opt-in **scripted LLM provider**,
+`Llm:EnableScriptedProvider` — deterministic in-process responses keyed
+on role/action/document-type, structurally un-enablable on any
+production-shaped host), so the REAL `Tamma.ElsaServer` binary joins the
+P5 topology as a second host process and the ACTUAL
+AdlOrchestrator → SingleIssueCycle workflows drive one seeded issue:
+
+```
+┌ containers ────────────────────────────┐  ┌ host processes ──────────────┐
+│ gitea/gitea:1.21   postgres:17 ×2      │  │ Tamma.Api  (real binary)     │
+│  └ webhooks → host.docker.internal ────┼─▶│   ▲ llm/git/issue mediation  │
+│                                        │◀─┼─  │  + scripted LLM provider │
+│  (engine DB = 3rd database on the      │  │ Tamma.ElsaServer (real       │
+│   app-DB container)                    │  │   binary, drives the cycle)  │
+└────────────────────────────────────────┘  └──────────────────────────────┘
+```
+
+- **Engine config:** `Llm:DefaultProviderChain=[scripted]` (the config-tier
+  provider selection), `Testing:UseMock=true` (CI-stub trigger),
+  `Agent:Local:*` → a python3 scripted agent that makes ONE real commit
+  per task via the Gitea API (empirically required: Gitea opens a
+  zero-diff draft PR but refuses to merge a commit-less one).
+- **The harness plays only the BY-DESIGN external actors**, each through
+  its shipped seam: the document decider
+  (`POST /api/documents/decisions/{sessionId}/resume`, sessions discovered
+  from APPROVAL.REQUESTED audit rows), the CI system (the engine's DG-5
+  `/elsa/api/ci/waits` seam, now forwarding the full result fields), and
+  the human merge approver (`/elsa/api/adl/merge-approval/resume`).
+- **What it proves end-to-end:** work selected off the seeded label →
+  typed documents (plan/tasks/test-spec) produced against the REAL
+  validators and accepted → branch + draft PR in Gitea → scripted agent
+  commits → CI-stub leg green → un-draft → merge decision → REAL
+  squash-merge → the merged-PR webhook crosses the container gateway and
+  resumes `WaitForPRMerged` → scripted deployment pipeline →
+  `CYCLE.COMPLETED`. Zero GitHub configuration, zero network LLM.
+- Same nightly gating as the P5 suite (`GiteaE2E` + `Nightly`; the
+  `gitea-e2e-nightly` job / `run-gitea-e2e` PR label). Locally:
+  `dotnet build Tamma.sln` then
+  `dotnet test tests/Tamma.Platforms.IntegrationTests --filter "TestCategory=GiteaE2E"`.
+- The engine runs as `ASPNETCORE_ENVIRONMENT=Production` (matching the
+  deployed engine) — one pre-existing engine DI composition defect
+  (`HourlyAnalyticsRollupScheduler`, a captive dependency) refuses a
+  Development boot and is outside this suite's scope. Re-entry is
+  ENABLED: the engine host now defaults to the HTTP-backed
+  latest-accepted read (`HttpLifecycleReEntryService`) — the plan-review
+  shim REQUIRES that read, so the old `Documents:ReEntryDisabled=true`
+  posture made every cycle terminate needs-human. The full defect
+  inventory this suite surfaced (23 items) is recorded in
+  `.dev/findings/engine-di-composition-gaps-found-by-e2e.md`.

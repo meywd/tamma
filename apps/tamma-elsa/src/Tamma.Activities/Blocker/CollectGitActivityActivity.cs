@@ -69,7 +69,7 @@ public class CollectGitActivityActivity : CodeActivity<GitActivitySignal>
         var repository = Repository.Get(context);
         var branchName = BranchName.Get(context);
         var lookbackHours = LookbackHours.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
 
         _logger?.LogInformation(

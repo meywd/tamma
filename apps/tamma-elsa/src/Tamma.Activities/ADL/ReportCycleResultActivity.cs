@@ -53,7 +53,10 @@ public class ReportCycleResultActivity : TammaAsyncActivity
     {
         var reason = Reason.Get(context);
         var issueNumber = IssueNumber.Get(context);
-        var error = Error.Get(context);
+        // 2026-08-13 (engine-driven E2E): Input<T>.Get THROWS "Error is required."
+        // on any null evaluated value — an OPTIONAL input must read GetOrDefault,
+        // or every non-error exit path (needsHuman included) faults right here.
+        var error = Error.GetOrDefault(context);
 
         // Set workflow output
         context.WorkflowExecutionContext.Output["exitReason"] = reason;

@@ -34,7 +34,13 @@ internal static class MediatedLlmText
         ActivityExecutionContext context,
         string role,
         string prompt,
-        CancellationToken ct)
+        CancellationToken ct,
+        // 2026-08-13 (engine-driven E2E run 34): the taxonomy ACTION of the call.
+        // This path passed no action, which (a) hid the call's identity from the
+        // audit tags and (b) left the scripted provider's role/action key empty —
+        // every TDD/debug single-shot missed its cell ("[tester/, *]"). Callers
+        // pass their canonical wire action (a real Prompts/{role}/{action}.md cell).
+        string? action = null)
     {
         var apiClient = context.GetRequiredService<TammaApiClient>();
         var tenantId = ResolveTenantId(context);
@@ -46,8 +52,20 @@ internal static class MediatedLlmText
             // blank-role default of "assistant" (neither canonical nor aliased)
             // would fail every such call.
             Role = string.IsNullOrWhiteSpace(role) ? "developer" : role,
+            Action = string.IsNullOrWhiteSpace(action) ? null : action,
             Prompt = prompt,
             EnableToolLoop = false,
+            // 2026-08-13 (engine-driven E2E run 33): honour the SAME deployment-tier
+            // provider selection the llm-call workflow applies (LlmCallWorkflow's
+            // ResolveChain: caller > DB chain > Llm:DefaultProviderChain). This
+            // direct path passed NO provider, so ManagedAgent fell back to the
+            // persona's provider — the two mediation paths chose DIFFERENT
+            // providers for the same role, and a deployment whose selected chain
+            // holds no key for the persona default fails only on THIS path
+            // (observed: TDD write-tests failing PROVIDER_CREDENTIAL_UNAVAILABLE
+            // on anthropic while every llm-call ran scripted). Null when the
+            // deployment sets no chain — the persona default then applies as before.
+            Provider = ResolveConfiguredProvider(context),
             // Story 43-14 (AC4) — the RUN correlation, not the sub-workflow's id.
             CorrelationId = string.IsNullOrWhiteSpace(context.WorkflowExecutionContext.CorrelationId)
                 ? context.WorkflowExecutionContext.Id
@@ -81,6 +99,30 @@ internal static class MediatedLlmText
         }
 
         return response.Text!;
+    }
+
+    /// <summary>
+    /// The deployment-tier provider selection: the FIRST allowlist-passing entry of
+    /// <c>Llm:DefaultProviderChain</c>, or null when the deployment configures no
+    /// chain (the API's persona/agent-config default then applies). Mirrors the
+    /// config tier of <c>LlmCallWorkflow.ResolveChain</c> — this single-shot path
+    /// has no caller/DB chain, so the config tier is the only one that can apply.
+    /// </summary>
+    internal static string? ResolveConfiguredProvider(ActivityExecutionContext context)
+    {
+        var configuration = context.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
+        if (configuration is null) return null;
+
+        var chain = Microsoft.Extensions.Configuration.ConfigurationBinder
+            .Get<string[]>(configuration.GetSection("Llm:DefaultProviderChain"));
+        if (chain is null || chain.Length == 0) return null;
+
+        var allowlist = context.GetService<Tamma.Activities.Security.ProviderAllowlist>()
+                        ?? new Tamma.Activities.Security.ProviderAllowlist();
+        return chain
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p.Trim())
+            .FirstOrDefault(p => allowlist.IsAllowed(p));
     }
 
     /// <summary>

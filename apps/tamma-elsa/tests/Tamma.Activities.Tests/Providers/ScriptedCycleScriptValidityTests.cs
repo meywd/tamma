@@ -171,16 +171,22 @@ public class ScriptedCycleScriptValidityTests
                 continue; // not on a review panel
             }
 
-            var response = responder.Respond(new ScriptedLlmCall(
-                "scripted", role.ToWire(), action.ToWire(), null, "m", "c"));
-            response.Success.Should().BeTrue(
-                $"reviewer cell ({role.ToWire()}, {action.ToWire()}) must be scripted — " +
+            // 2026-08-13: TWO consumers, TWO shapes. The 39-7 panel path
+            // declares documentType="review" (39-9 ring validates the reply as
+            // a canonical Review); the cycle's own plan-review/task-review
+            // parse the LEGACY verdict JSON with no documentType.
+            var panelReply = responder.Respond(new ScriptedLlmCall(
+                "scripted", role.ToWire(), action.ToWire(), "review", "m", "c"));
+            panelReply.Success.Should().BeTrue(
+                $"reviewer cell ({role.ToWire()}, {action.ToWire()}, @review) must be scripted — " +
                 "the 39-7 panel roster dispatches it");
-            // 2026-08-13: panel reviewer cells serve the CANONICAL Review —
-            // reviewer llm-calls declare documentType="review" and the 39-9
-            // ring validates them against the Review registry validator,
-            // which the legacy verdict shape does not satisfy.
-            response.ResponseText.Should().Be(ScriptedCycleLibrary.CanonicalReviewApprove);
+            panelReply.ResponseText.Should().Be(ScriptedCycleLibrary.CanonicalReviewApprove);
+
+            var legacyReply = responder.Respond(new ScriptedLlmCall(
+                "scripted", role.ToWire(), action.ToWire(), null, "m", "c"));
+            legacyReply.Success.Should().BeTrue();
+            legacyReply.ResponseText.Should().Be(ScriptedCycleLibrary.ApproveReviewVerdict,
+                "the documentType-less callers (plan-review / task-review) parse the legacy verdict shape");
         }
     }
 
@@ -196,6 +202,61 @@ public class ScriptedCycleScriptValidityTests
             "the scripted canonical approve must pass the Review validator, or every " +
             $"panel member exhausts the 39-9 repair ring (violations: " +
             $"[{string.Join("; ", result.Violations.Select(v => v.Message))}])");
+    }
+
+    // ── TDD single-shot cells: each payload satisfies ITS caller's parser ──
+    // (2026-08-13, engine-driven E2E run 34 — MediatedLlmText threads the
+    // taxonomy action, so these role/action cells now serve the TDD/debug
+    // activities' single-shot calls.)
+
+    [Test]
+    public void TddTestGeneration_ParsesThroughWriteTestsActivity()
+    {
+        var result = Tamma.Activities.TDD.WriteTestsActivity.ParseTestGenerationResponse(
+            ScriptedCycleLibrary.TddTestGeneration, new List<string>());
+        result.Success.Should().BeTrue(result.ErrorMessage ?? "");
+        result.TestCount.Should().BeGreaterThan(0);
+        result.TestFiles.Should().NotBeEmpty("CommitChanges needs the authored test files");
+        result.TestFiles.Should().OnlyContain(f => f.StartsWith("src/scripted/"),
+            "the E2E asserts the merged tree carries src/scripted/* files");
+    }
+
+    [Test]
+    public void TddImplementation_ParsesThroughWriteImplementationActivity()
+    {
+        var result = Tamma.Activities.TDD.WriteImplementationActivity.ParseImplementationResponse(
+            ScriptedCycleLibrary.TddImplementation);
+        result.Success.Should().BeTrue(result.ErrorMessage ?? "");
+        result.ImplementationFiles.Should().OnlyContain(f => f.StartsWith("src/scripted/"));
+    }
+
+    [Test]
+    public void TddNoRefactorNeeded_IsAnExplicitNoSuggestionsAnalysis()
+    {
+        using var doc = JsonDocument.Parse(ScriptedCycleLibrary.TddNoRefactorNeeded);
+        doc.RootElement.GetProperty("hasSuggestions").GetBoolean().Should().BeFalse(
+            "a scripted refactor suggestion would make the TDD loop nondeterministic");
+    }
+
+    [Test]
+    public void ReviewFixGeneration_ParsesThroughApplyReviewFixes()
+    {
+        var result = Tamma.Activities.ADL.ApplyReviewFixesActivity.ParseFixResponse(
+            ScriptedCycleLibrary.ReviewFixGeneration,
+            new Tamma.Activities.ADL.Models.ReviewAnalysisResult());
+        result.Success.Should().BeTrue(result.ErrorMessage ?? "");
+    }
+
+    [Test]
+    public void DebugCells_ParseAsTheirConsumersExpect()
+    {
+        using var hyp = JsonDocument.Parse(ScriptedCycleLibrary.DebugHypotheses);
+        hyp.RootElement.GetProperty("hypotheses").GetArrayLength().Should().BeGreaterThan(0,
+            "RefineHypothesis with zero hypotheses strands the debug loop");
+
+        using var reg = JsonDocument.Parse(ScriptedCycleLibrary.DebugRegressionTest);
+        reg.RootElement.GetProperty("fails_as_expected").GetBoolean().Should().BeTrue(
+            "a regression test that passes pre-fix is not a regression test");
     }
 
     // ── chain resolution: config-driven provider selection ──

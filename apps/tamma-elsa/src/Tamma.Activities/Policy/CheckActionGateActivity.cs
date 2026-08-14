@@ -155,9 +155,9 @@ public class CheckActionGateActivity : Activity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var actionKey = ActionKey.Get(context) ?? "";
-        var correlationId = Normalize(CorrelationId.Get(context))
+        var correlationId = Normalize(CorrelationId.GetOrDefault(context))
             ?? context.WorkflowExecutionContext.Id;
-        var tenantId = Normalize(TenantId.Get(context));
+        var tenantId = Normalize(TenantId.GetOrDefault(context));
 
         GovernanceEvaluateResponse? response = null;
         try
@@ -168,9 +168,9 @@ public class CheckActionGateActivity : Activity
                 response = await apiClient.EvaluateGovernanceAsync(
                     new GovernanceEvaluateRequest(
                         actionKey,
-                        Normalize(Role.Get(context)),
-                        Normalize(Operation.Get(context)),
-                        Normalize(Target.Get(context)),
+                        Normalize(Role.GetOrDefault(context)),
+                        Normalize(Operation.GetOrDefault(context)),
+                        Normalize(Target.GetOrDefault(context)),
                         correlationId),
                     tenantId,
                     context.CancellationToken).ConfigureAwait(false);

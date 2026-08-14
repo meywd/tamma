@@ -61,9 +61,9 @@ public class ClassifyBlockerActivity : CodeActivity<BlockerDiagnosisResult>
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var signals = Signals.Get(context);
-        var aiResponse = AIDiagnosisResponse.Get(context);
+        var aiResponse = AIDiagnosisResponse.GetOrDefault(context);
         var skillLevel = Math.Clamp(SkillLevel.Get(context), 1, 5);
-        var blockerContext = BlockerContext.Get(context);
+        var blockerContext = BlockerContext.GetOrDefault(context);
 
         _logger?.LogInformation("Classifying blocker from {SuccessfulCollectors}/{TotalCollectors} signals",
             signals.SuccessfulCollectors, signals.TotalCollectors);

@@ -11,12 +11,14 @@ namespace Tamma.Api.Services.Agents.Scripted;
 /// (role, action, documentType) keys + the loaded script: same call ⇒ same
 /// response, zero tokens, zero cost, no network.
 ///
-/// <para><b>Key resolution order</b> (first hit wins; keys normalized to
-/// lowercase): <c>{role}/{action}@{documentType}</c> →
-/// <c>{role}/{action}</c> → <c>@{documentType}</c> → registry example for the
-/// document type → <c>*</c>. A miss returns a FAILED response
-/// (HTTP 422-shaped, non-retryable) whose error message names every key
-/// tried — the "unscripted cell" contract, never a silent default.</para>
+/// <para><b>Key resolution</b> (first hit wins; keys normalized to lowercase),
+/// tier-split on whether the call carries a documentType: a TYPED call resolves
+/// <c>{role}/{action}@{documentType}</c> → <c>@{documentType}</c> → the type's
+/// registry example → <c>*</c>; a documentType-LESS call resolves
+/// <c>{role}/{action}</c> → <c>*</c>. The tiers never cross — a bare cell can
+/// never answer a typed-document call (and vice versa). A miss returns a FAILED
+/// response (HTTP 422-shaped, non-retryable) whose error message names every
+/// key tried — the "unscripted cell" contract, never a silent default.</para>
 /// </summary>
 public sealed class ScriptedLlmResponder : IScriptedLlmResponder
 {
@@ -140,28 +142,25 @@ public sealed class ScriptedLlmResponder : IScriptedLlmResponder
     {
         var cell = $"{role}/{action}";
 
+        // 2026-08-13 (engine-driven E2E, tier split — run 34): a call WITH a
+        // documentType is a TYPED-DOCUMENT call — the reply must be that
+        // document (qualified cell → per-type default → the type's own registry
+        // example). A call WITHOUT one is a free-form/legacy call — the bare
+        // {role}/{action} cell serves it. The tiers deliberately do NOT
+        // cross-fall-through: letting a bare cell answer a typed call re-created
+        // run 22's failure in reverse (the TDD single-shot cell
+        // 'tester/write-tests' — free-text test code — intercepted the
+        // test-spec PRODUCER's documentType='test-spec' call, which must answer
+        // with a test-spec document). Reviewer calls are consistent under the
+        // split: the 39-7 panel declares documentType='review' and resolves the
+        // qualified/{@review} tier; the documentType-less plan-review /
+        // task-review parsers get the bare verdict cells.
         if (docType.Length > 0)
         {
             var qualified = $"{cell}@{docType}";
             tried.Add(qualified);
             if (TryGet(qualified, out var t1)) return t1;
-        }
 
-        // 2026-08-13 (engine-driven E2E): the BARE role/action cell outranks the
-        // per-document-type default. A REVIEWER llm-call carries the SUBJECT's
-        // documentType (a plan review arrives as documentType='plan'), and the
-        // original order (@{doc} before {role}/{action}) answered it with the
-        // PLAN document example instead of the reviewer cell — every panel
-        // member's reply then failed Review validation until exhaustion
-        // (48× DOCUMENT.VALIDATED.FAILED documentType=review, four
-        // REVIEW_PANEL_UNDECIDABLE, run 22). A role/action the library scripts
-        // explicitly is ALWAYS more specific than "whatever document type the
-        // call happens to carry".
-        tried.Add(cell);
-        if (TryGet(cell, out var t3)) return t3;
-
-        if (docType.Length > 0)
-        {
             var typeDefault = $"@{docType}";
             tried.Add(typeDefault);
             if (TryGet(typeDefault, out var t2)) return t2;
@@ -171,6 +170,11 @@ public sealed class ScriptedLlmResponder : IScriptedLlmResponder
             tried.Add($"(registry example for '{docType}')");
             var example = ScriptedCycleLibrary.DocumentExampleFor(docType);
             if (example is not null) return example;
+        }
+        else
+        {
+            tried.Add(cell);
+            if (TryGet(cell, out var t3)) return t3;
         }
 
         tried.Add("*");

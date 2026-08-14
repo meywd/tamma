@@ -644,7 +644,7 @@ public sealed class EmitCleanupTerminalEventActivity : TammaAsyncActivity
         Logger ??= context.GetService<ILogger<EmitCleanupTerminalEventActivity>>();
 
         var tenantId = ResolveTenantId(context);
-        var note = Note.Get(context);
+        var note = Note.GetOrDefault(context);
 
         var failedSteps = CleanupWorkflowState.GetFailedSteps(context);
         var succeededSteps = CleanupWorkflowState.GetSucceededSteps(context);

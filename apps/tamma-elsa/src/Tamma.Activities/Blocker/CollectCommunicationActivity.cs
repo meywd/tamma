@@ -49,7 +49,7 @@ public class CollectCommunicationActivity : CodeActivity<CommunicationSignal>
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var slackId = SlackId.Get(context);
+        var slackId = SlackId.GetOrDefault(context);
         var juniorId = JuniorId.Get(context);
 
         _logger?.LogInformation(

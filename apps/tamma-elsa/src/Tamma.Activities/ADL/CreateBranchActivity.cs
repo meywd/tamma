@@ -111,7 +111,7 @@ public class CreateBranchActivity : Activity
         var issueTitle = IssueTitle.Get(context) ?? "";
         var baseBranch = string.IsNullOrWhiteSpace(BaseBranch.Get(context)) ? DefaultBaseBranch : BaseBranch.Get(context)!;
         var strategy = string.IsNullOrWhiteSpace(ConflictStrategy.Get(context)) ? DefaultConflictStrategy : ConflictStrategy.Get(context)!;
-        var tenantId = NormalizeTenant(TenantId.Get(context));
+        var tenantId = NormalizeTenant(TenantId.GetOrDefault(context));
 
         // The candidate branch name is generated engine-side (pure, token-free);
         // the API performs the idempotent conflict-resolution + create + validate.

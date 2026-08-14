@@ -107,13 +107,13 @@ public class CreateReleaseActivity : Activity
     {
         var repository = Repository.Get(context) ?? "";
         var tag = TagName.Get(context) ?? "";
-        var targetRef = TargetRef.Get(context);
-        var name = ReleaseName.Get(context);
-        var body = Body.Get(context);
+        var targetRef = TargetRef.GetOrDefault(context);
+        var name = ReleaseName.GetOrDefault(context);
+        var body = Body.GetOrDefault(context);
         var draft = Draft.Get(context);
         var prerelease = Prerelease.Get(context);
         var issueNumber = IssueNumber.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
 
         var request = new GitCreateReleaseRequest
         {

@@ -117,6 +117,23 @@ public class TestingWorkflow : WorkflowBase
             Variable = maxAttemptsVar,
             Value = new Input<object?>(ctx =>
             {
+                // 2026-08-13 (engine-driven E2E run 36): capture the CALLER'S
+                // SessionId/Repository/Branch/SkillLevel inputs — every dispatcher
+                // (TddWorkflow, CiWithDebugRetry, Debugging, Mentorship) passes
+                // them, but nothing ever read them, so the variables kept their
+                // defaults: the CI wait suspended with repository="" and the DG-5
+                // /elsa/api/ci/waits listing (fail-closed on a blank repository)
+                // silently HID the wait — no CI seat could ever resume it and
+                // every TDD leg timed out.
+                var sid = ctx.GetInput<Guid>("SessionId");
+                if (sid != Guid.Empty) sessionIdVar.Set(ctx, sid);
+                var repo = ctx.GetInput<string>("Repository");
+                if (!string.IsNullOrWhiteSpace(repo)) repositoryVar.Set(ctx, repo);
+                var branch = ctx.GetInput<string>("Branch");
+                if (!string.IsNullOrWhiteSpace(branch)) branchVar.Set(ctx, branch);
+                var skill = ctx.GetInput<int?>("SkillLevel");
+                if (skill is > 0) skillLevelVar.Set(ctx, skill.Value);
+
                 // Best-effort tenant tag (callers may not supply it; single-user → empty).
                 var tenant = ctx.GetInput<string>("tenantId");
                 if (!string.IsNullOrWhiteSpace(tenant)) tenantIdVar.Set(ctx, tenant);

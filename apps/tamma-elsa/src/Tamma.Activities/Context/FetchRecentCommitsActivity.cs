@@ -69,7 +69,7 @@ public class FetchRecentCommitsActivity : CodeActivity<RecentCommitsResult>
         var storyId = StoryId.Get(context);
         var daysBack = DaysBack.Get(context);
         var maxCommits = MaxCommits.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
 

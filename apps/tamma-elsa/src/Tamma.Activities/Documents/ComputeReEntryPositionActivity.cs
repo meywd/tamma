@@ -75,10 +75,10 @@ public class ComputeReEntryPositionActivity : Activity
                 retryable: false,
                 severity: TammaErrorSeverity.High);
 
-        var issueId = IssueId.Get(context) ?? "";
-        var documentType = DocumentType.Get(context) ?? "";
-        var tenantId = DocumentEvents.ParseTenantId(TenantId.Get(context));
-        var correlationId = CorrelationId.Get(context);
+        var issueId = IssueId.GetOrDefault(context) ?? "";
+        var documentType = DocumentType.GetOrDefault(context) ?? "";
+        var tenantId = DocumentEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var correlationId = CorrelationId.GetOrDefault(context);
 
         var position = await service
             .ReconstructAsync(tenantId, issueId, documentType, context.CancellationToken)

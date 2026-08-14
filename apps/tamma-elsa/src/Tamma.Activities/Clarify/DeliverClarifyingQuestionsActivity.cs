@@ -71,10 +71,10 @@ public class DeliverClarifyingQuestionsActivity : CodeActivity<ClarifyDeliveryRe
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var sessionId = SessionId.Get(context);
-        var repository = Repository.Get(context);
+        var repository = Repository.GetOrDefault(context);
         var issueNumber = IssueNumber.Get(context);
         var questionsJson = QuestionsJson.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var ct = context.CancellationToken;
 

@@ -146,8 +146,8 @@ public class WaitForMergeApprovalActivity : TammaOutcomeActivity
     {
         var issueNumber = IssueNumber.Get(context);
         var prNumber = PrNumber.Get(context);
-        var tenantId = TenantId.Get(context);
-        var repository = Repository.Get(context);
+        var tenantId = TenantId.GetOrDefault(context);
+        var repository = Repository.GetOrDefault(context);
         var bookmarkName = BookmarkName(tenantId, repository, issueNumber, prNumber);
 
         Logger?.LogInformation(
@@ -208,7 +208,7 @@ public class WaitForMergeApprovalActivity : TammaOutcomeActivity
     {
         ["issueNumber"] = IssueNumber.Get(context),
         ["prNumber"] = PrNumber.Get(context),
-        ["prUrl"] = PrUrl.Get(context) ?? "",
+        ["prUrl"] = PrUrl.GetOrDefault(context) ?? "",
         // IMPORTANT-1 — forward-compatible audit signal; enforcement (FR-34) deferred.
         ["breakingChange"] = BreakingChange.Get(context),
     };

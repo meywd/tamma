@@ -67,7 +67,7 @@ public class CollectInactivityActivity : CodeActivity<InactivitySignal>
         var repository = Repository.Get(context);
         var branchName = BranchName.Get(context);
         var thresholdMinutes = InactivityThresholdMinutes.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
 
         _logger?.LogInformation(

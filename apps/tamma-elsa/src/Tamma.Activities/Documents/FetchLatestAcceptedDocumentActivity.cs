@@ -88,9 +88,9 @@ public class FetchLatestAcceptedDocumentActivity : Activity
             return;
         }
 
-        var issueId = IssueId.Get(context) ?? string.Empty;
-        var documentType = DocumentTypeKey.Get(context) ?? string.Empty;
-        var tenantId = DocumentEvents.ParseTenantId(TenantId.Get(context));
+        var issueId = IssueId.GetOrDefault(context) ?? string.Empty;
+        var documentType = DocumentTypeKey.GetOrDefault(context) ?? string.Empty;
+        var tenantId = DocumentEvents.ParseTenantId(TenantId.GetOrDefault(context));
 
         if (string.IsNullOrWhiteSpace(issueId) || string.IsNullOrWhiteSpace(documentType))
         {

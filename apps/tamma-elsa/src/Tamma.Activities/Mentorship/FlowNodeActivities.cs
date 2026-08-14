@@ -794,7 +794,7 @@ public class EscalateToSeniorActivity : Activity
         var logger = context.GetRequiredService<ILogger<EscalateToSeniorActivity>>();
         var repository = context.GetRequiredService<IMentorshipSessionRepository>();
         var sessionId = SessionId.Get(context);
-        var reason = Reason.Get(context);
+        var reason = Reason.GetOrDefault(context);
 
         logger.LogWarning(
             "Escalating session {SessionId} to senior developer. Reason: {Reason}",
@@ -955,7 +955,7 @@ public class FailSessionActivity : Activity
         var logger = context.GetRequiredService<ILogger<FailSessionActivity>>();
         var repository = context.GetRequiredService<IMentorshipSessionRepository>();
         var sessionId = SessionId.Get(context);
-        var reason = Reason.Get(context);
+        var reason = Reason.GetOrDefault(context);
 
         logger.LogError("Session {SessionId} failed. Reason: {Reason}", sessionId, reason ?? "Unknown");
 

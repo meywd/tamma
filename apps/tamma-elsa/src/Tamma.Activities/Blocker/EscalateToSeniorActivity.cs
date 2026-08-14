@@ -117,7 +117,7 @@ public class EscalateToSeniorActivity : Activity
         var severity = BlockerSeverity.Get(context);
         var diagnosisDetails = DiagnosisDetails.Get(context);
         var previousAttempts = PreviousAttempts.Get(context) ?? new List<string>();
-        var signals = Signals.Get(context);
+        var signals = Signals.GetOrDefault(context);
 
         _logger?.LogInformation(
             "Escalating blocker to senior: Session={SessionId}, Type={BlockerType}, Severity={Severity}",

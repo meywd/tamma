@@ -484,7 +484,13 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             var result = subResult.Get(ctx);
             if (result != null)
             {
-                if (result.TryGetValue("prNumber", out var n) && n is int num) prNumber.Set(ctx, num);
+                // 2026-08-13 (engine-driven E2E run 32): the dispatch result crosses a
+                // SUSPENSION (the child runs on a bookmark), so the rehydrated dictionary
+                // carries JSON-inferred CLR types — a JSON number comes back as long (or
+                // JsonElement), NEVER int. `n is int` was silently false for a PR that
+                // EXISTS, so PrOk failed the cycle right after GIT.PR_OPENED.SUCCESS.
+                if (result.TryGetValue("prNumber", out var n) && CoerceInt(n) is int num && num > 0)
+                    prNumber.Set(ctx, num);
                 if (result.TryGetValue("prUrl", out var u)) prUrl.Set(ctx, u?.ToString() ?? "");
             }
             return (object)prNumber.Get(ctx);
@@ -1498,6 +1504,26 @@ public class SingleIssueCycleWorkflow : WorkflowBase
     /// result FAILS the cycle. There is deliberately NO "no explicit signal → success"
     /// fallback — an absent or unrecognised deploy verdict must NOT report success.
     /// </summary>
+    /// <summary>
+    /// 2026-08-13 (engine-driven E2E run 32) — tolerant int read for dispatch-result
+    /// values. A child's <c>SetOutput</c> int crosses the parent's suspension as a
+    /// JSON number, which Elsa's object rehydration infers as <c>long</c> (or leaves
+    /// as a <c>JsonElement</c>) — never <c>int</c>. Booleans survive as CLR bools,
+    /// which is why the sibling gates' <c>is true</c> checks pass while a bare
+    /// <c>is int</c> silently loses a REAL value. Null for anything non-numeric.
+    /// </summary>
+    internal static int? CoerceInt(object? value) => value switch
+    {
+        int i => i,
+        long l and >= int.MinValue and <= int.MaxValue => (int)l,
+        double d when double.IsInteger(d) && d is >= int.MinValue and <= int.MaxValue => (int)d,
+        decimal m when decimal.Truncate(m) == m && m is >= int.MinValue and <= int.MaxValue => (int)m,
+        string s when int.TryParse(s, out var parsed) => parsed,
+        JsonElement { ValueKind: JsonValueKind.Number } e when e.TryGetInt32(out var n) => n,
+        JsonElement { ValueKind: JsonValueKind.String } e when int.TryParse(e.GetString(), out var n) => n,
+        _ => null,
+    };
+
     internal static bool IsDeploySuccessful(IDictionary<string, object>? result)
     {
         if (result == null) return false;

@@ -77,7 +77,7 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
         var sessionId = SessionId.Get(context);
         var analysisType = AnalysisType.Get(context);
         var content = Content.Get(context);
-        var additionalContext = Context.Get(context);
+        var additionalContext = Context.GetOrDefault(context);
         var skillLevel = Math.Clamp(SkillLevel.Get(context), 1, 5);
 
         _logger?.LogInformation(
@@ -96,7 +96,8 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
             var response = useMock
                 ? SimulateClaudeResponse(analysisType)
                 : await MediatedLlmText.CompleteAsync(
-                    context, "reviewer", $"{systemPrompt}\n\n{userPrompt}", context.CancellationToken);
+                    context, "senior_developer", $"{systemPrompt}\n\n{userPrompt}", context.CancellationToken,
+                    action: "code-review");
 
             var result = ParseResponse(response, analysisType);
 

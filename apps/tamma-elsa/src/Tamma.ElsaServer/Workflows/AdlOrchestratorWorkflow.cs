@@ -169,6 +169,22 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         };
         cooldown.SetDisplayText("Cooldown");
 
+        // 2026-08-13 (engine-driven E2E): the WAIT is a stock scheduling Delay
+        // (timer bookmark ⇒ the instance SUSPENDS and frees the dispatch
+        // worker). CooldownActivity used to Task.Delay in-process, which held
+        // the runtime's dispatch slot for the whole cooldown — with a real
+        // 3600s cooldown, every subsequently dispatched workflow (all the
+        // cycle's llm-calls included) queued behind the sleeping orchestrator
+        // and the loop deadlocked itself. CooldownActivity now only emits the
+        // ADL.COOLDOWN audit pair; this node does the waiting.
+        var cooldownWait = new Elsa.Scheduling.Activities.Delay(
+            ctx => TimeSpan.FromSeconds(Math.Max(1, cooldownSeconds.Get(ctx))))
+        {
+            Id = "CooldownWait",
+            Name = "Cooldown Wait",
+        };
+        cooldownWait.SetDisplayText("Cooldown Wait");
+
         // ================================================================
         // Exit paths
         // ================================================================
@@ -212,7 +228,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Activities =
             {
                 initConfig, selectWorkItem, dispatchTriage,
-                checkLimits, dispatchCycle, cooldown,
+                checkLimits, dispatchCycle, cooldown, cooldownWait,
                 exitNoIssues, exitLimits, dispatchAdl, finish
             },
             Connections =
@@ -239,8 +255,10 @@ public class AdlOrchestratorWorkflow : WorkflowBase
                 ConnectOutcome(checkLimits, "Continue", dispatchCycle),
                 Connect(dispatchCycle, cooldown),
 
-                // All paths: cooldown → dispatch new ADL → finish this instance
-                Connect(cooldown, dispatchAdl),
+                // All paths: cooldown (emit) → cooldown wait (timer bookmark)
+                // → dispatch new ADL → finish this instance
+                Connect(cooldown, cooldownWait),
+                Connect(cooldownWait, dispatchAdl),
                 Connect(dispatchAdl, finish),
             }
         };

@@ -91,7 +91,7 @@ public class DeliverGuidanceActivity : Activity
         var prNumber = PRNumber.Get(context);
         var iteration = Iteration.Get(context);
         var commentsJson = ReviewCommentsJson.Get(context);
-        var guidanceText = GuidanceText.Get(context);
+        var guidanceText = GuidanceText.GetOrDefault(context);
 
         _logger?.LogInformation(
             "Delivering fix guidance for PR #{PRNumber}, iteration {Iteration}, session {SessionId}",

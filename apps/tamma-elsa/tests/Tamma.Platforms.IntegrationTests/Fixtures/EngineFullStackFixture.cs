@@ -155,17 +155,19 @@ public sealed class EngineFullStackFixture : IAsyncDisposable
             }
 
             // Production, DELIBERATELY (matching the deployed engine): under
-            // Development, DI ValidateOnBuild refuses to boot the engine on two
-            // pre-existing registration defects — HourlyAnalyticsRollupScheduler
-            // (singleton hosted service) consumes the scoped IWorkflowDispatcher,
-            // and LifecycleReEntryService needs IDocumentInstanceRepository which
-            // no engine composition registers (AddTammaData is API-only). The
-            // deployed engine never sees either (no ValidateOnBuild outside
-            // Development); the second is neutralized below via the sanctioned
-            // Documents:ReEntryDisabled seam. Recorded in
-            // .dev/findings/ (engine-driven E2E follow-up, 2026-08-13).
+            // Development, DI ValidateOnBuild refuses to boot the engine on a
+            // pre-existing registration defect — HourlyAnalyticsRollupScheduler
+            // (singleton hosted service) consumes the scoped IWorkflowDispatcher.
+            // The deployed engine never sees it (no ValidateOnBuild outside
+            // Development). Recorded in .dev/findings/ (engine-driven E2E
+            // follow-up, 2026-08-13).
+            //
+            // Documents:ReEntryDisabled is deliberately NOT set: the engine now
+            // defaults to HttpLifecycleReEntryService (latest-accepted read over
+            // the API), which the plan-review shim REQUIRES — with the Null seam
+            // the shim can never see the accepted plan and every cycle terminates
+            // needs-human (run 29's root cause).
             psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
-            psi.Environment["Documents__ReEntryDisabled"] = "true";
             psi.Environment["ASPNETCORE_URLS"] = $"http://0.0.0.0:{enginePort}";
             psi.Environment["ConnectionStrings__DefaultConnection"] = engineDb;
             psi.Environment["Elsa__Identity__SigningKey"] =

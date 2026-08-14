@@ -83,7 +83,7 @@ public class RefineHypothesisActivity : CodeActivity<DiagnosisResult>
             // Mediated call-LLM (no direct provider key in the engine). "senior_developer"
             // is the canonical analytical role the API can resolve; the free-text
             // "debugger" label 422s. See AIDiagnosisActivity for the same cut-over.
-            var response = await MediatedLlmText.CompleteAsync(context, "senior_developer", prompt, context.CancellationToken);
+            var response = await MediatedLlmText.CompleteAsync(context, "senior_developer", prompt, context.CancellationToken, action: "debug-rootcause");
             var result = ParseRefinementResponse(response);
 
             _logger?.LogInformation(

@@ -64,7 +64,7 @@ public class RequestReviewActivity : CodeActivity<RequestReviewOutput>
         var prNumber = PRNumber.Get(context);
         var storyId = StoryId.Get(context);
         var juniorId = JuniorId.Get(context);
-        var reviewers = Reviewers.Get(context);
+        var reviewers = Reviewers.GetOrDefault(context);
 
         _logger?.LogInformation(
             "Requesting review on PR #{PRNumber} for session {SessionId}",

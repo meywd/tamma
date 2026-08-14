@@ -130,7 +130,7 @@ public class WaitForDocumentDecisionActivity : Activity
     protected override void Execute(ActivityExecutionContext context)
     {
         var sessionId = SessionId.Get(context);
-        var tenantId = TenantId.Get(context);
+        var tenantId = TenantId.GetOrDefault(context);
         var requestedAtUtc = RequestedAtUtc.Get(context);
 
         // D4 — fail LOUD if the durationMs basis is missing/unparseable, rather than
@@ -151,8 +151,8 @@ public class WaitForDocumentDecisionActivity : Activity
         // orchestrator (D6 — every request routes to the orchestrator).
         TammaEventEmitter.Emit(context, this, _logger, BuildRequestedEvent(
             sessionId, tenantId,
-            IssueId.Get(context), DocumentId.Get(context), DocumentType.Get(context),
-            CorrelationId.Get(context), RulesReference.Get(context), requestedAtUtc));
+            IssueId.GetOrDefault(context), DocumentId.GetOrDefault(context), DocumentType.GetOrDefault(context),
+            CorrelationId.GetOrDefault(context), RulesReference.GetOrDefault(context), requestedAtUtc));
 
         _logger?.LogInformation(
             "Waiting for document decision: bookmark={BookmarkName} for session {SessionId}",
@@ -180,16 +180,16 @@ public class WaitForDocumentDecisionActivity : Activity
 
         // D7 — the authoritative rules reference is the server-stamped activity input, not the
         // resume echo, so orchestrator decisions stay auditable.
-        var rulesReference = RulesReference.Get(context);
+        var rulesReference = RulesReference.GetOrDefault(context);
 
         _logger?.LogInformation(
             "Document decision resumed: kind={Kind} channel={Channel} decider={Decider} durationMs={Duration}",
             read.DecisionKind, read.Channel, read.DeciderId ?? "<none>", durationMs);
 
         TammaEventEmitter.Emit(context, this, _logger, BuildProvidedEvent(
-            SessionId.Get(context), TenantId.Get(context),
-            IssueId.Get(context), DocumentId.Get(context), DocumentType.Get(context),
-            CorrelationId.Get(context), rulesReference, read, durationMs));
+            SessionId.Get(context), TenantId.GetOrDefault(context),
+            IssueId.GetOrDefault(context), DocumentId.GetOrDefault(context), DocumentType.GetOrDefault(context),
+            CorrelationId.GetOrDefault(context), rulesReference, read, durationMs));
 
         context.Set(DecisionJson, read.DecisionJson);
         context.Set(Feedback, read.Feedback);

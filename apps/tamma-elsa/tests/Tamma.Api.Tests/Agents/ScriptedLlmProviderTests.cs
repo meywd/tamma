@@ -142,17 +142,18 @@ public class ScriptedLlmProviderTests
     }
 
     [Test]
-    public void Respond_KeyResolutionOrder_QualifiedThenBareCellThenTypeDefault()
+    public void Respond_KeyResolution_IsTierSplitOnDocumentType()
     {
-        // 2026-08-13 correction (found by the engine-driven E2E): the BARE
-        // role/action cell now outranks the @{documentType} default. A reviewer
-        // llm-call carries the SUBJECT's documentType (a plan review arrives as
-        // documentType='plan'), and the original order answered it with the PLAN
-        // example instead of the reviewer cell — every panel member's reply then
-        // failed Review validation until exhaustion (48× VALIDATED.FAILED, four
-        // REVIEW_PANEL_UNDECIDABLE in one run). An explicitly scripted
-        // role/action is always more specific than whatever document type the
-        // call happens to carry.
+        // 2026-08-13 correction #2 (engine-driven E2E run 34): resolution is
+        // TIER-SPLIT on documentType, and the tiers never cross. A typed call
+        // resolves qualified → @{doc} → registry example; a documentType-less
+        // call resolves the bare cell only. History: the first correction let
+        // the bare cell outrank @{doc} (reviewer calls then carried the
+        // SUBJECT's type — 48× VALIDATED.FAILED, run 22); after
+        // SingleReviewerWorkflow started declaring documentType='review', the
+        // bare-over-@doc rule re-created the same failure in reverse — the TDD
+        // single-shot cell 'tester/write-tests' (free-text test code)
+        // intercepted the test-spec PRODUCER's documentType='test-spec' call.
         var overrides = new Dictionary<string, string>
         {
             ["architect/plan-system-design@plan"] = "QUALIFIED",
@@ -170,8 +171,9 @@ public class ScriptedLlmProviderTests
             ["architect/plan-system-design"] = "BARE",
         });
         withoutQualified.Respond(new ScriptedLlmCall("scripted", "architect", "plan-system-design", "plan", "m", "c"))
-            .ResponseText.Should().Be("BARE",
-                "the scripted role/action cell must beat the per-document-type default");
+            .ResponseText.Should().Be("TYPE-DEFAULT",
+                "a TYPED call must be answered with a document of its type — the bare "
+                + "(free-form) cell must never intercept it");
 
         var typeDefaultOnly = new ScriptedLlmResponder(new Dictionary<string, string>
         {
@@ -184,6 +186,10 @@ public class ScriptedLlmProviderTests
         // No documentType ⇒ the bare cell serves.
         responder.Respond(new ScriptedLlmCall("scripted", "architect", "plan-system-design", null, "m", "c"))
             .ResponseText.Should().Be("BARE");
+
+        // …and a documentType-less call never falls back to typed-tier cells.
+        typeDefaultOnly.Respond(new ScriptedLlmCall("scripted", "architect", "plan-system-design", null, "m", "c"))
+            .Success.Should().BeFalse("the tiers must not cross in either direction");
     }
 
     // =====================================================================

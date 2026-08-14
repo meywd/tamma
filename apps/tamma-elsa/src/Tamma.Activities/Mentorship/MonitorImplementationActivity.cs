@@ -81,7 +81,7 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
         var juniorId = JuniorId.Get(context);
         var monitoringDuration = MonitoringDuration.Get(context);
         var checkInterval = CheckInterval.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;

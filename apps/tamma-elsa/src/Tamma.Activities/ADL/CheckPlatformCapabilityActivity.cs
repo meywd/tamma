@@ -80,7 +80,7 @@ public class CheckPlatformCapabilityActivity : Activity
     {
         var repository = Repository.Get(context) ?? "";
         var capability = Capability.Get(context) ?? "";
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
 
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         GitCapabilitiesResponse? response = null;

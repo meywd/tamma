@@ -84,7 +84,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
         var storyId = StoryId.Get(context);
         var juniorId = JuniorId.Get(context);
         var action = Action.Get(context);
-        var prNumber = PullRequestNumber.Get(context);
+        var prNumber = PullRequestNumber.GetOrDefault(context);
 
         _logger?.LogInformation(
             "Code review action {Action} for junior {JuniorId} on story {StoryId}",
@@ -170,7 +170,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
             };
         }
 
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;
