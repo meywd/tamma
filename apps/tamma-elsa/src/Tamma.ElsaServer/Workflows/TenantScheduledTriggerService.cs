@@ -656,13 +656,12 @@ public sealed class TenantScheduledTriggerService : BackgroundService
         // 2026-08-13 — the request ctor takes the VERSION id, not the definition
         // id (see PublishedWorkflowDispatch); resolve the published version first
         // or every fire dies WorkflowGraphNotFound in the dispatch queue.
-        var definitionVersionId = await Tamma.Activities.Core.PublishedWorkflowDispatch
-            .ResolvePublishedVersionIdAsync(definitionService, fire.DefinitionId, ct);
-        var request = new DispatchWorkflowDefinitionRequest(definitionVersionId)
-        {
-            InstanceId = instanceId,
-            Input = input,
-        };
+        // 2026-08-14: the resolve MUST sit inside the guarded region below.
+        // fire.DefinitionId is row data, so an unpublished/unknown id is an
+        // ordinary bad row — resolving out here threw straight past the
+        // at-most-once contract, leaving the ledger row 'claimed' forever and
+        // emitting a FireFailed without the window key.
+        DispatchWorkflowDefinitionRequest request;
 
         // MODERATE-3 fix (2026-07-29): per-dispatch timeout. The linked CTS
         // cancels a cooperative dispatcher; WaitAsync additionally abandons a
@@ -675,6 +674,19 @@ public sealed class TenantScheduledTriggerService : BackgroundService
         if (timeout > TimeSpan.Zero) timeoutCts.CancelAfter(timeout);
         try
         {
+            // The definition id is ROW DATA (AC3) — this service must never name
+            // a consumer workflow's DefinitionId constant. The request ctor takes
+            // the VERSION id, not the definition id (see PublishedWorkflowDispatch),
+            // so resolve the published version first or every fire dies
+            // WorkflowGraphNotFound in the dispatch queue.
+            var definitionVersionId = await Tamma.Activities.Core.PublishedWorkflowDispatch
+                .ResolvePublishedVersionIdAsync(definitionService, fire.DefinitionId, timeoutCts.Token);
+            request = new DispatchWorkflowDefinitionRequest(definitionVersionId)
+            {
+                InstanceId = instanceId,
+                Input = input,
+            };
+
             var dispatchTask = dispatcher.DispatchAsync(
                 request, new DispatchWorkflowOptions(), timeoutCts.Token);
             await (timeout > TimeSpan.Zero

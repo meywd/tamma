@@ -101,9 +101,16 @@ public class CheckLimitsActivity : TammaOutcomeActivity
 
     private async Task<int> GetActiveInstanceCount(ActivityExecutionContext context)
     {
-        if (_workflowInstanceStore == null)
+        // 2026-08-14: a store-rehydrated activity has NULL ctor-injected members
+        // (the same defect fixed in six sibling activities), so this returned 0
+        // for EVERY tick — MaxConcurrent was never enforced and the ADL loop
+        // could dispatch cycles without bound. The warning below could not even
+        // report it, because the injected Logger is null for the same reason.
+        var store = _workflowInstanceStore ?? context.GetService<IWorkflowInstanceStore>();
+        var logger = Logger ?? context.GetService<ILogger<CheckLimitsActivity>>();
+        if (store == null)
         {
-            Logger?.LogWarning("No IWorkflowInstanceStore available, assuming 0 active instances");
+            logger?.LogWarning("No IWorkflowInstanceStore available, assuming 0 active instances");
             return 0;
         }
 
@@ -115,12 +122,12 @@ public class CheckLimitsActivity : TammaOutcomeActivity
                 WorkflowStatus = WorkflowStatus.Running,
             };
 
-            var count = await _workflowInstanceStore.CountAsync(filter);
+            var count = await store.CountAsync(filter);
             return (int)count;
         }
         catch (Exception ex)
         {
-            Logger?.LogError(ex, "Failed to query active workflow instances");
+            logger?.LogError(ex, "Failed to query active workflow instances");
             return 0; // fail open — don't block on query failure
         }
     }

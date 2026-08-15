@@ -194,11 +194,22 @@ public class EnsurePersonalTenantMiddleware(RequestDelegate next)
 
             // Persist as active tenant so subsequent requests skip the
             // discovery dance (finding 022).
+            //
+            // 2026-08-14: ONCE per (user, tenant), not once per request. The
+            // claims-less single-user branch runs on every tenant-less
+            // service-plane call — hundreds per cycle — and each one was doing a
+            // users UPDATE plus a TENANT.RESOLVED.SUCCESS domain-event append
+            // for a value that had not changed, flooding the audit trail the
+            // event store exists to keep readable. The first binding still
+            // writes and still emits; later identical bindings are silent.
+            if (AlreadyBound(userId, mostRecent.TenantId)) return;
+
             try
             {
                 await userRepo.UpdateActiveTenantAsync(userId, mostRecent.TenantId);
                 await EmitEvent(events, "TENANT.RESOLVED.SUCCESS", mostRecent.TenantId, userId,
                     new { reason = "existing_membership" });
+                MarkBound(userId, mostRecent.TenantId);
             }
             catch (Exception ex)
             {
@@ -235,6 +246,22 @@ public class EnsurePersonalTenantMiddleware(RequestDelegate next)
             MintLock.Release();
         }
     }
+
+    /// <summary>
+    /// The (user, tenant) pairs whose active-tenant row has already been
+    /// persisted by this process. Bounded by the number of principals a host
+    /// serves (exactly one in single-user mode, which is the only mode that
+    /// reaches the claims-less branch), so it cannot grow unboundedly. Purely an
+    /// optimisation: a cold process simply writes once more.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(Guid User, Guid Tenant), byte>
+        BoundActiveTenants = new();
+
+    private static bool AlreadyBound(Guid userId, Guid tenantId) =>
+        BoundActiveTenants.ContainsKey((userId, tenantId));
+
+    private static void MarkBound(Guid userId, Guid tenantId) =>
+        BoundActiveTenants[(userId, tenantId)] = 0;
 
     private static readonly SemaphoreSlim MintLock = new(1, 1);
 

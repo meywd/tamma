@@ -101,7 +101,15 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         // 2026-08-13 — the opt-in scripted-provider responder. Optional
         // trailing arg (the established pattern) so every existing composition
         // is untouched; DI supplies it only when the flag is on.
-        Scripted.IScriptedLlmResponder? scriptedResponder = null)
+        Scripted.IScriptedLlmResponder? scriptedResponder = null,
+        // 2026-08-14 — the COMPOSED allowlist. Binding the raw config section
+        // here missed `PostConfigure<ProviderAllowlistOptions>` widenings, which
+        // is exactly how the scripted provider is admitted in both hosts, so a
+        // provider that passed selection was rejected at the last moment and the
+        // caller silently fell back to another provider's model. Optional
+        // trailing arg (the established pattern): DI supplies the composed
+        // options; unit compositions without it fall back to the config bind.
+        IOptions<ProviderAllowlistOptions>? allowlistOptions = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
@@ -124,6 +132,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         _actionGateEvents = actionGateEvents;
         _authorizationBroker = authorizationBroker;
         _scriptedResponder = scriptedResponder;
+        _allowlistOptions = allowlistOptions;
     }
 
     /// <inheritdoc />
@@ -1323,6 +1332,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     /// config → descriptor). With no settings store wired — or no rows saved —
     /// the output is byte-identical to the pre-46-1 resolution.
     /// </summary>
+    private readonly IOptions<ProviderAllowlistOptions>? _allowlistOptions;
     private ProviderAllowlist? _allowlist;
 
     /// <summary>
@@ -1333,6 +1343,9 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     private ProviderAllowlist ResolveAllowlist()
     {
         if (_allowlist is not null) return _allowlist;
+
+        if (_allowlistOptions is not null)
+            return _allowlist = new ProviderAllowlist(_allowlistOptions);
 
         var options = new ProviderAllowlistOptions();
         _configuration?.GetSection("Security:ProviderAllowlist").Bind(options);

@@ -89,7 +89,9 @@ public sealed class HttpLifecycleReEntryService : ILifecycleReEntryService
             .ReadFromJsonAsync<LatestAcceptedDocuments>(DocumentJson.Options, ct)
             .ConfigureAwait(false);
 
-        var entry = latest?.Documents
+        // `documents` is optional in the response body — a 200 that omits it
+        // must read as "nothing accepted yet", not NRE.
+        var entry = latest?.Documents?
             .FirstOrDefault(d => string.Equals(d.DocumentType, documentTypeKey, StringComparison.Ordinal));
         if (entry is null)
             return LifecycleResumePosition.Fresh(

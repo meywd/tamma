@@ -163,6 +163,26 @@ public class WaitForPRMergedActivity : TammaOutcomeActivity
         slaMinutes = Math.Max(1, slaMinutes);
         context.DelayFor(TimeSpan.FromMinutes(slaMinutes), OnTimeoutAsync);
 
+        // 3) SECOND reconcile pass (2026-08-14). Step 0 alone leaves a real gap:
+        //    a webhook arriving AFTER that check but before this activity
+        //    suspends finds no bookmark to resume, so the endpoint buffers it —
+        //    and nothing ever reads the buffer again, leaving a merged PR on the
+        //    12 h SLA. Re-reading here collapses that window to the instant
+        //    between this check and suspension. Completing now discards the
+        //    bookmarks registered above, which is exactly the intent: the event
+        //    we were waiting for has already happened.
+        if (buffer is not null
+            && buffer.TryConsume(BookmarkName(tenantId, repository, prNumber), out var lateSha))
+        {
+            MergeSha.Set(context, lateSha);
+            Logger?.LogInformation(
+                "PR #{PRNumber} merge notification arrived WHILE the wait was registering — " +
+                "consumed on the second reconcile pass (sha: {MergeSha}); completing Merged",
+                prNumber, lateSha ?? "unknown");
+            await context.CompleteActivityWithOutcomesAsync("Merged");
+            return;
+        }
+
         Logger?.LogInformation(
             "Waiting for PR #{PRNumber} to be merged; durable SLA timeout armed at +{SlaMinutes}min",
             prNumber, slaMinutes);

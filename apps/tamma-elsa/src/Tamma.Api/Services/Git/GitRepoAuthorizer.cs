@@ -24,9 +24,16 @@ namespace Tamma.Api.Services.Git;
 /// installs) is <c>null == null</c> ⇒ Allow, then the platform static
 /// <c>GitHub:Token</c> writes cross-tenant. So:
 /// <list type="bullet">
-///   <item><b>single-user</b> — the sole user owns everything; a matched
-///     null/null is the legit sole-user case ⇒ Allow when
-///     <c>installation.TenantId == tenantId</c>.</item>
+///   <item><b>single-user</b> — authorization is GRANT-EXISTENCE, not id
+///     equality (corrected 2026-08-13; the doc claimed
+///     <c>installation.TenantId == tenantId</c> until 2026-08-14). There is
+///     exactly one principal, who owns every installation row, while the acting
+///     tenant may be their PERSONAL tenant (bound ambient for service-plane
+///     calls) and older grant rows carry <c>TenantId=null</c>; strict equality
+///     made the sole user "cross-tenant" against their own grant. So a matched
+///     installation ⇒ Allow, and the cross-tenant denial below is a SaaS-only
+///     branch by construction. The no-installation deny above still applies and
+///     remains the fail-closed edge in both modes.</item>
 ///   <item><b>SaaS</b> — BOTH the acting tenant AND the installation's tenant
 ///     must be present and equal. A null acting tenant OR a null-<c>TenantId</c>
 ///     (orphan) install ⇒ Deny.</item>

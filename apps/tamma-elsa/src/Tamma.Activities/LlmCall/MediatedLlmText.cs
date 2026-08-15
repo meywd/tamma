@@ -74,6 +74,31 @@ internal static class MediatedLlmText
 
         var response = await apiClient.CallLlmAsync(request, tenantId, ct).ConfigureAwait(false);
 
+        // 2026-08-14: the workflow path walks the WHOLE chain and then falls back
+        // to the persona default (ForEachProviderChain); pinning this path to the
+        // chain HEAD with no fallback turned a keyless/failing head into a hard
+        // failure for every single-shot call that previously succeeded on the
+        // persona default. Walk the remaining entries, then one final attempt
+        // with no provider at all (persona default) — the pre-selection
+        // behaviour, kept as the last resort rather than the first choice.
+        if (request.Provider is not null && !IsUsable(response))
+        {
+            foreach (var fallback in RemainingProviders(context, request.Provider))
+            {
+                response = await apiClient
+                    .CallLlmAsync(request with { Provider = fallback }, tenantId, ct)
+                    .ConfigureAwait(false);
+                if (IsUsable(response)) break;
+            }
+
+            if (!IsUsable(response))
+            {
+                response = await apiClient
+                    .CallLlmAsync(request with { Provider = null }, tenantId, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
         if (response is null)
         {
             // null == transport / raw-5xx (PostAsync nulled the body). Fail closed —
@@ -108,6 +133,49 @@ internal static class MediatedLlmText
     /// config tier of <c>LlmCallWorkflow.ResolveChain</c> — this single-shot path
     /// has no caller/DB chain, so the config tier is the only one that can apply.
     /// </summary>
+    /// <summary>A response we can actually use: present, successful, with text.</summary>
+    private static bool IsUsable(LlmCallApiResponse? response) =>
+        response is { Success: true } && !string.IsNullOrWhiteSpace(response.Text);
+
+    /// <summary>
+    /// The allow-listed chain entries AFTER <paramref name="current"/> — the
+    /// fallback order the workflow path already walks.
+    /// </summary>
+    private static IEnumerable<string> RemainingProviders(
+        ActivityExecutionContext context, string current)
+    {
+        var chain = AllowedProviderChain(context);
+        var seen = false;
+        foreach (var provider in chain)
+        {
+            if (!seen)
+            {
+                seen = string.Equals(provider, current, StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+            yield return provider;
+        }
+    }
+
+    /// <summary>The allow-listed entries of <c>Llm:DefaultProviderChain</c>, in order.</summary>
+    private static IReadOnlyList<string> AllowedProviderChain(ActivityExecutionContext context)
+    {
+        var configuration = context.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
+        if (configuration is null) return Array.Empty<string>();
+
+        var chain = Microsoft.Extensions.Configuration.ConfigurationBinder
+            .Get<string[]>(configuration.GetSection("Llm:DefaultProviderChain"));
+        if (chain is null || chain.Length == 0) return Array.Empty<string>();
+
+        var allowlist = context.GetService<Tamma.Activities.Security.ProviderAllowlist>()
+                        ?? new Tamma.Activities.Security.ProviderAllowlist();
+        return chain
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p.Trim())
+            .Where(p => allowlist.IsAllowed(p))
+            .ToList();
+    }
+
     internal static string? ResolveConfiguredProvider(ActivityExecutionContext context)
     {
         var configuration = context.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
