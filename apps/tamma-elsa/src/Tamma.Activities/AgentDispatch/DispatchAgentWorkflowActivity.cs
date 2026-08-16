@@ -232,7 +232,7 @@ public class DispatchAgentWorkflowActivity : Activity, ITammaActivity
     private void SetFailure(ActivityExecutionContext context, string message, DateTime dispatchedAt)
     {
         DispatchSuccess.Set(context, false);
-        WorkflowRunUrl.Set(context, null);
+        WorkflowRunUrl.Set(context, (string?)null);
         DispatchedAt.Set(context, dispatchedAt);
         ErrorMessage.Set(context, message);
     }

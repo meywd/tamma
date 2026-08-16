@@ -30,14 +30,14 @@ public class DesignDeliveryWorkflow : WorkflowBase
         builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Deliver a design proposal to the issue and emit DESIGN.PROPOSAL.GENERATED/DELIVERED before the accept gate";
 
-        var sessionId    = builder.WithVariable<Guid>();
-        var issueId      = builder.WithVariable<string>();
-        var repository   = builder.WithVariable<string>();
-        var issueNumber  = builder.WithVariable<int>();
-        var proposalJson = builder.WithVariable<string>();
-        var tenantId     = builder.WithVariable<string>("TenantId", "");
-        var alternativeCount = builder.WithVariable<int>();
-        var deliveryResult = builder.WithVariable<DesignDeliveryResult>();
+        var sessionId    = builder.WithVariable<Guid>().Persisted();
+        var issueId      = builder.WithVariable<string>().Persisted();
+        var repository   = builder.WithVariable<string>().Persisted();
+        var issueNumber  = builder.WithVariable<int>().Persisted();
+        var proposalJson = builder.WithVariable<string>().Persisted();
+        var tenantId     = builder.WithVariable<string>("TenantId", "").Persisted();
+        var alternativeCount = builder.WithVariable<int>().Persisted();
+        var deliveryResult = builder.WithVariable<DesignDeliveryResult>().Persisted();
 
         var readInputs = new SetVariable
         {

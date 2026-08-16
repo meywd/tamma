@@ -73,11 +73,17 @@ public class PrMergedResumeEndpointTests
             It.IsAny<CancellationToken>()))
         .ReturnsAsync(matches.AsEnumerable());
 
+    // 2026-08-13 (run 39, self-merge race): each fixture instance carries its
+    // own reconcile buffer — bookmark-miss deliveries are now BUFFERED (202)
+    // for WaitForPRMerged's reconcile-on-register, never lost to a plain 404.
+    private readonly PendingPrMergeBuffer _pendingMerges = new();
+
     private Task<IResult> Call(
         int pr = Pr, string? sha = "abc123", string? tenant = Tenant, string? repo = Repo) =>
         PrMergedResumeEndpoint.Resume(
             new PrMergedResumeEndpoint.ResumeRequest(pr, sha, tenant, repo),
-            _bookmarks.Object, _runtime.Object, NullLoggerFactory.Instance, CancellationToken.None);
+            _bookmarks.Object, _runtime.Object, _pendingMerges, NullLoggerFactory.Instance,
+            CancellationToken.None);
 
     private static int? StatusCodeOf(IResult result)
         => (result as IStatusCodeHttpResult)?.StatusCode;
@@ -160,16 +166,26 @@ public class PrMergedResumeEndpointTests
     public async Task Resume_CrossTenantName_NeverMatchesAnotherTenantsWait()
     {
         // Tenant B's wait is suspended under B's qualified name; a caller
-        // scoped to tenant A computes A's name and must 404, never act.
+        // scoped to tenant A computes A's name and must never act on B's wait.
+        // 2026-08-13 (run 39): a miss now BUFFERS under the CALLER's own name
+        // (202) instead of 404ing — cross-tenant safety holds because only a
+        // wait registering tenant A's exact name can ever consume A's entry;
+        // tenant B's wait computes B's name and can never see it.
         var tenantB = Guid.NewGuid().ToString();
         var bName = WaitForPRMergedActivity.BookmarkName(tenantB, Repo, Pr);
         StoreHas(bName, Bookmark("bm-b", bName, "wf-b"));
 
         var result = await Call(tenant: Tenant);
 
-        StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound);
+        StatusCodeOf(result).Should().Be(StatusCodes.Status202Accepted);
         _client.Verify(c => c.RunInstanceAsync(
             It.IsAny<RunWorkflowInstanceRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _pendingMerges.TryConsume(bName, out _)
+            .Should().BeFalse("the buffered entry is keyed by the CALLER's (tenant A's) name — "
+                + "tenant B's wait can never consume it");
+        _pendingMerges.TryConsume(
+                WaitForPRMergedActivity.BookmarkName(Tenant, Repo, Pr), out _)
+            .Should().BeTrue("only a wait registering the caller's own qualified name consumes it");
     }
 
     // ================================================================
@@ -177,15 +193,26 @@ public class PrMergedResumeEndpointTests
     // ================================================================
 
     [Test]
-    public async Task Resume_BurnedBookmark_Returns404_NeverRunsAnInstance()
+    public async Task Resume_BookmarkMiss_BuffersForReconcile_NeverRunsAnInstance()
     {
-        // The 12h SLA edge fired first (or a duplicate delivery raced): both
-        // names resolve nothing → benign 404, never a double-advance.
+        // 2026-08-13 (run 39, self-merge race): a bookmark miss is no longer a
+        // plain 404 — when Tamma merges its own PR the webhook forward arrives
+        // BEFORE the wait registers (observed 1 s early), and 404ing LOST the
+        // once-only delivery (the merged cycle then sat on the 12 h SLA). The
+        // miss now buffers the merge keyed by the qualified name (202) so
+        // WaitForPRMerged consumes it at registration. Still never a
+        // double-advance: no instance is run here, and a late delivery for an
+        // already-resumed wait leaves an entry that expires unconsumed.
         var result = await Call();
 
-        StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound);
+        StatusCodeOf(result).Should().Be(StatusCodes.Status202Accepted);
         _client.Verify(c => c.RunInstanceAsync(
             It.IsAny<RunWorkflowInstanceRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        _pendingMerges.TryConsume(
+                WaitForPRMergedActivity.BookmarkName(Tenant, Repo, Pr), out var sha)
+            .Should().BeTrue("the miss must be consumable by the wait's reconcile-on-register");
+        sha.Should().Be("abc123", "the buffered entry must carry the merge SHA");
     }
 
     [Test]

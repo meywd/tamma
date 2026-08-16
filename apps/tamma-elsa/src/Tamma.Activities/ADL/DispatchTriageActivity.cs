@@ -60,17 +60,25 @@ public class DispatchTriageActivity : TammaAsyncActivity
             ["repository"] = Repository.Get(context),
         };
 
-        var request = new DispatchWorkflowDefinitionRequest("issue-triage")
-        {
-            Input = input,
-        };
-
         // FIRE & FORGET, and non-fatal by design. This activity sits upstream of the
         // orchestrator's cooldown → restart edge, so an exception here faults the
         // instance BEFORE it can dispatch its successor and the autonomous loop stops
         // permanently. Failing to triage one batch must cost one tick, never the loop.
+        // The version-id resolve lives INSIDE the try for the same reason.
         try
         {
+            // 2026-08-13 — the request ctor takes the VERSION id, not the definition
+            // id (see PublishedWorkflowDispatch: every background dispatch failed
+            // WorkflowGraphNotFound before this resolve step existed).
+            var definitionVersionId = await Tamma.Activities.Core.PublishedWorkflowDispatch
+                .ResolvePublishedVersionIdAsync(
+                    context.GetRequiredService<Elsa.Workflows.Management.IWorkflowDefinitionService>(),
+                    "issue-triage");
+            var request = new DispatchWorkflowDefinitionRequest(definitionVersionId)
+            {
+                Input = input,
+            };
+
             await dispatcher.DispatchAsync(request, default);
 
             Logger?.LogInformation(

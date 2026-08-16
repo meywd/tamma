@@ -125,7 +125,7 @@ public class MergeAndCompleteReviewActivity : Activity
         var totalIterations = TotalIterations.Get(context);
         var verifyCi = VerifyCIBeforeMerge.Get(context);
         var deleteBranch = DeleteBranchAfterMerge.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         // Story 43-14 (AC4) — the RUN correlation (cycle instance id, threaded as
         // the Elsa correlation), not the merge sub-workflow's own id, so the
         // ?correlationId= this passes to DeleteBranchAsync matches the human's
@@ -152,7 +152,7 @@ public class MergeAndCompleteReviewActivity : Activity
                 return;
             }
 
-            var headBranch = HeadBranch.Get(context);
+            var headBranch = HeadBranch.GetOrDefault(context);
             if (string.IsNullOrWhiteSpace(headBranch))
                 headBranch = $"feature/{storyId}";
 

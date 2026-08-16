@@ -9,6 +9,7 @@ using Elsa.Workflows.Runtime.Requests;
 using Elsa.Workflows.Runtime.Responses;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using NUnit.Framework;
 using Tamma.Activities.ADL;
 using Tamma.Activities.Core;
@@ -68,9 +69,21 @@ public class AdlLoopDurabilityTests
         var cooldown = flowchart.Activities.OfType<CooldownActivity>().Single();
         var restart = flowchart.Activities.OfType<DispatchAdlActivity>().Single();
 
+        // 2026-08-13 (engine-driven E2E): a timer-bookmark Delay now sits
+        // between the cooldown emit and the restart — the old in-process
+        // Task.Delay held the runtime's dispatch slot for the whole cooldown
+        // and deadlocked every subsequently dispatched workflow behind the
+        // sleeping orchestrator. The loop edge is cooldown → CooldownWait
+        // (Delay, suspends) → restart.
+        // (must be a scheduling Delay — a timer bookmark — never an in-process sleep)
+        var wait = flowchart.Activities.OfType<Elsa.Scheduling.Activities.Delay>().Single();
+
         flowchart.Connections.Should().Contain(
-            c => c.Source.Activity == cooldown && c.Target.Activity == restart,
-            "cooldown must lead to the restart dispatch — that edge IS the loop");
+            c => c.Source.Activity == cooldown && c.Target.Activity == wait,
+            "the cooldown emit must lead into the timer-bookmark wait");
+        flowchart.Connections.Should().Contain(
+            c => c.Source.Activity == wait && c.Target.Activity == restart,
+            "the timer-bookmark wait must lead to the restart dispatch — that edge IS the loop");
     }
 
     // ── The dispatch activities must not throw out into the flow ────────────
@@ -198,6 +211,24 @@ public class AdlLoopDurabilityTests
         // fallback resolves it — the same path a rehydrated (JSON-constructed)
         // activity takes in production.
         services.AddSingleton(dispatcher);
+
+        // 2026-08-13 — the dispatch activities now resolve the PUBLISHED
+        // definition VERSION id first (PublishedWorkflowDispatch); stub the
+        // definition service to answer "<definitionId>" verbatim (AddElsa's
+        // real one has no published definitions in this harness).
+        var definitionService = new Moq.Mock<Elsa.Workflows.Management.IWorkflowDefinitionService>();
+        definitionService
+            .Setup(d => d.FindWorkflowDefinitionAsync(
+                Moq.It.IsAny<string>(),
+                Moq.It.IsAny<Elsa.Common.Models.VersionOptions>(),
+                Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string id, Elsa.Common.Models.VersionOptions _, CancellationToken _) =>
+                new Elsa.Workflows.Management.Entities.WorkflowDefinition
+                {
+                    Id = id,
+                    DefinitionId = id,
+                });
+        services.AddSingleton(definitionService.Object);
 
         await using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();

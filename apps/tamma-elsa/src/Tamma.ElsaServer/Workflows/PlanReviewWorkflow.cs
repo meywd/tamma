@@ -47,29 +47,29 @@ public class PlanReviewWorkflow : WorkflowBase
         builder.Description = "Read-through shim over the document store: maps the latest accepted plan + review lineage to the legacy review output (39-14 D1)";
 
         // ── Inputs (compat set) ────────────────────────────────────────
-        var repository   = builder.WithVariable<string>("Repository", "");
-        var issueNumber  = builder.WithVariable<int>("IssueNumber", 0);
-        var planJsonIn   = builder.WithVariable<string>("PlanJson", "");
-        var contextIds   = builder.WithVariable<string>("ContextIds", "[]");
-        var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
-        var tenantId     = builder.WithVariable<string>("TenantId", "");
-        var issueId      = builder.WithVariable<string>("IssueId", "");
+        var repository   = builder.WithVariable<string>("Repository", "").Persisted();
+        var issueNumber  = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var planJsonIn   = builder.WithVariable<string>("PlanJson", "").Persisted();
+        var contextIds   = builder.WithVariable<string>("ContextIds", "[]").Persisted();
+        var workItemJson = builder.WithVariable<string>("WorkItemJson", "").Persisted();
+        var tenantId     = builder.WithVariable<string>("TenantId", "").Persisted();
+        var issueId      = builder.WithVariable<string>("IssueId", "").Persisted();
 
         // ── 39-10 re-entry position (trivial pure read) ────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson  = builder.WithVariable<string>();
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson  = builder.WithVariable<string>().Persisted();
 
         // ── Store read result ──────────────────────────────────────────
-        var planFound    = builder.WithVariable<bool>();
-        var acceptedDocId = builder.WithVariable<string>();
-        var acceptedPlanJson = builder.WithVariable<string>("AcceptedPlanJson", "{}");
-        var lineageJson  = builder.WithVariable<string>("LineageJson", "{}");
+        var planFound    = builder.WithVariable<bool>().Persisted();
+        var acceptedDocId = builder.WithVariable<string>().Persisted();
+        var acceptedPlanJson = builder.WithVariable<string>("AcceptedPlanJson", "{}").Persisted();
+        var lineageJson  = builder.WithVariable<string>("LineageJson", "{}").Persisted();
 
         // ── Mapped legacy outputs ──────────────────────────────────────
-        var decision     = builder.WithVariable<string>("Decision", "needsHuman");
-        var planJsonOut  = builder.WithVariable<string>("PlanJsonOut", "");
-        var reviewNotes  = builder.WithVariable<string>("ReviewNotes", "");
-        var discussionLog = builder.WithVariable<string>("DiscussionLog", "[]");
+        var decision     = builder.WithVariable<string>("Decision", "needsHuman").Persisted();
+        var planJsonOut  = builder.WithVariable<string>("PlanJsonOut", "").Persisted();
+        var reviewNotes  = builder.WithVariable<string>("ReviewNotes", "").Persisted();
+        var discussionLog = builder.WithVariable<string>("DiscussionLog", "[]").Persisted();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable

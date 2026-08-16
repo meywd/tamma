@@ -51,7 +51,8 @@ public sealed class AgentRegistryService : IAgentRegistryService
         IHttpContextAccessor httpContext,
         IOptions<DefaultPersonaOptions>? defaultPersona = null,
         ITenantAgentEnablementReader? enablement = null,
-        ILogger<AgentRegistryService>? logger = null)
+        ILogger<AgentRegistryService>? logger = null,
+        Tamma.Api.Services.Actions.ISoleUserProvider? soleUsers = null)
     {
         _agents = agents;
         _selections = selections;
@@ -62,7 +63,19 @@ public sealed class AgentRegistryService : IAgentRegistryService
         _defaultPersona = defaultPersona?.Value ?? new DefaultPersonaOptions();
         _enablement = enablement;
         _logger = logger;
+        _soleUsers = soleUsers;
     }
+
+    // 2026-08-13 (engine-driven E2E, single-user mode-awareness): the service
+    // plane (the engine's Tamma:ApiToken mediation calls) carries no user
+    // claim, so claims-only principal resolution answered (null, null) in
+    // single-user mode — while the 43-x autonomy gate resolved the SAME
+    // request's principal to the sole user via ISoleUserProvider. The split
+    // meant the gate evaluated user X but the enablement read looked up
+    // NOBODY, so the seeded default-persona enablement was invisible and every
+    // engine LLM call failed AGENT_UNRESOLVED. Single-user claims-less
+    // resolution now falls back to the same sole-user seam the gate uses.
+    private readonly Tamma.Api.Services.Actions.ISoleUserProvider? _soleUsers;
 
     /// <inheritdoc />
     public (Guid? TenantId, Guid? UserId) ResolvePrincipal()
@@ -299,7 +312,29 @@ public sealed class AgentRegistryService : IAgentRegistryService
     // ── helpers ──
 
     private Guid? CurrentUserId()
-        => _httpContext.HttpContext?.User?.GetUserId();
+    {
+        var fromClaims = _httpContext.HttpContext?.User?.GetUserId();
+        if (fromClaims is not null || _mode.Mode == TammaMode.SaaS || _soleUsers is null)
+        {
+            return fromClaims;
+        }
+
+        // Single-user, no user claim (service-plane call): the principal IS the
+        // sole user — the same resolution the autonomy gate applies to this
+        // request. SoleUserProvider caches its success, so the sync bridge
+        // blocks at most once per process (config-first resolution never
+        // blocks at all).
+        try
+        {
+            return _soleUsers.GetSoleUserIdAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // Pre-setup deployment (no owner configured, users table empty) —
+            // behave exactly as before this fallback existed.
+            return null;
+        }
+    }
 
     /// <summary>The calling principal as the 32-15/32-16 <see cref="Principal"/>
     /// record (exactly one of TenantId / UserId set per the mode).</summary>

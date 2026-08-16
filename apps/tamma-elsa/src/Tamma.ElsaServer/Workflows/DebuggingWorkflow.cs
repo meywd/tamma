@@ -61,66 +61,66 @@ public class DebuggingWorkflow : WorkflowBase
         builder.Version = WorkflowVersions.ComputedVersion;
 
         // ---- Workflow variables ----
-        var sessionId = builder.WithVariable<Guid>();
-        var storyId = builder.WithVariable<string>();
-        var debugContextMode = builder.WithVariable<string>();
-        var errorOutput = builder.WithVariable<string>();
-        var relevantFiles = builder.WithVariable<string>();
-        var issueDescription = builder.WithVariable<string>();
-        var repositoryUrl = builder.WithVariable<string>();
-        var branchName = builder.WithVariable<string>();
-        var skillLevel = builder.WithVariable<int>();
+        var sessionId = builder.WithVariable<Guid>().Persisted();
+        var storyId = builder.WithVariable<string>().Persisted();
+        var debugContextMode = builder.WithVariable<string>().Persisted();
+        var errorOutput = builder.WithVariable<string>().Persisted();
+        var relevantFiles = builder.WithVariable<string>().Persisted();
+        var issueDescription = builder.WithVariable<string>().Persisted();
+        var repositoryUrl = builder.WithVariable<string>().Persisted();
+        var branchName = builder.WithVariable<string>().Persisted();
+        var skillLevel = builder.WithVariable<int>().Persisted();
         // Named "TenantId" so MediatedLlmText.ResolveTenantId + the event drain resolve
         // the tenant scope from this ambient variable (SaaS prompts/conventions/creds).
-        var tenantId = builder.WithVariable<string>("TenantId", "");
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
 
         // Typed result variables for collector activity outputs (bound via Output<T>)
-        var collectErrorsResult = builder.WithVariable<ErrorMessages>();
-        var collectCodeResult = builder.WithVariable<RelevantCode>();
-        var collectGitResult = builder.WithVariable<GitHistoryContext>();
-        var collectTestsResult = builder.WithVariable<TestResultsContext>();
-        var collectReproResult = builder.WithVariable<ReproductionSteps>();
+        var collectErrorsResult = builder.WithVariable<ErrorMessages>().Persisted();
+        var collectCodeResult = builder.WithVariable<RelevantCode>().Persisted();
+        var collectGitResult = builder.WithVariable<GitHistoryContext>().Persisted();
+        var collectTestsResult = builder.WithVariable<TestResultsContext>().Persisted();
+        var collectReproResult = builder.WithVariable<ReproductionSteps>().Persisted();
 
         // Gathered context variables (string serializations consumed by AIDiagnosis)
-        var errorMessages = builder.WithVariable<string>();
-        var relevantCode = builder.WithVariable<string>();
-        var gitHistory = builder.WithVariable<string>();
-        var testResults = builder.WithVariable<string>();
-        var reproductionSteps = builder.WithVariable<string>();
+        var errorMessages = builder.WithVariable<string>().Persisted();
+        var relevantCode = builder.WithVariable<string>().Persisted();
+        var gitHistory = builder.WithVariable<string>().Persisted();
+        var testResults = builder.WithVariable<string>().Persisted();
+        var reproductionSteps = builder.WithVariable<string>().Persisted();
 
         // Typed result variables for diagnosis/hypothesis activities
-        var selectedHypothesisVar = builder.WithVariable<Hypothesis?>();
-        var refinedDiagnosisVar = builder.WithVariable<DiagnosisResult>();
+        var selectedHypothesisVar = builder.WithVariable<Hypothesis?>().Persisted();
+        var refinedDiagnosisVar = builder.WithVariable<DiagnosisResult>().Persisted();
 
         // Story 39-15 (D4) — the debug-diagnosis lifecycle binding replaces AIDiagnosisActivity.
-        var priorDiagnosisId = builder.WithVariable<string>("PriorDiagnosisId", "");
-        var diagnosisLifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
-        var diagnosisDocumentId = builder.WithVariable<string>("DiagnosisDocumentId", "");
-        var diagnosisFailureReason = builder.WithVariable<string>("DiagnosisFailureReason", "");
-        var diagnosisProducedFlag = builder.WithVariable<bool>();
+        var priorDiagnosisId = builder.WithVariable<string>("PriorDiagnosisId", "").Persisted();
+        var diagnosisLifecycleResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var diagnosisDocumentId = builder.WithVariable<string>("DiagnosisDocumentId", "").Persisted();
+        var diagnosisFailureReason = builder.WithVariable<string>("DiagnosisFailureReason", "").Persisted();
+        var diagnosisProducedFlag = builder.WithVariable<bool>().Persisted();
         // 39-10 re-entry position (the child lifecycle owns the accept-gate bookmark).
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson = builder.WithVariable<string>();
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson = builder.WithVariable<string>().Persisted();
 
         // Diagnosis & loop variables
-        var hypothesesJson = builder.WithVariable<string>();
-        var iterationContextJson = builder.WithVariable<string>();
-        var currentIteration = builder.WithVariable<int>();
-        var maxIterations = builder.WithVariable<int>();
-        var selectedHypothesisJson = builder.WithVariable<string>();
-        var debugStartTime = builder.WithVariable<string>();
-        var debugResultJson = builder.WithVariable<string>();
-        var allFilesModified = builder.WithVariable<string>();
-        var attemptsJson = builder.WithVariable<string>();
-        var regressionTestWritten = builder.WithVariable<bool>();
-        var contextGatherDone = builder.WithVariable<bool>();
-        var debugStatus = builder.WithVariable<string>();
-        var escalationReason = builder.WithVariable<string>();
-        var runTestsOutput = builder.WithVariable<IDictionary<string, object>?>();
-        var applyFixOutput = builder.WithVariable<IDictionary<string, object>?>();
-        var regressionRunOutput = builder.WithVariable<IDictionary<string, object>?>();
-        var regressionTestResultVar = builder.WithVariable<TestGenerationResult>();
-        var compileReportResultVar = builder.WithVariable<DebugReport>();
+        var hypothesesJson = builder.WithVariable<string>().Persisted();
+        var iterationContextJson = builder.WithVariable<string>().Persisted();
+        var currentIteration = builder.WithVariable<int>().Persisted();
+        var maxIterations = builder.WithVariable<int>().Persisted();
+        var selectedHypothesisJson = builder.WithVariable<string>().Persisted();
+        var debugStartTime = builder.WithVariable<string>().Persisted();
+        var debugResultJson = builder.WithVariable<string>().Persisted();
+        var allFilesModified = builder.WithVariable<string>().Persisted();
+        var attemptsJson = builder.WithVariable<string>().Persisted();
+        var regressionTestWritten = builder.WithVariable<bool>().Persisted();
+        var contextGatherDone = builder.WithVariable<bool>().Persisted();
+        var debugStatus = builder.WithVariable<string>().Persisted();
+        var escalationReason = builder.WithVariable<string>().Persisted();
+        var runTestsOutput = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var applyFixOutput = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var regressionRunOutput = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var regressionTestResultVar = builder.WithVariable<TestGenerationResult>().Persisted();
+        var compileReportResultVar = builder.WithVariable<DebugReport>().Persisted();
 
         // ---- Activities ----
 

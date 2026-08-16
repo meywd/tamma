@@ -68,15 +68,15 @@ public class EmitTriageEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? TriageEvents.PanelFailed;
-        var repository = Repository.Get(context) ?? "";
-        var itemNumber = ItemNumber.Get(context);
-        var tenantId = TriageEvents.ParseTenantId(TenantId.Get(context));
-        var roleCount = RoleCount.Get(context);
-        var succeededCount = SucceededCount.Get(context);
-        var failedRolesJson = FailedRolesJson.Get(context);
+        var type = EventType.GetOrDefault(context) ?? TriageEvents.PanelFailed;
+        var repository = Repository.GetOrDefault(context) ?? "";
+        var itemNumber = ItemNumber.GetOrDefault(context);
+        var tenantId = TriageEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var roleCount = RoleCount.GetOrDefault(context);
+        var succeededCount = SucceededCount.GetOrDefault(context);
+        var failedRolesJson = FailedRolesJson.GetOrDefault(context);
 
         var evt = BuildTammaEvent(type, repository, itemNumber, tenantId, roleCount, succeededCount, failedRolesJson);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -85,7 +85,8 @@ public class EmitTriageEventActivity : Activity
             "Emitted {Type} for item #{Item} in {Repo} (roles={Roles}, succeeded={Succeeded})",
             type, itemNumber, repository, roleCount, succeededCount);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

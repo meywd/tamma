@@ -87,7 +87,7 @@ public class WriteRegressionTestActivity : CodeActivity<TestGenerationResult>
             var prompt = BuildTestPrompt(storyId, bugDescription, hypothesisJson, codeContext);
             // Mediated call-LLM (no direct provider key in the engine). "tester" is the
             // canonical role the API resolves for test authoring. See AIDiagnosisActivity.
-            var response = await MediatedLlmText.CompleteAsync(context, "tester", prompt, context.CancellationToken);
+            var response = await MediatedLlmText.CompleteAsync(context, "tester", prompt, context.CancellationToken, action: "write-regression-test");
             var result = ParseTestResponse(response);
 
             if (result.Success)

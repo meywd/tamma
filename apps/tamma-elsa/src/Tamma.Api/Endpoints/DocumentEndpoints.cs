@@ -22,6 +22,21 @@ namespace Tamma.Api.Endpoints;
 /// </summary>
 public static class DocumentEndpoints
 {
+    /// <summary>
+    /// 2026-08-13 (engine-driven E2E) — issue ids are <c>{owner}/{repo}#{n}</c>, so
+    /// every correct caller of the <c>/api/documents/issues/{issueId}/…</c> routes
+    /// escapes the id into ONE path segment (<c>tamma-bot%2Ftest-repo%231</c>).
+    /// ASP.NET Core route values decode everything EXCEPT the encoded slash
+    /// (<c>%2F</c> is deliberately left encoded to prevent path-splitting), so the
+    /// handler receives <c>tamma-bot%2Ftest-repo#1</c> — which matched no store row
+    /// and turned every engine-side latest-accepted read into a silent empty 200
+    /// (the plan-review shim then escalated a plan the lifecycle had just
+    /// accepted). Fold ONLY the leftover encoded slash — a full second unescape
+    /// would double-decode ids containing literal percent escapes.
+    /// </summary>
+    private static string FoldEncodedSlashes(string issueId) =>
+        issueId.Replace("%2F", "/", StringComparison.OrdinalIgnoreCase);
+
     // ─── GET /api/documents/issues/{issueId}/lineage (AC3) ────────────────────
 
     /// <summary>
@@ -42,6 +57,8 @@ public static class DocumentEndpoints
     {
         if (tc.TenantId is not Guid tenantId || tenantId == Guid.Empty)
             return Results.NotFound(new { error = "no_active_tenant" });
+
+        issueId = FoldEncodedSlashes(issueId);
 
         if (audience is not null && !ProseAudienceExtensions.TryParse(audience, out _))
             return Results.BadRequest(new
@@ -72,6 +89,7 @@ public static class DocumentEndpoints
         if (tc.TenantId is not Guid tenantId || tenantId == Guid.Empty)
             return Results.NotFound(new { error = "no_active_tenant" });
 
+        issueId = FoldEncodedSlashes(issueId);
         var rows = await repo.GetLatestAcceptedAsync(tenantId, issueId, ct).ConfigureAwait(false);
         var latest = LineageAssembler.AssembleLatest(issueId, rows);
         return Results.Json(latest, DocumentJson.Options, statusCode: StatusCodes.Status200OK);

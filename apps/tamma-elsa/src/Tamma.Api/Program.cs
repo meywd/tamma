@@ -624,6 +624,15 @@ if (!string.IsNullOrWhiteSpace(
 // of provider-key resolution into the LLM call path (CallLlmInlineActivity).
 builder.Services.AddProviderCredentialResolution();
 
+// 2026-08-13 (Epic 31 P5 follow-up) — the OPT-IN scripted LLM provider (the
+// deterministic in-process test provider behind the engine-driven autonomous
+// E2E). Default: a NO-OP (flag off). Llm:EnableScriptedProvider=true on a
+// host carrying any SaaS/production signal REFUSES TO START (structural
+// guard, ScriptedProviderPosture). Must run AFTER
+// AddProviderCredentialResolution (it decorates the resolver so "scripted"
+// needs no key).
+builder.Services.AddScriptedLlmProvider(builder.Configuration);
+
 // Epic 46 — the live model-listing seam (46-0: IProviderModelCatalog — one
 // fetch/normalize/cache service behind the admin + tenant models routes) and
 // the persisted provider-settings store (46-1: IProviderSettingsStore — the
@@ -1129,30 +1138,37 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = 429;
 
+    // 2026-08-13 (engine-driven E2E): the four generic policies are
+    // config-overridable (shipped defaults unchanged). The engine's OWN
+    // mediated traffic (agent-config resolves — one per llm-call) rides
+    // "ConfigRead"; a busy autonomous cycle (7-role review panels × rounds)
+    // exceeds 100/min and the engine then churns retries against 429s. A
+    // single-box deployment can raise RateLimits:ConfigRead rather than
+    // throttling its own engine.
     options.AddFixedWindowLimiter("ConfigRead", o =>
     {
-        o.PermitLimit = 100;
+        o.PermitLimit = builder.Configuration.GetValue("RateLimits:ConfigRead", 100);
         o.Window = TimeSpan.FromMinutes(1);
         o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
         o.QueueLimit = 0;
     });
     options.AddFixedWindowLimiter("ConfigWrite", o =>
     {
-        o.PermitLimit = 30;
+        o.PermitLimit = builder.Configuration.GetValue("RateLimits:ConfigWrite", 30);
         o.Window = TimeSpan.FromMinutes(1);
         o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
         o.QueueLimit = 0;
     });
     options.AddFixedWindowLimiter("ProviderIngest", o =>
     {
-        o.PermitLimit = 500;
+        o.PermitLimit = builder.Configuration.GetValue("RateLimits:ProviderIngest", 500);
         o.Window = TimeSpan.FromMinutes(1);
         o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
         o.QueueLimit = 0;
     });
     options.AddFixedWindowLimiter("ProviderExecute", o =>
     {
-        o.PermitLimit = 50;
+        o.PermitLimit = builder.Configuration.GetValue("RateLimits:ProviderExecute", 50);
         o.Window = TimeSpan.FromMinutes(1);
         o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
         o.QueueLimit = 0;

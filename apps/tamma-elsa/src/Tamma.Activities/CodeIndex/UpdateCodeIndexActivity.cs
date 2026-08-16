@@ -54,8 +54,8 @@ public class UpdateCodeIndexActivity : CodeActivity
     {
         try
         {
-            var changedFilesRaw = ChangedFilesJson.Get(context);
-            var repositoryPath = RepositoryPath.Get(context);
+            var changedFilesRaw = ChangedFilesJson.GetOrDefault(context);
+            var repositoryPath = RepositoryPath.GetOrDefault(context);
 
             List<string>? changedFiles = null;
             if (!string.IsNullOrWhiteSpace(changedFilesRaw))

@@ -64,12 +64,12 @@ public class AssembleContextActivity : CodeActivity<AssembledContext>
 
     protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var storyMetadata = StoryMetadata.Get(context);
-        var recentCommits = RecentCommits.Get(context);
-        var fileContents = FileContents.Get(context);
-        var testResults = TestResults.Get(context);
-        var sessionHistory = SessionHistory.Get(context);
-        var similarPatterns = SimilarPatterns.Get(context);
+        var storyMetadata = StoryMetadata.GetOrDefault(context);
+        var recentCommits = RecentCommits.GetOrDefault(context);
+        var fileContents = FileContents.GetOrDefault(context);
+        var testResults = TestResults.GetOrDefault(context);
+        var sessionHistory = SessionHistory.GetOrDefault(context);
+        var similarPatterns = SimilarPatterns.GetOrDefault(context);
         var purpose = Purpose.Get(context);
 
         _logger?.LogInformation(

@@ -128,25 +128,35 @@ public class DispatchCycleActivity : TammaAsyncActivity
         };
 
         var instanceId = Guid.NewGuid().ToString();
-        var request = new DispatchWorkflowDefinitionRequest("single-issue-cycle")
-        {
-            Input = input,
-            InstanceId = instanceId,
-            // Story 43-14 (D5) — the cycle's correlation IS the cycle instance id.
-            // The RunCorrelation middleware puts this on the ambient during the
-            // cycle's execution, and CorrelationPropagatingWorkflowDispatcher
-            // propagates it to every sub-workflow — so the whole chain shares one
-            // ledger-visible correlation and a human's approval covers the run.
-            CorrelationId = instanceId,
-        };
 
         // FIRE & FORGET, and non-fatal by design. This activity sits upstream of the
         // orchestrator's cooldown → restart edge, so an exception here faults the
         // instance BEFORE it can dispatch its successor and the autonomous loop stops
         // permanently. Failing to start ONE issue cycle must cost that issue, never
-        // the loop — the issue is still selectable on the next tick.
+        // the loop — the issue is still selectable on the next tick. The version-id
+        // resolve lives INSIDE the try for the same reason (a transient DB read
+        // failure must never fault the loop).
         try
         {
+            // 2026-08-13 — the request ctor takes the VERSION id, not the definition
+            // id (see PublishedWorkflowDispatch: every background dispatch failed
+            // WorkflowGraphNotFound before this resolve step existed).
+            var definitionVersionId = await Tamma.Activities.Core.PublishedWorkflowDispatch
+                .ResolvePublishedVersionIdAsync(
+                    context.GetRequiredService<Elsa.Workflows.Management.IWorkflowDefinitionService>(),
+                    "single-issue-cycle");
+            var request = new DispatchWorkflowDefinitionRequest(definitionVersionId)
+            {
+                Input = input,
+                InstanceId = instanceId,
+                // Story 43-14 (D5) — the cycle's correlation IS the cycle instance id.
+                // The RunCorrelation middleware puts this on the ambient during the
+                // cycle's execution, and CorrelationPropagatingWorkflowDispatcher
+                // propagates it to every sub-workflow — so the whole chain shares one
+                // ledger-visible correlation and a human's approval covers the run.
+                CorrelationId = instanceId,
+            };
+
             await dispatcher.DispatchAsync(request, default);
 
             InstanceId.Set(context, instanceId);

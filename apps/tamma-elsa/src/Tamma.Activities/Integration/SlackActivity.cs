@@ -98,12 +98,12 @@ public class SlackActivity : CodeActivity<SlackOperationResult>
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var action = Action.Get(context);
-        var channel = Channel.Get(context);
-        var userId = UserId.Get(context);
+        var channel = Channel.GetOrDefault(context);
+        var userId = UserId.GetOrDefault(context);
         var message = Message.Get(context);
-        var sessionId = SessionId.Get(context);
+        var sessionId = SessionId.GetOrDefault(context);
         var messageType = MessageType.Get(context);
-        var tenantId = NormalizeTenant(TenantId.Get(context));
+        var tenantId = NormalizeTenant(TenantId.GetOrDefault(context));
 
         _logger?.LogInformation("Executing Slack action {Action} (mediated)", action);
 

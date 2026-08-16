@@ -46,34 +46,34 @@ public class AmbiguityScoringWorkflow : WorkflowBase
         builder.Description = "Score how ambiguous/underspecified a requirement is via the generic document lifecycle; above-threshold routes to clarification as a typed outcome";
 
         // ── Inputs (legacy `threshold` input retired — the threshold is acceptance-rules config, 39-5) ──
-        var sessionId        = builder.WithVariable<Guid>();
-        var issueId          = builder.WithVariable<string>();
-        var requirement      = builder.WithVariable<string>();
-        var ambiguityContext = builder.WithVariable<string>();
-        var tenantId         = builder.WithVariable<string>("TenantId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+        var sessionId        = builder.WithVariable<Guid>().Persisted();
+        var issueId          = builder.WithVariable<string>().Persisted();
+        var requirement      = builder.WithVariable<string>().Persisted();
+        var ambiguityContext = builder.WithVariable<string>().Persisted();
+        var tenantId         = builder.WithVariable<string>("TenantId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
 
         // ── 39-10 re-entry position ────────────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson  = builder.WithVariable<string>();
-        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson  = builder.WithVariable<string>().Persisted();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce").Persisted();
 
         // ── Dispatched-workflow result + typed exit ────────────────────
-        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
-        var lifecycleAccepted = builder.WithVariable<bool>();
-        var isAmbiguity     = builder.WithVariable<bool>();
-        var hasAssessment   = builder.WithVariable<bool>();
-        var exitStatus      = builder.WithVariable<string>("ExitStatus", "");
-        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
-        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
-        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
-        var score           = builder.WithVariable<double>();
-        var ambiguityCount  = builder.WithVariable<int>();
-        var confidence      = builder.WithVariable<double>();
-        var threshold       = builder.WithVariable<double>();
-        var decision        = builder.WithVariable<string>("Decision", "");
-        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
-        var outputStatus    = builder.WithVariable<string>();
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var lifecycleAccepted = builder.WithVariable<bool>().Persisted();
+        var isAmbiguity     = builder.WithVariable<bool>().Persisted();
+        var hasAssessment   = builder.WithVariable<bool>().Persisted();
+        var exitStatus      = builder.WithVariable<string>("ExitStatus", "").Persisted();
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "").Persisted();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}").Persisted();
+        var score           = builder.WithVariable<double>().Persisted();
+        var ambiguityCount  = builder.WithVariable<int>().Persisted();
+        var confidence      = builder.WithVariable<double>().Persisted();
+        var threshold       = builder.WithVariable<double>().Persisted();
+        var decision        = builder.WithVariable<string>("Decision", "").Persisted();
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "").Persisted();
+        var outputStatus    = builder.WithVariable<string>().Persisted();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable

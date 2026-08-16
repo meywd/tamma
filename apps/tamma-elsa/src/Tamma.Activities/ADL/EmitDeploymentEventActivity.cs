@@ -72,16 +72,16 @@ public class EmitDeploymentEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? DeployEvents.PipelineFailed;
-        var issueNumber = IssueNumber.Get(context);
-        var repository = Repository.Get(context) ?? "";
-        var mergeSha = MergeSha.Get(context) ?? "";
-        var stage = Stage.Get(context) ?? "";
-        var mode = Mode.Get(context) ?? "";
-        var tenantId = DeployEvents.ParseTenantId(TenantId.Get(context));
-        var data = ParseData(DataJson.Get(context));
+        var type = EventType.GetOrDefault(context) ?? DeployEvents.PipelineFailed;
+        var issueNumber = IssueNumber.GetOrDefault(context);
+        var repository = Repository.GetOrDefault(context) ?? "";
+        var mergeSha = MergeSha.GetOrDefault(context) ?? "";
+        var stage = Stage.GetOrDefault(context) ?? "";
+        var mode = Mode.GetOrDefault(context) ?? "";
+        var tenantId = DeployEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var data = ParseData(DataJson.GetOrDefault(context));
 
         var evt = BuildTammaEvent(type, issueNumber, repository, mergeSha, stage, mode, tenantId, data);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -90,7 +90,8 @@ public class EmitDeploymentEventActivity : Activity
             "Emitted {Type} for issue #{Issue} stage {Stage} in {Repo}",
             type, issueNumber, string.IsNullOrEmpty(stage) ? "<pipeline>" : stage, repository);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

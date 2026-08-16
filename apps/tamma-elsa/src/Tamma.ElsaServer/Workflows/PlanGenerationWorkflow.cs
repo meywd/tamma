@@ -66,44 +66,44 @@ public class PlanGenerationWorkflow : WorkflowBase
         builder.Description = "Generate a reviewed implementation plan via the generic document lifecycle (produce → validate → review(panel) → revise → accept)";
 
         // ── Inputs (compat set + additive) ─────────────────────────────
-        var repository      = builder.WithVariable<string>("Repository", "");
-        var issueNumber     = builder.WithVariable<int>("IssueNumber", 0);
-        var poSummary       = builder.WithVariable<string>("POSummary", "");
-        var contextIds      = builder.WithVariable<string>("ContextIds", "[]");
-        var workItemJson    = builder.WithVariable<string>("WorkItemJson", "");
-        var reviewNotes     = builder.WithVariable<string>("ReviewNotes", "");
-        var revisionNumber  = builder.WithVariable<int>("RevisionNumber", 0);
-        var tenantId        = builder.WithVariable<string>("TenantId", "");
-        var issueId         = builder.WithVariable<string>("IssueId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+        var repository      = builder.WithVariable<string>("Repository", "").Persisted();
+        var issueNumber     = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var poSummary       = builder.WithVariable<string>("POSummary", "").Persisted();
+        var contextIds      = builder.WithVariable<string>("ContextIds", "[]").Persisted();
+        var workItemJson    = builder.WithVariable<string>("WorkItemJson", "").Persisted();
+        var reviewNotes     = builder.WithVariable<string>("ReviewNotes", "").Persisted();
+        var revisionNumber  = builder.WithVariable<int>("RevisionNumber", 0).Persisted();
+        var tenantId        = builder.WithVariable<string>("TenantId", "").Persisted();
+        var issueId         = builder.WithVariable<string>("IssueId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
 
         // ── Consumed decomposition (D4) ────────────────────────────────
-        var decompositionJson = builder.WithVariable<string>("DecompositionJson", "");
-        var decompositionFound = builder.WithVariable<bool>();
-        var decompositionDocId = builder.WithVariable<string>();
-        var decompositionLineage = builder.WithVariable<string>();
+        var decompositionJson = builder.WithVariable<string>("DecompositionJson", "").Persisted();
+        var decompositionFound = builder.WithVariable<bool>().Persisted();
+        var decompositionDocId = builder.WithVariable<string>().Persisted();
+        var decompositionLineage = builder.WithVariable<string>().Persisted();
 
         // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
-        var assessmentFound = builder.WithVariable<bool>();
-        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
+        var assessmentFound = builder.WithVariable<bool>().Persisted();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}").Persisted();
 
         // ── 39-10 re-entry position (D9) ───────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson  = builder.WithVariable<string>();
-        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson  = builder.WithVariable<string>().Persisted();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce").Persisted();
 
         // ── Dispatched-workflow result + typed exit ────────────────────
-        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
-        var lifecycleAccepted = builder.WithVariable<bool>();
-        var exitStatus      = builder.WithVariable<string>("ExitStatus", "");
-        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
-        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
-        var planJson        = builder.WithVariable<string>("PlanJson", "");
-        var decisionNotes   = builder.WithVariable<string>("DecisionNotes", "");
-        var legacyDecision  = builder.WithVariable<string>("LegacyDecision", "needsHuman");
-        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
-        var outputStatus    = builder.WithVariable<string>();
-        var outputError     = builder.WithVariable<string>("OutputError", "");
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var lifecycleAccepted = builder.WithVariable<bool>().Persisted();
+        var exitStatus      = builder.WithVariable<string>("ExitStatus", "").Persisted();
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "").Persisted();
+        var planJson        = builder.WithVariable<string>("PlanJson", "").Persisted();
+        var decisionNotes   = builder.WithVariable<string>("DecisionNotes", "").Persisted();
+        var legacyDecision  = builder.WithVariable<string>("LegacyDecision", "needsHuman").Persisted();
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "").Persisted();
+        var outputStatus    = builder.WithVariable<string>().Persisted();
+        var outputError     = builder.WithVariable<string>("OutputError", "").Persisted();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable

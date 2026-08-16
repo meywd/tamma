@@ -61,45 +61,45 @@ public class CodeReviewWorkflow : WorkflowBase
         // ============================================
         // Workflow variables
         // ============================================
-        var sessionId = builder.WithVariable<string>("SessionId", "");
-        var sessionIdGuid = builder.WithVariable<Guid>("SessionIdGuid", Guid.Empty);
-        var storyId = builder.WithVariable<string>("StoryId", "");
-        var juniorId = builder.WithVariable<string>("JuniorId", "");
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var repositoryUrl = builder.WithVariable<string>("RepositoryUrl", "");
-        var branchName = builder.WithVariable<string>("BranchName", "");
-        var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
-        var reviewerIdsJson = builder.WithVariable<string>("ReviewerIdsJson", "");
-        var resolvedReviewers = builder.WithVariable<string>("ResolvedReviewers", "");
-        var skillLevel = builder.WithVariable<int>("SkillLevel", 3);
-        var prNumber = builder.WithVariable<int>("PRNumber", 0);
-        var prUrl = builder.WithVariable<string>("PRUrl", "");
-        var iteration = builder.WithVariable<int>("Iteration", 0);
-        var maxIterations = builder.WithVariable<int>("MaxIterations", 5);
-        var maxIterationsInput = builder.WithVariable<int>("MaxIterationsInput", 0);
-        var mergeStrategyInput = builder.WithVariable<string>("MergeStrategyInput", "");
-        var reviewCommentsJson = builder.WithVariable<string>("ReviewCommentsJson", "[]");
-        var analysisText = builder.WithVariable<string>("AnalysisText", "");
-        var guidanceText = builder.WithVariable<string>("GuidanceText", "");
-        var validationError = builder.WithVariable<string>("ValidationError", "");
-        var escalationResolution = builder.WithVariable<string>("EscalationResolution", "");
-        var mergeShaVar = builder.WithVariable<string>("MergeSha", "");
+        var sessionId = builder.WithVariable<string>("SessionId", "").Persisted();
+        var sessionIdGuid = builder.WithVariable<Guid>("SessionIdGuid", Guid.Empty).Persisted();
+        var storyId = builder.WithVariable<string>("StoryId", "").Persisted();
+        var juniorId = builder.WithVariable<string>("JuniorId", "").Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
+        var repositoryUrl = builder.WithVariable<string>("RepositoryUrl", "").Persisted();
+        var branchName = builder.WithVariable<string>("BranchName", "").Persisted();
+        var baseBranch = builder.WithVariable<string>("BaseBranch", "main").Persisted();
+        var reviewerIdsJson = builder.WithVariable<string>("ReviewerIdsJson", "").Persisted();
+        var resolvedReviewers = builder.WithVariable<string>("ResolvedReviewers", "").Persisted();
+        var skillLevel = builder.WithVariable<int>("SkillLevel", 3).Persisted();
+        var prNumber = builder.WithVariable<int>("PRNumber", 0).Persisted();
+        var prUrl = builder.WithVariable<string>("PRUrl", "").Persisted();
+        var iteration = builder.WithVariable<int>("Iteration", 0).Persisted();
+        var maxIterations = builder.WithVariable<int>("MaxIterations", 5).Persisted();
+        var maxIterationsInput = builder.WithVariable<int>("MaxIterationsInput", 0).Persisted();
+        var mergeStrategyInput = builder.WithVariable<string>("MergeStrategyInput", "").Persisted();
+        var reviewCommentsJson = builder.WithVariable<string>("ReviewCommentsJson", "[]").Persisted();
+        var analysisText = builder.WithVariable<string>("AnalysisText", "").Persisted();
+        var guidanceText = builder.WithVariable<string>("GuidanceText", "").Persisted();
+        var validationError = builder.WithVariable<string>("ValidationError", "").Persisted();
+        var escalationResolution = builder.WithVariable<string>("EscalationResolution", "").Persisted();
+        var mergeShaVar = builder.WithVariable<string>("MergeSha", "").Persisted();
         // Bound (#IMPORTANT) on the escalate→merge re-merge loop. Each time the merge-failure
         // escalation resolves and routes back to MergeAndComplete we increment this; once it
         // reaches the cap the run terminates as rejected (with a distinct, auditable event)
         // instead of cycling between merge and escalation forever.
-        var mergeRetryCount = builder.WithVariable<int>("MergeRetryCount", 0);
+        var mergeRetryCount = builder.WithVariable<int>("MergeRetryCount", 0).Persisted();
 
         // Config-resolved variables (filled by BindConfig)
-        var mergeStrategy = builder.WithVariable<MergeStrategy>("MergeStrategy", MergeStrategy.Squash);
-        var reviewTimeoutHours = builder.WithVariable<int>("ReviewTimeoutHours", 24);
-        var fixTimeoutHours = builder.WithVariable<int>("FixTimeoutHours", 1);
-        var verifyCi = builder.WithVariable<bool>("VerifyCIBeforeMerge", true);
-        var deleteBranch = builder.WithVariable<bool>("DeleteBranchAfterMerge", true);
+        var mergeStrategy = builder.WithVariable<MergeStrategy>("MergeStrategy", MergeStrategy.Squash).Persisted();
+        var reviewTimeoutHours = builder.WithVariable<int>("ReviewTimeoutHours", 24).Persisted();
+        var fixTimeoutHours = builder.WithVariable<int>("FixTimeoutHours", 1).Persisted();
+        var verifyCi = builder.WithVariable<bool>("VerifyCIBeforeMerge", true).Persisted();
+        var deleteBranch = builder.WithVariable<bool>("DeleteBranchAfterMerge", true).Persisted();
 
         // LLM dispatch result holders
-        var analyzeResult = builder.WithVariable<IDictionary<string, object>?>();
-        var guidanceResult = builder.WithVariable<IDictionary<string, object>?>();
+        var analyzeResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var guidanceResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ============================================
         // 0. Bind inputs (defect #1) — mirror AssessmentWorkflow input binding

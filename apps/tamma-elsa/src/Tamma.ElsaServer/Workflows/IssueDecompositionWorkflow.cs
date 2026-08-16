@@ -81,43 +81,43 @@ public class IssueDecompositionWorkflow : WorkflowBase
         builder.Description = "Decompose a complex issue into an ordered set of implementable sub-tasks via the generic document lifecycle (produce → validate → review → revise → accept)";
 
         // ── Workflow variables (inputs) ────────────────────────────────
-        var sessionId       = builder.WithVariable<Guid>();
-        var issueId         = builder.WithVariable<string>();
-        var issueTitle      = builder.WithVariable<string>();
-        var repository      = builder.WithVariable<string>();
-        var issueNumber     = builder.WithVariable<int>();
-        var workItemJson    = builder.WithVariable<string>();
-        var tenantId        = builder.WithVariable<string>("TenantId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+        var sessionId       = builder.WithVariable<Guid>().Persisted();
+        var issueId         = builder.WithVariable<string>().Persisted();
+        var issueTitle      = builder.WithVariable<string>().Persisted();
+        var repository      = builder.WithVariable<string>().Persisted();
+        var issueNumber     = builder.WithVariable<int>().Persisted();
+        var workItemJson    = builder.WithVariable<string>().Persisted();
+        var tenantId        = builder.WithVariable<string>("TenantId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
 
         // ── Context (consumes side) ────────────────────────────────────
-        var decompositionContext = builder.WithVariable<string>();
-        var contextIds      = builder.WithVariable<string>("[]");
+        var decompositionContext = builder.WithVariable<string>().Persisted();
+        var contextIds      = builder.WithVariable<string>("[]").Persisted();
 
         // ── 39-10 re-entry position (D7) ───────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson  = builder.WithVariable<string>();
-        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson  = builder.WithVariable<string>().Persisted();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce").Persisted();
 
         // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
-        var assessmentFound = builder.WithVariable<bool>();
-        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
+        var assessmentFound = builder.WithVariable<bool>().Persisted();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}").Persisted();
 
         // ── Dispatched-workflow result containers ──────────────────────
-        var contextGatherResult = builder.WithVariable<IDictionary<string, object>?>();
-        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
+        var contextGatherResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ── Typed lifecycle exit (D2 — routed values, never raw output) ─
-        var lifecycleAccepted = builder.WithVariable<bool>();
-        var exitStatus      = builder.WithVariable<string>("ExitStatus", "");
-        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
-        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
-        var decompositionJson = builder.WithVariable<string>("DecompositionJson", "{}");
-        var subtaskCount    = builder.WithVariable<int>();
-        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
+        var lifecycleAccepted = builder.WithVariable<bool>().Persisted();
+        var exitStatus      = builder.WithVariable<string>("ExitStatus", "").Persisted();
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "").Persisted();
+        var decompositionJson = builder.WithVariable<string>("DecompositionJson", "{}").Persisted();
+        var subtaskCount    = builder.WithVariable<int>().Persisted();
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "").Persisted();
 
         // ── Output ─────────────────────────────────────────────────────
-        var outputStatus    = builder.WithVariable<string>();
+        var outputStatus    = builder.WithVariable<string>().Persisted();
 
         // ── Step 1: Read inputs (BuildWorkItem kept as the internal composer) ──
         var readInputs = new SetVariable

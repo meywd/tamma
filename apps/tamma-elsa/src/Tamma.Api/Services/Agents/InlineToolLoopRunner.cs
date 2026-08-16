@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Credentials;
@@ -60,6 +61,11 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     private readonly IProviderSettingsStore? _settingsStore;
     private readonly Tamma.Api.Services.Actions.ActionGateEventsService? _actionGateEvents;
     private readonly ToolLoopAuthorizationBroker? _authorizationBroker;
+    // 2026-08-13 — the opt-in in-process "scripted" provider seam. Registered
+    // ONLY when Llm:EnableScriptedProvider=true on a non-production host
+    // (AddScriptedLlmProvider); null everywhere else ⇒ the dispatch below is
+    // byte-identical to before the seam existed.
+    private readonly Scripted.IScriptedLlmResponder? _scriptedResponder;
 
     public InlineToolLoopRunner(
         ILogger<InlineToolLoopRunner>? logger,
@@ -91,7 +97,19 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         // (registration decides): with it, a Seam B denial first checks whether a
         // correlation-standing grant already covers the run (one shell ask per run,
         // not per call). The sync gate above stays REQUIRED and untouched.
-        ToolLoopAuthorizationBroker? authorizationBroker = null)
+        ToolLoopAuthorizationBroker? authorizationBroker = null,
+        // 2026-08-13 — the opt-in scripted-provider responder. Optional
+        // trailing arg (the established pattern) so every existing composition
+        // is untouched; DI supplies it only when the flag is on.
+        Scripted.IScriptedLlmResponder? scriptedResponder = null,
+        // 2026-08-14 — the COMPOSED allowlist. Binding the raw config section
+        // here missed `PostConfigure<ProviderAllowlistOptions>` widenings, which
+        // is exactly how the scripted provider is admitted in both hosts, so a
+        // provider that passed selection was rejected at the last moment and the
+        // caller silently fell back to another provider's model. Optional
+        // trailing arg (the established pattern): DI supplies the composed
+        // options; unit compositions without it fall back to the config bind.
+        IOptions<ProviderAllowlistOptions>? allowlistOptions = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
@@ -113,6 +131,8 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         _settingsStore = settingsStore;
         _actionGateEvents = actionGateEvents;
         _authorizationBroker = authorizationBroker;
+        _scriptedResponder = scriptedResponder;
+        _allowlistOptions = allowlistOptions;
     }
 
     /// <inheritdoc />
@@ -232,12 +252,16 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
                         loopConfig.CompactionThreshold,
                         async (prompt, ct) =>
                         {
-                            // Make a single-turn summarization LLM call using the same provider
-                            var summaryResponse = dialect == ProviderWireDialect.Anthropic
-                                ? await CallAnthropicMessages(httpClient, providerConfig, model,
-                                    "You are a precise conversation summarizer.", prompt, 2048, 0.3, null)
-                                : await CallOpenAiCompatible(httpClient, providerConfig, model,
-                                    "You are a precise conversation summarizer.", prompt, 2048, 0.3, null);
+                            // Make a single-turn summarization LLM call using the same provider.
+                            // The scripted provider (2026-08-13) intercepts here too — a scripted
+                            // run must never open an HTTP socket, compaction included.
+                            var summaryResponse =
+                                TryScripted(providerName, providerConfig, model, repair, workflowInstanceId)
+                                ?? (dialect == ProviderWireDialect.Anthropic
+                                    ? await CallAnthropicMessages(httpClient, providerConfig, model,
+                                        "You are a precise conversation summarizer.", prompt, 2048, 0.3, null)
+                                    : await CallOpenAiCompatible(httpClient, providerConfig, model,
+                                        "You are a precise conversation summarizer.", prompt, 2048, 0.3, null));
 
                             return summaryResponse.Success ? summaryResponse.ResponseText : null;
                         },
@@ -252,10 +276,20 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
                 }
             }
 
-            // Call LLM with full conversation history
+            // Call LLM with full conversation history. The opt-in scripted
+            // provider (2026-08-13) intercepts BEFORE the wire dialects: when
+            // the responder is registered AND this provider is "scripted", the
+            // deterministic in-process response stands in for the HTTP call —
+            // everything else in the loop (validation ring, token accounting,
+            // events) runs identically.
             var llmSw = System.Diagnostics.Stopwatch.StartNew();
             NormalizedLlmResponse response;
-            if (dialect == ProviderWireDialect.Anthropic)
+            var scripted = TryScripted(providerName, providerConfig, model, repair, workflowInstanceId);
+            if (scripted is not null)
+            {
+                response = scripted;
+            }
+            else if (dialect == ProviderWireDialect.Anthropic)
             {
                 response = await CallAnthropicMultiTurn(
                     httpClient, providerConfig, model, messages, maxTokens, temperature, tools);
@@ -749,11 +783,13 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
                 // execution). Same client/config/tools declarations (Anthropic
                 // requires the tools when history carries tool blocks). Repair turns
                 // NEVER touch loopConfig.MaxSteps / completedTurns.
-                var repairResponse = dialect == ProviderWireDialect.Anthropic
-                    ? await CallAnthropicMultiTurn(
-                        httpClient, providerConfig, model, messages, maxTokens, temperature, tools)
-                    : await CallOpenAiMultiTurn(
-                        httpClient, providerConfig, model, messages, maxTokens, temperature, tools);
+                var repairResponse =
+                    TryScripted(providerName, providerConfig, model, repair, workflowInstanceId)
+                    ?? (dialect == ProviderWireDialect.Anthropic
+                        ? await CallAnthropicMultiTurn(
+                            httpClient, providerConfig, model, messages, maxTokens, temperature, tools)
+                        : await CallOpenAiMultiTurn(
+                            httpClient, providerConfig, model, messages, maxTokens, temperature, tools));
 
                 repairTurns++;
 
@@ -818,6 +854,33 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         return $"Tool call denied by autonomy policy: '{toolName}'"
             + (decision.ActionKey is { } k ? $" (action '{k.ToWire()}')" : string.Empty)
             + $" {detail}. This action cannot run automatically; continue without it.";
+    }
+
+    /// <summary>
+    /// 2026-08-13 — the scripted-provider dispatch guard. Returns the
+    /// deterministic in-process response when (a) the responder is registered
+    /// (opt-in flag on a non-production host) AND (b) this call's provider is
+    /// the scripted key; null otherwise, in which case the caller proceeds to
+    /// the real wire dialects untouched. The response is keyed on the call's
+    /// (role, action) — stamped onto the provider config by ManagedAgent —
+    /// plus the 39-9 repair plan's document-type key.
+    /// </summary>
+    private NormalizedLlmResponse? TryScripted(
+        string providerName, LlmProviderConfig providerConfig, string model,
+        RepairRingPlan? repair, string correlationId)
+    {
+        if (_scriptedResponder is null || !_scriptedResponder.CanHandle(providerName))
+        {
+            return null;
+        }
+
+        return _scriptedResponder.Respond(new Scripted.ScriptedLlmCall(
+            providerName,
+            providerConfig.CallRole,
+            providerConfig.CallAction,
+            repair?.DocumentTypeKey,
+            model,
+            correlationId));
     }
 
     // =======================================================================
@@ -1269,6 +1332,26 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     /// config → descriptor). With no settings store wired — or no rows saved —
     /// the output is byte-identical to the pre-46-1 resolution.
     /// </summary>
+    private readonly IOptions<ProviderAllowlistOptions>? _allowlistOptions;
+    private ProviderAllowlist? _allowlist;
+
+    /// <summary>
+    /// The allowlist bound from <c>Security:ProviderAllowlist</c>, cached for
+    /// the runner's lifetime. Falls back to the built-in defaults when no
+    /// configuration is present (the pre-2026-08-14 behaviour).
+    /// </summary>
+    private ProviderAllowlist ResolveAllowlist()
+    {
+        if (_allowlist is not null) return _allowlist;
+
+        if (_allowlistOptions is not null)
+            return _allowlist = new ProviderAllowlist(_allowlistOptions);
+
+        var options = new ProviderAllowlistOptions();
+        _configuration?.GetSection("Security:ProviderAllowlist").Bind(options);
+        return _allowlist = new ProviderAllowlist(Options.Create(options));
+    }
+
     internal LlmProviderConfig LoadProviderConfig(string providerName, Guid? tenantId)
     {
         // F5 — the allowlist carries CANONICAL keys only; catalogue aliases
@@ -1281,8 +1364,15 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             ?? ProviderCatalog.ResolveNonHttp(providerName)?.Key
             ?? providerName;
 
-        // Validate the canonical provider name against the allowlist
-        if (!ProviderAllowlist.IsAllowedDefault(canonicalName))
+        // Validate the canonical provider name against the allowlist.
+        // 2026-08-14 (engine-driven E2E): this used the CONFIG-BLIND static
+        // helper, so `Security:ProviderAllowlist:AdditionalProviders` — the
+        // documented extension point for self-hosted/custom providers — was
+        // dead on the main LLM path: a configured provider passed selection
+        // and then got rejected here, and the caller silently fell back to the
+        // platform default. Bind the configured allowlist instead (built once;
+        // the defaults still apply when nothing is configured).
+        if (!ResolveAllowlist().IsAllowed(canonicalName))
         {
             _logger?.LogWarning("Provider '{Provider}' is not in the allowlist, rejecting", providerName);
             return new LlmProviderConfig { Name = providerName, Enabled = false };

@@ -64,16 +64,16 @@ public class CreateIssuesWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repositoryVar = builder.WithVariable<string>("Repository", "");
-        var issuesJsonVar = builder.WithVariable<string>("IssuesJson", "[]");
+        var repositoryVar = builder.WithVariable<string>("Repository", "").Persisted();
+        var issuesJsonVar = builder.WithVariable<string>("IssuesJson", "[]").Persisted();
         // MUST be literally "TenantId" — EventPersistenceMiddleware.ResolveTenantId
         // reads this exact variable name to tenant-tag the drained events (AC5).
-        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "").Persisted();
 
-        var createdCountVar = builder.WithVariable<int>("CreatedCount", 0);
-        var failedCountVar = builder.WithVariable<int>("FailedCount", 0);
-        var skippedCountVar = builder.WithVariable<int>("SkippedCount", 0);
-        var issueNumbersJsonVar = builder.WithVariable<string>("IssueNumbersJson", "[]");
+        var createdCountVar = builder.WithVariable<int>("CreatedCount", 0).Persisted();
+        var failedCountVar = builder.WithVariable<int>("FailedCount", 0).Persisted();
+        var skippedCountVar = builder.WithVariable<int>("SkippedCount", 0).Persisted();
+        var issueNumbersJsonVar = builder.WithVariable<string>("IssueNumbersJson", "[]").Persisted();
 
         // ================================================================
         // 1. Read inputs

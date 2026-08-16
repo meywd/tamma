@@ -67,7 +67,7 @@ public class WaitForPlanApprovalActivity : Activity
     protected override void Execute(ActivityExecutionContext context)
     {
         var issueNumber = IssueNumber.Get(context);
-        var tenantId = PlanApprovalEvents.ParseTenantId(TenantId.Get(context));
+        var tenantId = PlanApprovalEvents.ParseTenantId(TenantId.GetOrDefault(context));
         var bookmarkName = $"adl-plan-approval-{issueNumber}";
 
         _logger?.LogInformation(
@@ -118,7 +118,7 @@ public class WaitForPlanApprovalActivity : Activity
         // resuming edge so the approver / feedback context is captured durably (a rejection is
         // a LOUD error-status row, never a silent approve).
         var issueNumber = IssueNumber.Get(context);
-        var tenantId = PlanApprovalEvents.ParseTenantId(TenantId.Get(context));
+        var tenantId = PlanApprovalEvents.ParseTenantId(TenantId.GetOrDefault(context));
         TammaEventEmitter.Emit(context, this, _logger,
             BuildTammaEvent(
                 PlanApprovalEvents.DecisionEventType(result.Decision),

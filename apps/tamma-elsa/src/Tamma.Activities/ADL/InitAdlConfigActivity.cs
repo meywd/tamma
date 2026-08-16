@@ -78,13 +78,28 @@ public class InitAdlConfigActivity : TammaActivity
         // Start from defaults
         var config = new AdlConfig();
 
+        // 2026-08-13 (engine-driven E2E): ALL the layered-override inputs are
+        // OPTIONAL and must be read with GetOrDefault — .Get throws
+        // "<name> is required." on a null evaluated value, and the
+        // self-restart dispatch (DispatchAdlActivity) passes only configJson,
+        // so every successor orchestrator instance faulted its own init here.
         // Layer 1: Parse configJson if provided
-        var configJson = ConfigJson.Get(context);
+        var configJson = ConfigJson.GetOrDefault(context);
         if (!string.IsNullOrWhiteSpace(configJson))
         {
             try
             {
-                config = JsonSerializer.Deserialize<AdlConfig>(configJson) ?? config;
+                // 2026-08-13 (engine-driven E2E): case-INSENSITIVE on purpose.
+                // Callers dispatch camelCase config ({"cooldownSeconds":3600});
+                // the default case-sensitive deserialize silently ignored every
+                // camelCase member, so the orchestrator ran with
+                // CooldownSeconds=10 and re-selected the same still-open issue
+                // every ten seconds — 25 restarts and 18 concurrent cycles for
+                // one issue in a single E2E window.
+                config = JsonSerializer.Deserialize<AdlConfig>(
+                             configJson,
+                             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                         ?? config;
             }
             catch (JsonException ex)
             {
@@ -93,19 +108,19 @@ public class InitAdlConfigActivity : TammaActivity
         }
 
         // Layer 2: Direct input overrides
-        var repoInput = Repository.Get(context);
+        var repoInput = Repository.GetOrDefault(context);
         if (!string.IsNullOrEmpty(repoInput))
             config.Repository = repoInput;
 
-        var labelsInput = IssueLabels.Get(context);
+        var labelsInput = IssueLabels.GetOrDefault(context);
         if (labelsInput is { Length: > 0 })
             config.IssueLabels = labelsInput;
 
-        var botInput = BotAssignee.Get(context);
+        var botInput = BotAssignee.GetOrDefault(context);
         if (!string.IsNullOrEmpty(botInput))
             config.BotAssignee = botInput;
 
-        var branchInput = BaseBranch.Get(context);
+        var branchInput = BaseBranch.GetOrDefault(context);
         if (!string.IsNullOrEmpty(branchInput))
             config.BaseBranch = branchInput;
 

@@ -51,38 +51,38 @@ public class DesignProposalWorkflow : WorkflowBase
         builder.Description = "Generate a reviewed technical design proposal via the generic document lifecycle (produce → validate → review → deliver → accept gate)";
 
         // ── Inputs ─────────────────────────────────────────────────────
-        var sessionId    = builder.WithVariable<Guid>();
-        var issueId      = builder.WithVariable<string>();
-        var requirement  = builder.WithVariable<string>();
-        var repository   = builder.WithVariable<string>();
-        var issueNumber  = builder.WithVariable<int>();
-        var constraints  = builder.WithVariable<string>();
-        var conventions  = builder.WithVariable<string>();
-        var tenantId     = builder.WithVariable<string>("TenantId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+        var sessionId    = builder.WithVariable<Guid>().Persisted();
+        var issueId      = builder.WithVariable<string>().Persisted();
+        var requirement  = builder.WithVariable<string>().Persisted();
+        var repository   = builder.WithVariable<string>().Persisted();
+        var issueNumber  = builder.WithVariable<int>().Persisted();
+        var constraints  = builder.WithVariable<string>().Persisted();
+        var conventions  = builder.WithVariable<string>().Persisted();
+        var tenantId     = builder.WithVariable<string>("TenantId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
 
         // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
-        var assessmentFound = builder.WithVariable<bool>();
-        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
+        var assessmentFound = builder.WithVariable<bool>().Persisted();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}").Persisted();
 
         // ── 39-10 re-entry position ────────────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson  = builder.WithVariable<string>();
-        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson  = builder.WithVariable<string>().Persisted();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce").Persisted();
 
         // ── Dispatched-workflow result + typed exit ────────────────────
-        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
-        var lifecycleAccepted = builder.WithVariable<bool>();
-        var lifecycleRejected = builder.WithVariable<bool>();
-        var exitStatus      = builder.WithVariable<string>("ExitStatus", "");
-        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
-        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
-        var proposalJson    = builder.WithVariable<string>("ProposalJson", "{}");
-        var alternativeCount = builder.WithVariable<int>();
-        var decisionNotes   = builder.WithVariable<string>("DecisionNotes", "");
-        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
-        var approved        = builder.WithVariable<bool>();
-        var outputStatus    = builder.WithVariable<string>();
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var lifecycleAccepted = builder.WithVariable<bool>().Persisted();
+        var lifecycleRejected = builder.WithVariable<bool>().Persisted();
+        var exitStatus      = builder.WithVariable<string>("ExitStatus", "").Persisted();
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "").Persisted();
+        var proposalJson    = builder.WithVariable<string>("ProposalJson", "{}").Persisted();
+        var alternativeCount = builder.WithVariable<int>().Persisted();
+        var decisionNotes   = builder.WithVariable<string>("DecisionNotes", "").Persisted();
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "").Persisted();
+        var approved        = builder.WithVariable<bool>().Persisted();
+        var outputStatus    = builder.WithVariable<string>().Persisted();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable

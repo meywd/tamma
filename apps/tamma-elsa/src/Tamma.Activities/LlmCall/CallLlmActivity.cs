@@ -124,12 +124,12 @@ public class CallLlmActivity : Activity
     {
         var providerName = ProviderName.Get(context);
         var userPrompt = UserPrompt.Get(context);
-        var modelOverride = ModelOverride.Get(context);
+        var modelOverride = ModelOverride.GetOrDefault(context);
         var maxTokens = MaxTokens.Get(context);
         var temperature = Temperature.Get(context);
-        var toolsJson = ToolsJson.Get(context);
+        var toolsJson = ToolsJson.GetOrDefault(context);
         var attemptNumber = AttemptNumber.Get(context);
-        var tenantIdRaw = TenantId.Get(context);
+        var tenantIdRaw = TenantId.GetOrDefault(context);
 
         var tools = DeserializeTools(toolsJson)?.Select(t => t.Name).ToList();
         // Story 43-14 (AC4) — the RUN correlation (the cycle instance id, threaded

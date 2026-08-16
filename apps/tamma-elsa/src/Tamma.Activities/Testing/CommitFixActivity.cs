@@ -81,7 +81,7 @@ public class CommitFixActivity : CodeActivity<CommitFixResult>
         var fixedIssues = FixedIssues.Get(context) ?? new List<QualityIssue>();
         var attemptNumber = AttemptNumber.Get(context);
         var maxAttempts = MaxAttempts.Get(context);
-        var fixDescription = FixDescription.Get(context);
+        var fixDescription = FixDescription.GetOrDefault(context);
 
         _logger?.LogInformation(
             "Committing auto-fix attempt {Attempt}/{Max} for session {SessionId}",

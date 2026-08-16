@@ -70,16 +70,22 @@ public class FetchUntriagedItemsActivity : TammaAsyncActivity
         var repo = Repository.Get(context);
         var items = new List<TriageItem>();
 
-        var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
+        // 2026-08-13 (engine-driven E2E): store-rehydrated activities are built
+        // by the [JsonConstructor] with NULL ctor-injected members — resolve
+        // from the execution context (ctor-or-GetService idiom).
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+        var httpClientFactory = _httpClientFactory ?? context.GetService<IHttpClientFactory>();
+
+        var callbackUrl = configuration?["Engine:CallbackUrl"];
+        var useMock = configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
 
         if (useMock)
         {
             items = SimulateItems();
         }
-        else if (!string.IsNullOrEmpty(callbackUrl) && _httpClientFactory != null)
+        else if (!string.IsNullOrEmpty(callbackUrl) && httpClientFactory != null)
         {
-            var httpClient = _httpClientFactory.CreateClient();
+            var httpClient = httpClientFactory.CreateClient();
 
             // Fetch open issues
             try

@@ -77,8 +77,8 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
         var sessionId = SessionId.Get(context);
         var storyId = StoryId.Get(context);
         var juniorId = JuniorId.Get(context);
-        var blockerContext = BlockerContext.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var blockerContext = BlockerContext.GetOrDefault(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;

@@ -40,25 +40,25 @@ public class ContextGatheringWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var repository = builder.WithVariable<string>("Repository", "");
-        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
-        var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
-        var workItemType = builder.WithVariable<string>("WorkItemType", "feature");
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var issueNumber = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var workItemJson = builder.WithVariable<string>("WorkItemJson", "").Persisted();
+        var workItemType = builder.WithVariable<string>("WorkItemType", "feature").Persisted();
 
         // Accumulated findings
-        var devFindings = builder.WithVariable<string>("DevFindings", "{}");
-        var qaFindings = builder.WithVariable<string>("QAFindings", "{}");
-        var securityFindings = builder.WithVariable<string>("SecurityFindings", "{}");
-        var devopsFindings = builder.WithVariable<string>("DevOpsFindings", "{}");
-        var architectFindings = builder.WithVariable<string>("ArchitectFindings", "{}");
+        var devFindings = builder.WithVariable<string>("DevFindings", "{}").Persisted();
+        var qaFindings = builder.WithVariable<string>("QAFindings", "{}").Persisted();
+        var securityFindings = builder.WithVariable<string>("SecurityFindings", "{}").Persisted();
+        var devopsFindings = builder.WithVariable<string>("DevOpsFindings", "{}").Persisted();
+        var architectFindings = builder.WithVariable<string>("ArchitectFindings", "{}").Persisted();
 
         // Context IDs accumulated from per-role storage
-        var contextIds = builder.WithVariable<string>("ContextIds", "[]");
-        var poSummary = builder.WithVariable<string>("POSummary", "");
-        var links = builder.WithVariable<string>("Links", "[]");
+        var contextIds = builder.WithVariable<string>("ContextIds", "[]").Persisted();
+        var poSummary = builder.WithVariable<string>("POSummary", "").Persisted();
+        var links = builder.WithVariable<string>("Links", "[]").Persisted();
 
-        var llmResult = builder.WithVariable<IDictionary<string, object>?>();
+        var llmResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ================================================================
         // 1. Init

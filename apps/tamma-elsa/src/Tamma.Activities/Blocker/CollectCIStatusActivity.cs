@@ -64,7 +64,7 @@ public class CollectCIStatusActivity : CodeActivity<CIStatusSignal>
     {
         var repository = Repository.Get(context);
         var branchName = BranchName.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;

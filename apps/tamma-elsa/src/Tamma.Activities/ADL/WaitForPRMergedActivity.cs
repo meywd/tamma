@@ -63,6 +63,7 @@ public class WaitForPRMergedActivity : TammaOutcomeActivity
     public const int DefaultTimeoutMinutes = 720;
 
     private readonly IConfiguration? _configuration;
+    private readonly PendingPrMergeBuffer? _pendingMerges;
 
     public override string? EventType => "CYCLE.PR.MERGE.WAIT";
 
@@ -86,10 +87,14 @@ public class WaitForPRMergedActivity : TammaOutcomeActivity
     [JsonConstructor]
     public WaitForPRMergedActivity() { }
 
-    public WaitForPRMergedActivity(ILogger<WaitForPRMergedActivity> logger, IConfiguration configuration)
+    public WaitForPRMergedActivity(
+        ILogger<WaitForPRMergedActivity> logger,
+        IConfiguration configuration,
+        PendingPrMergeBuffer? pendingMerges = null)
     {
         Logger = logger;
         _configuration = configuration;
+        _pendingMerges = pendingMerges;
     }
 
     /// <summary>
@@ -115,11 +120,31 @@ public class WaitForPRMergedActivity : TammaOutcomeActivity
     /// </summary>
     public static string LegacyBookmarkName(int prNumber) => $"pr-merged-{prNumber}";
 
-    protected override Task RunAsync(ActivityExecutionContext context)
+    protected override async Task RunAsync(ActivityExecutionContext context)
     {
         var prNumber = PRNumber.Get(context);
         var tenantId = TenantId.GetOrDefault(context);
         var repository = Repository.GetOrDefault(context);
+
+        // 0) RECONCILE-ON-REGISTER (2026-08-13, engine-driven E2E run 39): when
+        //    Tamma performs the merge ITSELF, the platform's merged-PR webhook
+        //    fires immediately — observed 1 s BEFORE this activity registered
+        //    its bookmark, so the once-only forward 404'd and the merged cycle
+        //    sat on the 12 h SLA. The resume endpoint buffers such early
+        //    notifications keyed by this exact bookmark name; consume it here
+        //    and short-circuit to Merged instead of suspending.
+        var buffer = _pendingMerges ?? context.GetService<PendingPrMergeBuffer>();
+        if (buffer is not null
+            && buffer.TryConsume(BookmarkName(tenantId, repository, prNumber), out var bufferedSha))
+        {
+            MergeSha.Set(context, bufferedSha);
+            Logger?.LogInformation(
+                "PR #{PRNumber} merge notification arrived BEFORE the wait registered — " +
+                "consumed from the reconcile buffer (sha: {MergeSha}); completing Merged without suspending",
+                prNumber, bufferedSha ?? "unknown");
+            await context.CompleteActivityWithOutcomesAsync("Merged");
+            return;
+        }
 
         // 1) Merge bookmark — resumed by the merged-PR webhook through the
         //    engine-side PrMergedResumeEndpoint (tenant+repo-qualified name).
@@ -138,11 +163,29 @@ public class WaitForPRMergedActivity : TammaOutcomeActivity
         slaMinutes = Math.Max(1, slaMinutes);
         context.DelayFor(TimeSpan.FromMinutes(slaMinutes), OnTimeoutAsync);
 
+        // 3) SECOND reconcile pass (2026-08-14). Step 0 alone leaves a real gap:
+        //    a webhook arriving AFTER that check but before this activity
+        //    suspends finds no bookmark to resume, so the endpoint buffers it —
+        //    and nothing ever reads the buffer again, leaving a merged PR on the
+        //    12 h SLA. Re-reading here collapses that window to the instant
+        //    between this check and suspension. Completing now discards the
+        //    bookmarks registered above, which is exactly the intent: the event
+        //    we were waiting for has already happened.
+        if (buffer is not null
+            && buffer.TryConsume(BookmarkName(tenantId, repository, prNumber), out var lateSha))
+        {
+            MergeSha.Set(context, lateSha);
+            Logger?.LogInformation(
+                "PR #{PRNumber} merge notification arrived WHILE the wait was registering — " +
+                "consumed on the second reconcile pass (sha: {MergeSha}); completing Merged",
+                prNumber, lateSha ?? "unknown");
+            await context.CompleteActivityWithOutcomesAsync("Merged");
+            return;
+        }
+
         Logger?.LogInformation(
             "Waiting for PR #{PRNumber} to be merged; durable SLA timeout armed at +{SlaMinutes}min",
             prNumber, slaMinutes);
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -168,7 +211,7 @@ public class WaitForPRMergedActivity : TammaOutcomeActivity
     /// </summary>
     private async ValueTask OnTimeoutAsync(ActivityExecutionContext context)
     {
-        MergeSha.Set(context, null);
+        MergeSha.Set(context, (string?)null);
 
         Logger?.LogWarning(
             "Merge SLA expired (durable timeout) for PR #{PRNumber} — taking the TimedOut edge",

@@ -65,8 +65,8 @@ public class PersistDocumentInstanceActivity : Activity
             ?? throw Failed(
                 "TammaApiClient is not registered — the engine cannot reach the document store.", null);
 
-        Guid? correlatingEventId = Guid.TryParse(CorrelatingEventId.Get(context), out var g) ? g : null;
-        var tenantId = TenantId.Get(context);
+        Guid? correlatingEventId = Guid.TryParse(CorrelatingEventId.GetOrDefault(context), out var g) ? g : null;
+        var tenantId = TenantId.GetOrDefault(context);
 
         try
         {
@@ -87,6 +87,7 @@ public class PersistDocumentInstanceActivity : Activity
         }
 
         _logger?.LogInformation("Persisted document instance (tenant {Tenant})", tenantId);
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
     }
 
     private static TammaError Failed(string message, Exception? inner) => new(

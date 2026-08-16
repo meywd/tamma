@@ -53,13 +53,13 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var configJson = builder.WithVariable<string>("ConfigJson", "{}");
-        var repository = builder.WithVariable<string>("Repository", "");
-        var issueLabels = builder.WithVariable<string[]>("IssueLabels", Array.Empty<string>());
-        var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot");
-        var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
-        var cooldownSeconds = builder.WithVariable<int>("CooldownSeconds", 10);
-        var maxConcurrent = builder.WithVariable<int>("MaxConcurrent", 1);
+        var configJson = builder.WithVariable<string>("ConfigJson", "{}").Persisted();
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var issueLabels = builder.WithVariable<string[]>("IssueLabels", Array.Empty<string>()).Persisted();
+        var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot").Persisted();
+        var baseBranch = builder.WithVariable<string>("BaseBranch", "main").Persisted();
+        var cooldownSeconds = builder.WithVariable<int>("CooldownSeconds", 10).Persisted();
+        var maxConcurrent = builder.WithVariable<int>("MaxConcurrent", 1).Persisted();
 
         // Deployment mode + tenant threaded to each dispatched cycle (and from
         // there into the deployment pipeline's production-approval gate). These
@@ -69,12 +69,12 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         // empty and DispatchCycleActivity derives the real mode from configuration
         // (mirrors TammaModeProvider). A SaaS dispatcher / operator may still set
         // `mode`/`tenantId` on the orchestrator input to override per-instance.
-        var mode = builder.WithVariable<string>("Mode", "");
-        var tenantId = builder.WithVariable<string>("TenantId", "");
+        var mode = builder.WithVariable<string>("Mode", "").Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
 
         // Selected work item data
-        var selectedItemJson = builder.WithVariable<string?>("SelectedItemJson", null);
-        var selectedIssueNumber = builder.WithVariable<int>("SelectedIssueNumber", 0);
+        var selectedItemJson = builder.WithVariable<string?>("SelectedItemJson", null).Persisted();
+        var selectedIssueNumber = builder.WithVariable<int>("SelectedIssueNumber", 0).Persisted();
 
         // ================================================================
         // 1. Load Config
@@ -169,6 +169,22 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         };
         cooldown.SetDisplayText("Cooldown");
 
+        // 2026-08-13 (engine-driven E2E): the WAIT is a stock scheduling Delay
+        // (timer bookmark ⇒ the instance SUSPENDS and frees the dispatch
+        // worker). CooldownActivity used to Task.Delay in-process, which held
+        // the runtime's dispatch slot for the whole cooldown — with a real
+        // 3600s cooldown, every subsequently dispatched workflow (all the
+        // cycle's llm-calls included) queued behind the sleeping orchestrator
+        // and the loop deadlocked itself. CooldownActivity now only emits the
+        // ADL.COOLDOWN audit pair; this node does the waiting.
+        var cooldownWait = new Elsa.Scheduling.Activities.Delay(
+            ctx => TimeSpan.FromSeconds(Math.Max(1, cooldownSeconds.Get(ctx))))
+        {
+            Id = "CooldownWait",
+            Name = "Cooldown Wait",
+        };
+        cooldownWait.SetDisplayText("Cooldown Wait");
+
         // ================================================================
         // Exit paths
         // ================================================================
@@ -212,7 +228,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Activities =
             {
                 initConfig, selectWorkItem, dispatchTriage,
-                checkLimits, dispatchCycle, cooldown,
+                checkLimits, dispatchCycle, cooldown, cooldownWait,
                 exitNoIssues, exitLimits, dispatchAdl, finish
             },
             Connections =
@@ -239,8 +255,10 @@ public class AdlOrchestratorWorkflow : WorkflowBase
                 ConnectOutcome(checkLimits, "Continue", dispatchCycle),
                 Connect(dispatchCycle, cooldown),
 
-                // All paths: cooldown → dispatch new ADL → finish this instance
-                Connect(cooldown, dispatchAdl),
+                // All paths: cooldown (emit) → cooldown wait (timer bookmark)
+                // → dispatch new ADL → finish this instance
+                Connect(cooldown, cooldownWait),
+                Connect(cooldownWait, dispatchAdl),
                 Connect(dispatchAdl, finish),
             }
         };

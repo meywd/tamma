@@ -64,32 +64,32 @@ public class TddWithDebugRetryWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var storyId = builder.WithVariable<string>("StoryId", "");
-        var planJson = builder.WithVariable<string>("PlanJson", "");
-        var repositoryUrl = builder.WithVariable<string>("RepositoryUrl", "");
-        var branchName = builder.WithVariable<string>("BranchName", "");
-        var skillLevel = builder.WithVariable<int>("SkillLevel", 5);
-        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
-        var tenantId = builder.WithVariable<string>("TenantId", "");
+        var storyId = builder.WithVariable<string>("StoryId", "").Persisted();
+        var planJson = builder.WithVariable<string>("PlanJson", "").Persisted();
+        var repositoryUrl = builder.WithVariable<string>("RepositoryUrl", "").Persisted();
+        var branchName = builder.WithVariable<string>("BranchName", "").Persisted();
+        var skillLevel = builder.WithVariable<int>("SkillLevel", 5).Persisted();
+        var issueNumber = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
         // tddDebugAttempt is ALWAYS reset to 0 on entry (see initInputs) so each
         // invocation — including a re-dispatch from a parent re-run — gets the full
         // retry budget regardless of any stale counter (sibling parity with
         // CiWithDebugRetryWorkflow's ciRetryCount reset).
-        var tddDebugAttempt = builder.WithVariable<int>("TddDebugAttempt", 0);
-        var maxRetries = builder.WithVariable<int>("MaxRetries", 3);
+        var tddDebugAttempt = builder.WithVariable<int>("TddDebugAttempt", 0).Persisted();
+        var maxRetries = builder.WithVariable<int>("MaxRetries", 3).Persisted();
         // Stable per-issue/story TDD session id, derived once in init and shared by the
         // tdd-cycle and debugging dispatches so retries correlate into ONE TDD session
         // (instead of a fresh Guid per dispatch). Lets resumed runs dedupe.
-        var sessionId = builder.WithVariable<string>("SessionId", "");
+        var sessionId = builder.WithVariable<string>("SessionId", "").Persisted();
         // Real underlying failure detail captured from the failing tdd-cycle result so
         // the failure terminal can surface the actual cause (not a generic string).
-        var lastTddError = builder.WithVariable<string>("LastTddError", "TDD cycle failed");
+        var lastTddError = builder.WithVariable<string>("LastTddError", "TDD cycle failed").Persisted();
         // The terminal failure reason: tdd-not-converged (exhausted) vs debugger-escalated.
-        var finishReason = builder.WithVariable<string>("FinishReason", TddDebugEvents.ReasonNotConverged);
+        var finishReason = builder.WithVariable<string>("FinishReason", TddDebugEvents.ReasonNotConverged).Persisted();
 
         // DispatchWorkflow result capture
-        var tddResult = builder.WithVariable<IDictionary<string, object>?>();
-        var debugResult = builder.WithVariable<IDictionary<string, object>?>();
+        var tddResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var debugResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ================================================================
         // INIT: Capture inputs, reset counter, derive a stable session id

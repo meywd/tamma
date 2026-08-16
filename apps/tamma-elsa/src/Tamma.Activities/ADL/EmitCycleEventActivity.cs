@@ -62,25 +62,33 @@ public class EmitCycleEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? CycleEvents.Failed;
+        var type = EventType.GetOrDefault(context) ?? CycleEvents.Failed;
 
+        // 2026-08-13 (found by the engine-driven E2E): the OPTIONAL inputs must
+        // be read with GetOrDefault. A literal-null Input default is DROPPED by
+        // the workflow-definition store's JSON round-trip, so an unwired input
+        // materializes as null and Input.Get throws "<name> is required." —
+        // which faulted EVERY CYCLE.STARTED/COMPLETED emit (the workflow only
+        // wires StepId/ErrorDetail on the failure emits).
         var evt = BuildTammaEvent(
             type,
-            issueNumber: IssueNumber.Get(context),
-            repository: Repository.Get(context),
-            tenantId: CycleEvents.ParseTenantId(TenantId.Get(context)),
-            stepId: StepId.Get(context),
-            errorDetail: ErrorDetail.Get(context));
+            issueNumber: IssueNumber.GetOrDefault(context),
+            repository: Repository.GetOrDefault(context),
+            tenantId: CycleEvents.ParseTenantId(TenantId.GetOrDefault(context)),
+            stepId: StepId.GetOrDefault(context),
+            errorDetail: ErrorDetail.GetOrDefault(context));
 
         TammaEventEmitter.Emit(context, this, _logger, evt);
 
         _logger?.LogInformation(
             "Emitted {Type} for issue #{Issue} repo {Repo} (step={Step})",
-            type, IssueNumber.Get(context), Repository.Get(context), StepId.Get(context));
+            type, IssueNumber.GetOrDefault(context), Repository.GetOrDefault(context),
+            StepId.GetOrDefault(context));
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

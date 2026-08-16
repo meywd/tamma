@@ -75,7 +75,7 @@ public class BindCodeReviewConfigActivity : CodeActivity
         var resolved = Resolve(
             _configuration,
             MaxIterationsInput.Get(context),
-            MergeStrategyInput.Get(context));
+            MergeStrategyInput.GetOrDefault(context));
 
         MaxIterations.Set(context, resolved.MaxIterations);
         MergeStrategy.Set(context, resolved.MergeStrategy);

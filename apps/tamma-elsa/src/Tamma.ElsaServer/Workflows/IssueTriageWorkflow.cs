@@ -46,16 +46,16 @@ public class IssueTriageWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repository = builder.WithVariable<string>("Repository", "");
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
         // Tenant id threaded from this workflow's input through to each cycle dispatch so
         // a SaaS caller's per-item TRIAGE.ISSUE.* events carry the tenant tag (the cycle
         // forwards it onward to its context/panel/PO sub-workflows). Empty in single-user
         // mode → platform-scope events (honest default — no fabricated tenant).
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var itemsJson = builder.WithVariable<string>("ItemsJson", "[]");
-        var currentItemIndex = builder.WithVariable<int>("CurrentItemIndex", 0);
-        var totalItems = builder.WithVariable<int>("TotalItems", 0);
-        var currentItemJson = builder.WithVariable<string>("CurrentItemJson", "");
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
+        var itemsJson = builder.WithVariable<string>("ItemsJson", "[]").Persisted();
+        var currentItemIndex = builder.WithVariable<int>("CurrentItemIndex", 0).Persisted();
+        var totalItems = builder.WithVariable<int>("TotalItems", 0).Persisted();
+        var currentItemJson = builder.WithVariable<string>("CurrentItemJson", "").Persisted();
 
         // ================================================================
         // 1. Fetch Untriaged Items

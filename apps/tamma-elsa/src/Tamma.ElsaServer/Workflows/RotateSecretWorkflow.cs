@@ -43,16 +43,16 @@ public class RotateSecretWorkflow : WorkflowBase
             + "Handler plugins (postgres, cranl, hmac, generic-http) own the "
             + "system-specific push/probe/rollback.";
 
-        var secretId = builder.WithVariable<Guid>("SecretId", Guid.Empty);
-        var correlationId = builder.WithVariable<string>("RotationCorrelationId", string.Empty);
-        var newPlaintext = builder.WithVariable<string>("NewPlaintext", string.Empty);
-        var generateLength = builder.WithVariable<int>("GenerateLength", 32);
-        var operatorUserId = builder.WithVariable<Guid>("OperatorUserId", Guid.Empty);
-        var graceSeconds = builder.WithVariable<long>("GraceWindowSeconds", 0L);
-        var resultVar = builder.WithVariable<string>("Result", string.Empty);
-        var newVersionVar = builder.WithVariable<int>("NewVersionNumber", 0);
-        var oldVersionVar = builder.WithVariable<int>("OldVersionNumber", 0);
-        var errorVar = builder.WithVariable<string>("Error", string.Empty);
+        var secretId = builder.WithVariable<Guid>("SecretId", Guid.Empty).Persisted();
+        var correlationId = builder.WithVariable<string>("RotationCorrelationId", string.Empty).Persisted();
+        var newPlaintext = builder.WithVariable<string>("NewPlaintext", string.Empty).Persisted();
+        var generateLength = builder.WithVariable<int>("GenerateLength", 32).Persisted();
+        var operatorUserId = builder.WithVariable<Guid>("OperatorUserId", Guid.Empty).Persisted();
+        var graceSeconds = builder.WithVariable<long>("GraceWindowSeconds", 0L).Persisted();
+        var resultVar = builder.WithVariable<string>("Result", string.Empty).Persisted();
+        var newVersionVar = builder.WithVariable<int>("NewVersionNumber", 0).Persisted();
+        var oldVersionVar = builder.WithVariable<int>("OldVersionNumber", 0).Persisted();
+        var errorVar = builder.WithVariable<string>("Error", string.Empty).Persisted();
 
         var initInputs = new SetVariable
         {

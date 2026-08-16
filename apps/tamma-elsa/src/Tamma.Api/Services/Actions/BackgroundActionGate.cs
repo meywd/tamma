@@ -1,4 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
+using Tamma.Api.Services.PromptStore;
+using Tamma.Data;
+using Tamma.Data.Repositories;
 using Tamma.Core.Actions;
 
 namespace Tamma.Api.Services.Actions;
@@ -110,6 +113,25 @@ public sealed class BackgroundActionGate : IBackgroundActionGate
                 return true;
             }
 
+            // 2026-08-14 (engine-driven E2E): a background tick has no HTTP
+            // scope, so EnsurePersonalTenantMiddleware never ran and the
+            // ambient tenant was NULL. In single-user mode every tenant-
+            // resident read the gate performs (acceptance_rules_overrides)
+            // then threw "requires an ambient tenant id", the gate CORRECTLY
+            // read that as unreadable policy and denied, and so EVERY
+            // background actor in a single-user deployment was gated off
+            // permanently (outbox sender, task-queue processor, ...) while
+            // logging an error per tick. Bind the sole user's existing
+            // personal tenant for this scope — the same seam the middleware
+            // uses. Read-only on purpose: minting a tenant belongs to a user
+            // request, so a pre-setup deployment still behaves as before.
+            if (tenantId is null)
+            {
+                await TryBindSingleUserTenantAsync(scope.ServiceProvider, deadline.Token)
+                    .ConfigureAwait(false);
+                tenantId = scope.ServiceProvider.GetService<ITenantContext>()?.TenantId;
+            }
+
             var principal = tenantId is Guid tid
                 ? GovernancePrincipal.ForTenant(tid)
                 : GovernancePrincipal.Platform;
@@ -164,6 +186,42 @@ public sealed class BackgroundActionGate : IBackgroundActionGate
 
             await TryEmitEvaluationFailedAsync(key, ex).ConfigureAwait(false);
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Single-user only: bind the sole user's EXISTING personal tenant onto this
+    /// scope so the gate's tenant-resident policy reads have a home. Silent and
+    /// best-effort by design — every failure mode (SaaS, pre-setup, no
+    /// membership, missing seam) simply leaves the scope tenant-less, which is
+    /// exactly the behaviour that shipped before this bind existed.
+    /// </summary>
+    private static async Task TryBindSingleUserTenantAsync(
+        IServiceProvider services, CancellationToken ct)
+    {
+        try
+        {
+            var mode = services.GetService<ITammaModeProvider>();
+            if (mode is null || mode.Mode != TammaMode.SingleUser) return;
+
+            var tenantContext = services.GetService<ITenantContext>();
+            if (tenantContext is null || tenantContext.TenantId is not null) return;
+
+            var soleUsers = services.GetService<ISoleUserProvider>();
+            var memberships = services.GetService<ITenantMembershipRepository>();
+            if (soleUsers is null || memberships is null) return;
+
+            var userId = await soleUsers.GetSoleUserIdAsync(ct).ConfigureAwait(false);
+            var owned = await memberships.GetUserTenantsAsync(userId).ConfigureAwait(false);
+            if (owned.Count == 0) return;
+
+            tenantContext.SetTenantId(owned.OrderByDescending(m => m.JoinedAt).First().TenantId);
+        }
+        catch
+        {
+            // Pre-setup deployment (no owner configured / no users row), or any
+            // other resolution failure: leave the scope tenant-less. The gate's
+            // own fail-closed posture then applies unchanged.
         }
     }
 

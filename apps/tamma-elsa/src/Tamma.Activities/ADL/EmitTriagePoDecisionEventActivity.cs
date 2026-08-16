@@ -81,26 +81,27 @@ public class EmitTriagePoDecisionEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? TriagePoDecisionEvents.Failed;
-        var repository = Repository.Get(context) ?? "";
-        var itemNumber = ItemNumber.Get(context);
-        var tenantId = TriagePoDecisionEvents.ParseTenantId(TenantId.Get(context));
+        var type = EventType.GetOrDefault(context) ?? TriagePoDecisionEvents.Failed;
+        var repository = Repository.GetOrDefault(context) ?? "";
+        var itemNumber = ItemNumber.GetOrDefault(context);
+        var tenantId = TriagePoDecisionEvents.ParseTenantId(TenantId.GetOrDefault(context));
 
         var evt = BuildTammaEvent(
             type, repository, itemNumber, tenantId,
-            DecisionStatus.Get(context), Priority.Get(context), Type.Get(context),
-            Complexity.Get(context), Automation.Get(context),
-            ProviderUsed.Get(context), CostUsd.Get(context), Error.Get(context));
+            DecisionStatus.GetOrDefault(context), Priority.GetOrDefault(context), Type.GetOrDefault(context),
+            Complexity.GetOrDefault(context), Automation.GetOrDefault(context),
+            ProviderUsed.GetOrDefault(context), CostUsd.GetOrDefault(context), Error.GetOrDefault(context));
 
         TammaEventEmitter.Emit(context, this, _logger, evt);
 
         _logger?.LogInformation(
             "Emitted {Type} for item #{Item} in {Repo} (status={Status}, provider={Provider})",
-            type, itemNumber, repository, DecisionStatus.Get(context), ProviderUsed.Get(context));
+            type, itemNumber, repository, DecisionStatus.GetOrDefault(context), ProviderUsed.GetOrDefault(context));
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

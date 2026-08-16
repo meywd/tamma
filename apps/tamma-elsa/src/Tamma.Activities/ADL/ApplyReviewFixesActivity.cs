@@ -81,7 +81,7 @@ public class ApplyReviewFixesActivity : Activity
         var analysisJson = AnalysisJson.Get(context);
         var repository = Repository.Get(context);
         var branchName = BranchName.Get(context);
-        var externalLlmResponse = LlmFixResponse.Get(context);
+        var externalLlmResponse = LlmFixResponse.GetOrDefault(context);
 
         try
         {
@@ -114,7 +114,7 @@ public class ApplyReviewFixesActivity : Activity
 
                 response = useMock
                     ? SimulateFixGeneration(analysis)
-                    : await MediatedLlmText.CompleteAsync(context, "implementer", prompt, context.CancellationToken);
+                    : await MediatedLlmText.CompleteAsync(context, "developer", prompt, context.CancellationToken, action: "implement-fix");
             }
 
             var result = ParseFixResponse(response, analysis);

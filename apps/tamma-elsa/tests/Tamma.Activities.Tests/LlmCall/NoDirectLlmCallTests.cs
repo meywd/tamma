@@ -321,8 +321,12 @@ public class NoDirectLlmCallTests
 
         roles.Should().NotBeEmpty(
             "the scan must discover the cut-over role literals; an empty set means a regex broke");
+        // 2026-08-13 (engine-driven E2E run 34): the MediatedLlmText call sites now
+        // pass CANONICAL wire roles (implementer→developer, reviewer→senior_developer)
+        // alongside their taxonomy action — the aliases dropped out of the source, so
+        // the sanity literals are the canonical trio.
         roles.Should().Contain(
-            new[] { "implementer", "tester", "reviewer", "senior_developer", "developer" },
+            new[] { "tester", "senior_developer", "developer" },
             "sanity: the known cut-over role literals must be discovered by the scan");
 
         foreach (var role in roles)

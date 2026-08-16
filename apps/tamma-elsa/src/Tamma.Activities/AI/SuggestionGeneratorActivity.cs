@@ -71,8 +71,8 @@ public class SuggestionGeneratorActivity : CodeActivity<SuggestionsOutput>
         var sessionId = SessionId.Get(context);
         var juniorId = JuniorId.Get(context);
         var suggestionType = SuggestionType.Get(context);
-        var codeContext = CodeContext.Get(context);
-        var analysisResults = AnalysisResults.Get(context);
+        var codeContext = CodeContext.GetOrDefault(context);
+        var analysisResults = AnalysisResults.GetOrDefault(context);
         var maxSuggestions = MaxSuggestions.Get(context);
 
         _logger?.LogInformation(

@@ -45,27 +45,27 @@ public class DocumentReviewWorkflow : WorkflowBase
             "panel producer, mapping their outputs onto the 39-6 D10 review contract";
 
         // ── Inputs (39-6 D10) + derived ──
-        var documentType = builder.WithVariable<string>("DocumentType", "");
-        var issueId = builder.WithVariable<string>("IssueId", "");
-        var correlationId = builder.WithVariable<string>("CorrelationId", "");
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
-        var reviewerRole = builder.WithVariable<string>("ReviewerRole", "");
-        var subjectJson = builder.WithVariable<string>("SubjectJson", "");
-        var contentJson = builder.WithVariable<string>("ContentJson", "{}");
-        var variablesJson = builder.WithVariable<string>("VariablesJson", "{}");
-        var isPanel = builder.WithVariable<bool>("IsPanel", false);
+        var documentType = builder.WithVariable<string>("DocumentType", "").Persisted();
+        var issueId = builder.WithVariable<string>("IssueId", "").Persisted();
+        var correlationId = builder.WithVariable<string>("CorrelationId", "").Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
+        var reviewerRole = builder.WithVariable<string>("ReviewerRole", "").Persisted();
+        var subjectJson = builder.WithVariable<string>("SubjectJson", "").Persisted();
+        var contentJson = builder.WithVariable<string>("ContentJson", "{}").Persisted();
+        var variablesJson = builder.WithVariable<string>("VariablesJson", "{}").Persisted();
+        var isPanel = builder.WithVariable<bool>("IsPanel", false).Persisted();
 
         // ── Dispatch results ──
-        var producerResult = builder.WithVariable<IDictionary<string, object>?>();
+        var producerResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ── Outputs ──
-        var outSuccess = builder.WithVariable<bool>("OutSuccess", false);
-        var outReviewJson = builder.WithVariable<string>("OutReviewJson", "");
-        var outReviewDocId = builder.WithVariable<string>("OutReviewDocId", "");
-        var outFailureKind = builder.WithVariable<string>("OutFailureKind", "");
-        var outUndecidableReason = builder.WithVariable<string>("OutUndecidableReason", "");
-        var outMemberReviews = builder.WithVariable<string>("OutMemberReviews", "[]");
+        var outSuccess = builder.WithVariable<bool>("OutSuccess", false).Persisted();
+        var outReviewJson = builder.WithVariable<string>("OutReviewJson", "").Persisted();
+        var outReviewDocId = builder.WithVariable<string>("OutReviewDocId", "").Persisted();
+        var outFailureKind = builder.WithVariable<string>("OutFailureKind", "").Persisted();
+        var outUndecidableReason = builder.WithVariable<string>("OutUndecidableReason", "").Persisted();
+        var outMemberReviews = builder.WithVariable<string>("OutMemberReviews", "[]").Persisted();
 
         // ================================================================
         // Init — resolve rules + mode, build subject + reviewer variables

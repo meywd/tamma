@@ -83,7 +83,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
         var juniorId = JuniorId.Get(context);
         var prNumber = PullRequestNumber.Get(context);
         var autoMerge = AutoMerge.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;

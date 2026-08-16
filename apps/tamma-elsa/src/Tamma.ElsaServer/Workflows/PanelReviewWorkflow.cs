@@ -58,40 +58,40 @@ public class PanelReviewWorkflow : WorkflowBase
             "an aggregate Review (or a typed undecidable result carrying all member reviews)";
 
         // ── Inputs threaded to each member + the aggregation ──
-        var subjectJson = builder.WithVariable<string>("SubjectJson", "");
-        var contentJson = builder.WithVariable<string>("ContentJson", "{}");
-        var variablesJson = builder.WithVariable<string>("VariablesJson", "{}");
-        var feedbackVariableName = builder.WithVariable<string>("FeedbackVariableName", ReviewProducerHelper.DefaultFeedbackVariable);
-        var documentTypeKey = builder.WithVariable<string>("DocumentTypeKey", "");
-        var issueId = builder.WithVariable<string>("IssueId", "");
-        var correlationId = builder.WithVariable<string>("CorrelationId", "");
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+        var subjectJson = builder.WithVariable<string>("SubjectJson", "").Persisted();
+        var contentJson = builder.WithVariable<string>("ContentJson", "{}").Persisted();
+        var variablesJson = builder.WithVariable<string>("VariablesJson", "{}").Persisted();
+        var feedbackVariableName = builder.WithVariable<string>("FeedbackVariableName", ReviewProducerHelper.DefaultFeedbackVariable).Persisted();
+        var documentTypeKey = builder.WithVariable<string>("DocumentTypeKey", "").Persisted();
+        var issueId = builder.WithVariable<string>("IssueId", "").Persisted();
+        var correlationId = builder.WithVariable<string>("CorrelationId", "").Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
 
         // ── Resolved panel config ──
-        var rosterJson = builder.WithVariable<string>("RosterJson", "[]");
-        var decisionRuleWire = builder.WithVariable<string>("DecisionRuleWire", "unanimous");
-        var minimumUsableReviews = builder.WithVariable<int>("MinimumUsableReviews", 0);
-        var memberCount = builder.WithVariable<int>("MemberCount", 0);
+        var rosterJson = builder.WithVariable<string>("RosterJson", "[]").Persisted();
+        var decisionRuleWire = builder.WithVariable<string>("DecisionRuleWire", "unanimous").Persisted();
+        var minimumUsableReviews = builder.WithVariable<int>("MinimumUsableReviews", 0).Persisted();
+        var memberCount = builder.WithVariable<int>("MemberCount", 0).Persisted();
 
         // ── Per-role member captures (JSON). Default "{}" = not dispatched. ──
         var memberVars = PanelRoles.ToDictionary(
             r => r,
-            r => builder.WithVariable<string>($"{r}MemberResultJson", "{}"));
+            r => builder.WithVariable<string>($"{r}MemberResultJson", "{}").Persisted());
 
         // ── Shared sub-workflow dispatch result ──
-        var memberResult = builder.WithVariable<IDictionary<string, object>?>();
+        var memberResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ── Aggregate outputs ──
-        var decided = builder.WithVariable<bool>("Decided", false);
-        var aggregateReviewJson = builder.WithVariable<string>("AggregateReviewJson", "");
-        var aggregateEnvelopeJson = builder.WithVariable<string>("AggregateEnvelopeJson", "");
-        var aggregateDocumentId = builder.WithVariable<string>("AggregateDocumentId", "");
-        var aggregateProducerRole = builder.WithVariable<string>("AggregateProducerRole", "");
-        var aggregateProducerAction = builder.WithVariable<string>("AggregateProducerAction", "");
-        var memberReviewsJson = builder.WithVariable<string>("MemberReviewsJson", "[]");
-        var undecidableReason = builder.WithVariable<string>("UndecidableReason", "");
-        var succeededCount = builder.WithVariable<int>("SucceededCount", 0);
+        var decided = builder.WithVariable<bool>("Decided", false).Persisted();
+        var aggregateReviewJson = builder.WithVariable<string>("AggregateReviewJson", "").Persisted();
+        var aggregateEnvelopeJson = builder.WithVariable<string>("AggregateEnvelopeJson", "").Persisted();
+        var aggregateDocumentId = builder.WithVariable<string>("AggregateDocumentId", "").Persisted();
+        var aggregateProducerRole = builder.WithVariable<string>("AggregateProducerRole", "").Persisted();
+        var aggregateProducerAction = builder.WithVariable<string>("AggregateProducerAction", "").Persisted();
+        var memberReviewsJson = builder.WithVariable<string>("MemberReviewsJson", "[]").Persisted();
+        var undecidableReason = builder.WithVariable<string>("UndecidableReason", "").Persisted();
+        var succeededCount = builder.WithVariable<int>("SucceededCount", 0).Persisted();
 
         // ================================================================
         // Init — resolve roster + rule + quorum (D11)

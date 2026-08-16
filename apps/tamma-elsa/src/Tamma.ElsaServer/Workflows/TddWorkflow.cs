@@ -40,41 +40,41 @@ public class TddWorkflow : WorkflowBase
         builder.Description = "Drives the red-green-refactor TDD cycle for a single implementation task";
 
         // -- Workflow variables --
-        var sessionId = builder.WithVariable<Guid>();
-        var storyId = builder.WithVariable<string>();
-        var taskDescription = builder.WithVariable<string>();
-        var taskFiles = builder.WithVariable<List<string>>();
-        var repositoryUrl = builder.WithVariable<string>();
-        var branchName = builder.WithVariable<string>();
-        var skillLevel = builder.WithVariable<int>();
-        var codeContext = builder.WithVariable<string>();
+        var sessionId = builder.WithVariable<Guid>().Persisted();
+        var storyId = builder.WithVariable<string>().Persisted();
+        var taskDescription = builder.WithVariable<string>().Persisted();
+        var taskFiles = builder.WithVariable<List<string>>().Persisted();
+        var repositoryUrl = builder.WithVariable<string>().Persisted();
+        var branchName = builder.WithVariable<string>().Persisted();
+        var skillLevel = builder.WithVariable<int>().Persisted();
+        var codeContext = builder.WithVariable<string>().Persisted();
 
         // Activity output variables (bound via Output<T>)
-        var testGenResult = builder.WithVariable<TestGenerationResult>();
-        var testSyntaxResult = builder.WithVariable<TestSyntaxValidationResult>();
-        var implResult = builder.WithVariable<ImplementationResult>();
-        var analysisResult = builder.WithVariable<RefactoringAnalysis>();
-        var refactorResult = builder.WithVariable<RefactoringResult>();
-        var commitResultVar = builder.WithVariable<CommitResult>();
+        var testGenResult = builder.WithVariable<TestGenerationResult>().Persisted();
+        var testSyntaxResult = builder.WithVariable<TestSyntaxValidationResult>().Persisted();
+        var implResult = builder.WithVariable<ImplementationResult>().Persisted();
+        var analysisResult = builder.WithVariable<RefactoringAnalysis>().Persisted();
+        var refactorResult = builder.WithVariable<RefactoringResult>().Persisted();
+        var commitResultVar = builder.WithVariable<CommitResult>().Persisted();
 
         // Phase tracking scalars
-        var rewriteAttempt = builder.WithVariable<int>();
-        var debugAttempt = builder.WithVariable<int>();
-        var debuggingInvoked = builder.WithVariable<bool>();
-        var testRunAllPassed = builder.WithVariable<bool>();
-        var testRunPassedCount = builder.WithVariable<int>();
-        var testRunFailedCount = builder.WithVariable<int>();
-        var refactorApplied = builder.WithVariable<bool>();
+        var rewriteAttempt = builder.WithVariable<int>().Persisted();
+        var debugAttempt = builder.WithVariable<int>().Persisted();
+        var debuggingInvoked = builder.WithVariable<bool>().Persisted();
+        var testRunAllPassed = builder.WithVariable<bool>().Persisted();
+        var testRunPassedCount = builder.WithVariable<int>().Persisted();
+        var testRunFailedCount = builder.WithVariable<int>().Persisted();
+        var refactorApplied = builder.WithVariable<bool>().Persisted();
 
         // Captures the result dictionary returned by DispatchWorkflow("testing-pipeline").
         // Reused across RED, GREEN, and REFACTOR phases (each dispatch overwrites it
         // before the corresponding result-extraction SetVariable runs).
-        var testingPipelineResult = builder.WithVariable<IDictionary<string, object>?>();
+        var testingPipelineResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // Phase timestamps
-        var redPhaseStart = builder.WithVariable<DateTime>();
-        var greenPhaseStart = builder.WithVariable<DateTime>();
-        var refactorPhaseStart = builder.WithVariable<DateTime>();
+        var redPhaseStart = builder.WithVariable<DateTime>().Persisted();
+        var greenPhaseStart = builder.WithVariable<DateTime>().Persisted();
+        var refactorPhaseStart = builder.WithVariable<DateTime>().Persisted();
 
         // ============================
         // Activity definitions

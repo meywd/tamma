@@ -51,45 +51,45 @@ public class TriagePODecisionWorkflow : WorkflowBase
         builder.Description = "Produce a reviewed, typed TriageDecision via the generic document lifecycle (produce → validate → review(panel) → accept)";
 
         // ── Inputs ─────────────────────────────────────────────────────
-        var repository = builder.WithVariable<string>("Repository", "");
-        var itemJson = builder.WithVariable<string>("ItemJson", "");
-        var contextJson = builder.WithVariable<string>("ContextJson", "{}");
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var issueId = builder.WithVariable<string>("IssueId", "");
-        var findingsDocumentId = builder.WithVariable<string>("FindingsDocumentId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
-        var itemNumber = builder.WithVariable<int>("ItemNumber", 0);
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var itemJson = builder.WithVariable<string>("ItemJson", "").Persisted();
+        var contextJson = builder.WithVariable<string>("ContextJson", "{}").Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
+        var issueId = builder.WithVariable<string>("IssueId", "").Persisted();
+        var findingsDocumentId = builder.WithVariable<string>("FindingsDocumentId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
+        var itemNumber = builder.WithVariable<int>("ItemNumber", 0).Persisted();
 
         // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
-        var assessmentFound = builder.WithVariable<bool>();
-        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
+        var assessmentFound = builder.WithVariable<bool>().Persisted();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}").Persisted();
 
         // ── 39-10 re-entry position ────────────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson = builder.WithVariable<string>();
-        var positionStage = builder.WithVariable<string>("PositionStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson = builder.WithVariable<string>().Persisted();
+        var positionStage = builder.WithVariable<string>("PositionStage", "produce").Persisted();
 
         // ── Dispatched lifecycle result + typed exit ───────────────────
-        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
-        var lifecycleAccepted = builder.WithVariable<bool>();
-        var exitOutcome = builder.WithVariable<string>("ExitOutcome", "");
-        var exitDocId = builder.WithVariable<string>("ExitDocId", "");
-        var documentJson = builder.WithVariable<string>("DocumentJson", "");
-        var decisionJson = builder.WithVariable<string>("DecisionJson", "{}");
-        var callSucceeded = builder.WithVariable<bool>("CallSucceeded", false);
-        var failureDetail = builder.WithVariable<string>("FailureDetail", "");
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var lifecycleAccepted = builder.WithVariable<bool>().Persisted();
+        var exitOutcome = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var exitDocId = builder.WithVariable<string>("ExitDocId", "").Persisted();
+        var documentJson = builder.WithVariable<string>("DocumentJson", "").Persisted();
+        var decisionJson = builder.WithVariable<string>("DecisionJson", "{}").Persisted();
+        var callSucceeded = builder.WithVariable<bool>("CallSucceeded", false).Persisted();
+        var failureDetail = builder.WithVariable<string>("FailureDetail", "").Persisted();
 
         // Decision fields surfaced for the COMPLETED event payload.
-        var decisionStatus = builder.WithVariable<string>("DecisionStatus", "");
-        var priority = builder.WithVariable<string>("Priority", "");
-        var type = builder.WithVariable<string>("Type", "");
-        var complexity = builder.WithVariable<string>("Complexity", "");
-        var automation = builder.WithVariable<string>("Automation", "");
+        var decisionStatus = builder.WithVariable<string>("DecisionStatus", "").Persisted();
+        var priority = builder.WithVariable<string>("Priority", "").Persisted();
+        var type = builder.WithVariable<string>("Type", "").Persisted();
+        var complexity = builder.WithVariable<string>("Complexity", "").Persisted();
+        var automation = builder.WithVariable<string>("Automation", "").Persisted();
 
         // Panel mirror counts.
-        var panelMemberCount = builder.WithVariable<int>("PanelMemberCount", TriageRosterSize);
-        var panelSucceededCount = builder.WithVariable<int>("PanelSucceededCount", 0);
-        var panelFailedRolesJson = builder.WithVariable<string>("PanelFailedRolesJson", "[]");
+        var panelMemberCount = builder.WithVariable<int>("PanelMemberCount", TriageRosterSize).Persisted();
+        var panelSucceededCount = builder.WithVariable<int>("PanelSucceededCount", 0).Persisted();
+        var panelFailedRolesJson = builder.WithVariable<string>("PanelFailedRolesJson", "[]").Persisted();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable

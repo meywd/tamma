@@ -1,7 +1,15 @@
 namespace Tamma.Api.Dtos.Prompts;
 
 public record UpsertPromptRequest(string Template, string? SystemPrompt, string[]? Variables, bool? EnableTools, int? MaxTokens);
-public record RenderPromptRequest(Dictionary<string, string> Variables);
+/// <summary>
+/// 2026-08-13 (engine-driven E2E): variables arrive as ARBITRARY JSON values —
+/// the engine's document-produce path sends numbers (e.g.
+/// <c>revisionNumber: 1</c>) alongside strings, and a
+/// <c>Dictionary&lt;string, string&gt;</c> binding rejected the whole body
+/// ("JSON value could not be converted to System.String"), 500ing every
+/// produce-leg prompt render. The endpoint stringifies each value.
+/// </summary>
+public record RenderPromptRequest(Dictionary<string, System.Text.Json.JsonElement> Variables);
 public record PromptResponse(string? Role, string? Action, string Template, string? SystemPrompt, string[]? Variables, bool EnableTools, int MaxTokens, string Source);
 
 /// <summary>

@@ -76,36 +76,36 @@ public class TestingWorkflow : WorkflowBase
         // ============================================
         // Workflow Variables
         // ============================================
-        var sessionIdVar = builder.WithVariable<Guid>("SessionId", default);
-        var repositoryVar = builder.WithVariable<string>("Repository", "");
-        var branchVar = builder.WithVariable<string>("Branch", "");
-        var skillLevelVar = builder.WithVariable<int>("SkillLevel", 3);
-        var consecutivePassCountVar = builder.WithVariable<int>("ConsecutivePassCount", 0);
-        var attemptNumberVar = builder.WithVariable<int>("AttemptNumber", 1);
-        var maxAttemptsVar = builder.WithVariable<int>("MaxAttempts", 3);
+        var sessionIdVar = builder.WithVariable<Guid>("SessionId", default).Persisted();
+        var repositoryVar = builder.WithVariable<string>("Repository", "").Persisted();
+        var branchVar = builder.WithVariable<string>("Branch", "").Persisted();
+        var skillLevelVar = builder.WithVariable<int>("SkillLevel", 3).Persisted();
+        var consecutivePassCountVar = builder.WithVariable<int>("ConsecutivePassCount", 0).Persisted();
+        var attemptNumberVar = builder.WithVariable<int>("AttemptNumber", 1).Persisted();
+        var maxAttemptsVar = builder.WithVariable<int>("MaxAttempts", 3).Persisted();
         // Tenant scope (empty/single-user → platform-scope). MUST be named
         // "TenantId": TriggerCIActivity / WaitForCIResultsActivity (and
         // EventPersistenceMiddleware) resolve tenant ambiently via
         // GetVariable("TenantId") — the old name "TenantIdTag" was invisible
         // to that lookup, so the CI trigger + the DG-5 poller ran
         // platform-scoped in SaaS (Epic 31 review, F-high).
-        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "").Persisted();
         // The terminal escalation reason (set just before routing into the escalation leg).
-        var escalationReasonVar = builder.WithVariable<string>("EscalationReason", "");
+        var escalationReasonVar = builder.WithVariable<string>("EscalationReason", "").Persisted();
         // The real underlying failure detail surfaced on an escalation (never empty).
-        var escalationDetailVar = builder.WithVariable<string>("EscalationDetail", "");
+        var escalationDetailVar = builder.WithVariable<string>("EscalationDetail", "").Persisted();
 
         // Result variables — activities write directly to these via Output<T>(variable)
-        var ciTriggerResultVar = builder.WithVariable<CITriggerResult>("CITriggerResult", default!);
-        var ciResultsVar = builder.WithVariable<CIResultsPayload>("CIResultsPayload", default!);
-        var evaluationResultVar = builder.WithVariable<QualityGateResult>("EvaluationResult", default!);
-        var coverageResultVar = builder.WithVariable<CoverageCheckResult>("CoverageResult", default!);
-        var lintResultVar = builder.WithVariable<LintCheckResult>("LintResult", default!);
-        var securityResultVar = builder.WithVariable<SecurityCheckResult>("SecurityResult", default!);
-        var qualityReportVar = builder.WithVariable<QualityReport>("QualityReport", default!);
-        var commitFixResultVar = builder.WithVariable<CommitFixResult>("CommitFixResult", default!);
-        var ciResultsFromWaitVar = builder.WithVariable<CIResultsPayload>("CIResultsFromWait", default!);
-        var fixDispatchResultVar = builder.WithVariable<IDictionary<string, object>?>();
+        var ciTriggerResultVar = builder.WithVariable<CITriggerResult>("CITriggerResult", default!).Persisted();
+        var ciResultsVar = builder.WithVariable<CIResultsPayload>("CIResultsPayload", default!).Persisted();
+        var evaluationResultVar = builder.WithVariable<QualityGateResult>("EvaluationResult", default!).Persisted();
+        var coverageResultVar = builder.WithVariable<CoverageCheckResult>("CoverageResult", default!).Persisted();
+        var lintResultVar = builder.WithVariable<LintCheckResult>("LintResult", default!).Persisted();
+        var securityResultVar = builder.WithVariable<SecurityCheckResult>("SecurityResult", default!).Persisted();
+        var qualityReportVar = builder.WithVariable<QualityReport>("QualityReport", default!).Persisted();
+        var commitFixResultVar = builder.WithVariable<CommitFixResult>("CommitFixResult", default!).Persisted();
+        var ciResultsFromWaitVar = builder.WithVariable<CIResultsPayload>("CIResultsFromWait", default!).Persisted();
+        var fixDispatchResultVar = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ============================================
         // Step 0: Initialize — read optional maxRetries + tenantId input
@@ -117,6 +117,23 @@ public class TestingWorkflow : WorkflowBase
             Variable = maxAttemptsVar,
             Value = new Input<object?>(ctx =>
             {
+                // 2026-08-13 (engine-driven E2E run 36): capture the CALLER'S
+                // SessionId/Repository/Branch/SkillLevel inputs — every dispatcher
+                // (TddWorkflow, CiWithDebugRetry, Debugging, Mentorship) passes
+                // them, but nothing ever read them, so the variables kept their
+                // defaults: the CI wait suspended with repository="" and the DG-5
+                // /elsa/api/ci/waits listing (fail-closed on a blank repository)
+                // silently HID the wait — no CI seat could ever resume it and
+                // every TDD leg timed out.
+                var sid = ctx.GetInput<Guid>("SessionId");
+                if (sid != Guid.Empty) sessionIdVar.Set(ctx, sid);
+                var repo = ctx.GetInput<string>("Repository");
+                if (!string.IsNullOrWhiteSpace(repo)) repositoryVar.Set(ctx, repo);
+                var branch = ctx.GetInput<string>("Branch");
+                if (!string.IsNullOrWhiteSpace(branch)) branchVar.Set(ctx, branch);
+                var skill = ctx.GetInput<int?>("SkillLevel");
+                if (skill is > 0) skillLevelVar.Set(ctx, skill.Value);
+
                 // Best-effort tenant tag (callers may not supply it; single-user → empty).
                 var tenant = ctx.GetInput<string>("tenantId");
                 if (!string.IsNullOrWhiteSpace(tenant)) tenantIdVar.Set(ctx, tenant);
@@ -863,7 +880,18 @@ public class TestingWorkflow : WorkflowBase
         return a;
     }
 
-    private static SetOutput MakeOutput(string id, string outputName, Func<ActivityExecutionContext, object> value)
+    // 2026-08-13 (found by the engine-driven E2E): this parameter MUST be
+    // Func<ExpressionExecutionContext, object>. With the former
+    // Func<ActivityExecutionContext, object>, Input<object> has no matching
+    // delegate constructor, so `new(value)` bound the LITERAL ctor and the Func
+    // itself became the input's literal value — unserializable, which made the
+    // workflow-definition store populator throw at startup and SKIP registering
+    // this workflow AND every workflow after it in enumeration order
+    // (testing-pipeline, triage-*, update-issue-status were all absent from the
+    // engine's registry; NotifyIssue's update-issue-status dispatch then failed
+    // "no published version" inside every cycle).
+    private static SetOutput MakeOutput(
+        string id, string outputName, Func<Elsa.Expressions.Models.ExpressionExecutionContext, object> value)
     {
         var a = new SetOutput
         {

@@ -45,7 +45,7 @@ public class ResolveAgentConfigActivity : CodeActivity
     {
         var logger = context.GetRequiredService<ILogger<ResolveAgentConfigActivity>>();
         var role = AgentRoleProp.Get(context) ?? "assistant";
-        var systemPromptOverride = SystemPromptOverrideProp.Get(context);
+        var systemPromptOverride = SystemPromptOverrideProp.GetOrDefault(context);
 
         // Priority 1: Caller override
         if (!string.IsNullOrWhiteSpace(systemPromptOverride))

@@ -49,6 +49,12 @@ public enum NonHttpProviderTransport
 
     /// <summary>Model Context Protocol server (zen-mcp).</summary>
     Mcp,
+
+    /// <summary>In-process scripted responder (the opt-in "scripted" test
+    /// provider, 2026-08-13). Served by <c>IScriptedLlmResponder</c> inside
+    /// the API's tool-loop runner — never over HTTP; <c>HttpProviderClient</c>
+    /// refuses it like every other non-HTTP transport.</summary>
+    InProcess,
 }
 
 /// <summary>

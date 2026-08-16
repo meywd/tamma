@@ -44,17 +44,17 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repository = builder.WithVariable<string>("Repository", "");
-        var branchName = builder.WithVariable<string>("BranchName", "");
-        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
-        var skillLevel = builder.WithVariable<int>("SkillLevel", 5);
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var branchName = builder.WithVariable<string>("BranchName", "").Persisted();
+        var issueNumber = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var skillLevel = builder.WithVariable<int>("SkillLevel", 5).Persisted();
         // Epic 31 review (F-high) — the cycle passes tenantId into this gate
         // (SingleIssueCycleWorkflow / MergeApprovalWorkflow both send it) and
         // this workflow used to DROP it, so the whole CI plane below ran
         // platform-scoped in SaaS. Named "TenantId" per the MediatedLlmText
         // ambient convention so EventPersistenceMiddleware tags this
         // instance's events with the tenant too.
-        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "").Persisted();
         // ciRetryCount is always reset to 0 on workflow entry (see initInputs below)
         // so each invocation gets the full retry budget regardless of prior history.
         //
@@ -64,12 +64,12 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
         // dispatches a fresh ci-with-debug-retry instance per CI check phase, so there
         // is no cross-invocation counter leakage. The originally reported bug (counter
         // persisting across re-entries) was stale — the reset logic was already correct.
-        var ciRetryCount = builder.WithVariable<int>("CiRetryCount", 0);
-        var maxRetries = builder.WithVariable<int>("MaxRetries", 3);
+        var ciRetryCount = builder.WithVariable<int>("CiRetryCount", 0).Persisted();
+        var maxRetries = builder.WithVariable<int>("MaxRetries", 3).Persisted();
 
         // DispatchWorkflow result capture
-        var testResult = builder.WithVariable<IDictionary<string, object>?>();
-        var debugResult = builder.WithVariable<IDictionary<string, object>?>();
+        var testResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var debugResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ================================================================
         // INIT: Capture inputs

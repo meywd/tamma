@@ -70,7 +70,7 @@ public class AnalyzeReviewActivity : Activity
     {
         var repository = Repository.Get(context);
         var prNumber = PrNumber.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
 
         try
         {

@@ -73,6 +73,16 @@ public sealed class GiteaFullStackFixture : IAsyncDisposable
     public IReadOnlyList<string> ScrubbedGitHubEnvKeys => _scrubbedGitHubKeys;
     private readonly List<string> _scrubbedGitHubKeys = new();
 
+    /// <summary>
+    /// Engine-driven E2E (2026-08-13) — extra environment applied to the API
+    /// child process AFTER the built-ins (so an entry here can also override).
+    /// The engine-full-stack fixture uses it to enable the scripted LLM
+    /// provider and to point the API's "elsa" client at the launched engine.
+    /// Populate BEFORE <see cref="StartAsync"/>.
+    /// </summary>
+    public IDictionary<string, string> ExtraApiEnvironment { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
     public async Task StartAsync(CancellationToken ct = default)
     {
         try
@@ -91,6 +101,26 @@ public sealed class GiteaFullStackFixture : IAsyncDisposable
                 ControlPlaneDb.StartAsync(ct),
                 AppDb.StartAsync(ct),
                 Gitea.StartAsync(ct)).ConfigureAwait(false);
+
+            // ── 1b. tenant-schema migrations on the app DB ────────────
+            // 2026-08-13 (engine-driven E2E): the API's SYSTEM STORE
+            // (SystemStoreDbContextFactory — conventions, document instances,
+            // domain events, …) rides ConnectionStrings:TammaAppDb, but NOTHING
+            // in API startup migrates the Tenant schema onto it — deployment
+            // does that once, operator-side (AdminTenantMigrationEndpoints /
+            // `dotnet ef database update`). Without this, ConventionStoreSeeder
+            // fails at boot ("relation \"conventions\" does not exist") and
+            // every /api/conventions/resolve 500s. The fixture plays the
+            // operator: apply the Tenant migrations before the API boots so
+            // its seeders find the tables.
+            {
+                var tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
+                    .UseNpgsql(AppDb.GetConnectionString(), npgsql =>
+                        npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"))
+                    .Options;
+                await using var tenantDb = new TenantDbContext(tenantOptions);
+                await tenantDb.Database.MigrateAsync(ct).ConfigureAwait(false);
+            }
 
             // ── 2. launch the real Tamma.Api as a host process ────────
             var apiDll = LocateApiDll();
@@ -139,6 +169,13 @@ public sealed class GiteaFullStackFixture : IAsyncDisposable
             psi.Environment["Tamma__PublicBaseUrl"] = PublicBaseUrl;
             psi.Environment["Webhooks__RegisterOnStartup"] = "true";
             psi.Environment["Webhooks__Secrets__gitea"] = WebhookSecret;
+
+            // Engine-driven E2E (2026-08-13) — caller-supplied extras, applied
+            // LAST so they may extend or override the built-ins above.
+            foreach (var (key, value) in ExtraApiEnvironment)
+            {
+                psi.Environment[key] = value;
+            }
 
             _api = new Process { StartInfo = psi };
             var log = new StreamWriter(_apiLogPath, append: false) { AutoFlush = true };

@@ -77,46 +77,46 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
         // crashed, because DocumentLifecycleWorkflow mints a UUIDv7 when the input is
         // Guid.Empty — the caller had NO handle to correlate the accept decision with,
         // and the workflow exposed none on exit. That bites when 39-17/39-19 land.
-        var sessionId    = builder.WithVariable<Guid>();
-        var issueId      = builder.WithVariable<string>("IssueId", "");
-        var issueTitle   = builder.WithVariable<string>("IssueTitle", "");
-        var repository   = builder.WithVariable<string>("Repository", "");
-        var issueNumber  = builder.WithVariable<int>("IssueNumber", 0);
-        var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
-        var conventions  = builder.WithVariable<string>("Conventions", "");
-        var tenantId     = builder.WithVariable<string>("TenantId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+        var sessionId    = builder.WithVariable<Guid>().Persisted();
+        var issueId      = builder.WithVariable<string>("IssueId", "").Persisted();
+        var issueTitle   = builder.WithVariable<string>("IssueTitle", "").Persisted();
+        var repository   = builder.WithVariable<string>("Repository", "").Persisted();
+        var issueNumber  = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var workItemJson = builder.WithVariable<string>("WorkItemJson", "").Persisted();
+        var conventions  = builder.WithVariable<string>("Conventions", "").Persisted();
+        var tenantId     = builder.WithVariable<string>("TenantId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
 
         // ── Consumed upstream documents (D3 carrier / D4 lineage) ──────
-        var clarificationFound   = builder.WithVariable<bool>();
-        var clarificationDocId   = builder.WithVariable<string>("ClarificationDocId", "");
-        var clarificationJson    = builder.WithVariable<string>("ClarificationJson", "");
-        var clarificationLineage = builder.WithVariable<string>();
-        var findingsFound   = builder.WithVariable<bool>();
-        var findingsDocId   = builder.WithVariable<string>("FindingsDocId", "");
-        var findingsJson    = builder.WithVariable<string>("FindingsJson", "");
-        var findingsLineage = builder.WithVariable<string>();
+        var clarificationFound   = builder.WithVariable<bool>().Persisted();
+        var clarificationDocId   = builder.WithVariable<string>("ClarificationDocId", "").Persisted();
+        var clarificationJson    = builder.WithVariable<string>("ClarificationJson", "").Persisted();
+        var clarificationLineage = builder.WithVariable<string>().Persisted();
+        var findingsFound   = builder.WithVariable<bool>().Persisted();
+        var findingsDocId   = builder.WithVariable<string>("FindingsDocId", "").Persisted();
+        var findingsJson    = builder.WithVariable<string>("FindingsJson", "").Persisted();
+        var findingsLineage = builder.WithVariable<string>().Persisted();
 
         // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
-        var assessmentFound = builder.WithVariable<bool>();
-        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
+        var assessmentFound = builder.WithVariable<bool>().Persisted();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}").Persisted();
 
         // ── 39-10 re-entry position (D5) ───────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson  = builder.WithVariable<string>();
-        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson  = builder.WithVariable<string>().Persisted();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce").Persisted();
 
         // ── Dispatched-workflow result + typed exit ────────────────────
-        var lifecycleResult   = builder.WithVariable<IDictionary<string, object>?>();
-        var lifecycleAccepted = builder.WithVariable<bool>();
-        var lifecycleDrafted  = builder.WithVariable<bool>();
-        var exitOutcome       = builder.WithVariable<string>("ExitOutcome", "");
-        var exitDocId         = builder.WithVariable<string>("ExitDocId", "");
-        var criteriaJson      = builder.WithVariable<string>("CriteriaJson", "[]");
-        var criteriaCount     = builder.WithVariable<int>();
-        var parentDocumentId  = builder.WithVariable<string>("ParentDocumentId", "");
-        var failureDetail     = builder.WithVariable<string>("FailureDetail", "");
-        var outputStatus      = builder.WithVariable<string>();
+        var lifecycleResult   = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var lifecycleAccepted = builder.WithVariable<bool>().Persisted();
+        var lifecycleDrafted  = builder.WithVariable<bool>().Persisted();
+        var exitOutcome       = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var exitDocId         = builder.WithVariable<string>("ExitDocId", "").Persisted();
+        var criteriaJson      = builder.WithVariable<string>("CriteriaJson", "[]").Persisted();
+        var criteriaCount     = builder.WithVariable<int>().Persisted();
+        var parentDocumentId  = builder.WithVariable<string>("ParentDocumentId", "").Persisted();
+        var failureDetail     = builder.WithVariable<string>("FailureDetail", "").Persisted();
+        var outputStatus      = builder.WithVariable<string>().Persisted();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable

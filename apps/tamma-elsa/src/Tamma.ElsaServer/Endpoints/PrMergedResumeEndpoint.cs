@@ -66,6 +66,7 @@ public static class PrMergedResumeEndpoint
         [FromBody] ResumeRequest request,
         [FromServices] IBookmarkStore bookmarkStore,
         [FromServices] IWorkflowRuntime workflowRuntime,
+        [FromServices] PendingPrMergeBuffer pendingMerges,
         [FromServices] ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
@@ -95,16 +96,25 @@ public static class PrMergedResumeEndpoint
 
         if (bookmarks.Count == 0)
         {
-            // Idempotency: the SLA edge (or an earlier delivery) burned the
-            // bookmark — a late merge webhook is a benign no-op.
+            // 2026-08-13 (engine-driven E2E run 39) — the SELF-MERGE RACE: when
+            // Tamma performs the merge itself, this webhook forward can arrive
+            // BEFORE the cycle registers its wait (observed 1 s early). The
+            // delivery is once-only, so a plain 404 here LOSES the merge and
+            // the cycle sits on the 12 h SLA. Buffer the notification keyed by
+            // the qualified name; WaitForPRMergedActivity consumes it at
+            // registration (reconcile-on-register) and completes Merged without
+            // suspending. A late/duplicate delivery for an already-resumed wait
+            // is still harmless — the buffered entry expires unconsumed.
+            pendingMerges.Record(qualified, request.MergeSha);
             logger.LogInformation(
-                "No suspended pr-merged bookmark {Bookmark} — wait already resumed, timed out, or not this tenant/repo",
+                "No suspended pr-merged bookmark {Bookmark} — buffered for reconcile-on-register " +
+                "(wait not yet registered, already resumed, timed out, or not this tenant/repo)",
                 qualified);
-            return Results.NotFound(new
+            return Results.Accepted(value: new
             {
-                error = "bookmark_not_found",
+                buffered = true,
                 bookmark = qualified,
-                detail = "No PR-merged wait is currently suspended for this PR.",
+                detail = "No PR-merged wait is suspended yet; the notification is buffered for the wait's registration.",
             });
         }
 

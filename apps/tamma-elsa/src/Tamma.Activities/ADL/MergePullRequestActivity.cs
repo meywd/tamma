@@ -159,7 +159,7 @@ public class MergePullRequestActivity : TammaOutcomeActivity
         var strategy = NormalizeStrategy(MergeStrategy.Get(context));
         var autoDeleteBranch = AutoDeleteBranch.Get(context);
         var closeIssue = CloseAssociatedIssue.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
 
         var request = new GitMergePrRequest
         {

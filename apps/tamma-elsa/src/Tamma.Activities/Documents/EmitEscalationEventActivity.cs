@@ -86,28 +86,28 @@ public class EmitEscalationEventActivity : Activity
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? ApprovalEvents.EscalationTriggered;
+        var type = EventType.GetOrDefault(context) ?? ApprovalEvents.EscalationTriggered;
 
         var evt = BuildTammaEvent(
             type,
-            EscalationId.Get(context),
-            Outcome.Get(context),
-            LineageJson.Get(context),
-            RulesReference.Get(context),
-            Channel.Get(context),
-            IssueId.Get(context),
-            DocumentId.Get(context),
-            DocumentType.Get(context),
-            CorrelationId.Get(context),
-            SessionId.Get(context),
-            ApprovalEvents.ParseTenantId(TenantId.Get(context)),
-            Detail.Get(context));
+            EscalationId.GetOrDefault(context),
+            Outcome.GetOrDefault(context),
+            LineageJson.GetOrDefault(context),
+            RulesReference.GetOrDefault(context),
+            Channel.GetOrDefault(context),
+            IssueId.GetOrDefault(context),
+            DocumentId.GetOrDefault(context),
+            DocumentType.GetOrDefault(context),
+            CorrelationId.GetOrDefault(context),
+            SessionId.GetOrDefault(context),
+            ApprovalEvents.ParseTenantId(TenantId.GetOrDefault(context)),
+            Detail.GetOrDefault(context));
 
         TammaEventEmitter.Emit(context, this, _logger, evt);
 
         _logger?.LogInformation(
             "Emitted {Type} for escalation {EscalationId} (outcome={Outcome}, document={DocumentId})",
-            type, EscalationId.Get(context), Outcome.Get(context), DocumentId.Get(context));
+            type, EscalationId.GetOrDefault(context), Outcome.GetOrDefault(context), DocumentId.GetOrDefault(context));
 
         // Complete on the default outcome so a mid-flow emit node continues to the next activity
         // (the escalated exit region wires this before its terminal). A plain Activity does not

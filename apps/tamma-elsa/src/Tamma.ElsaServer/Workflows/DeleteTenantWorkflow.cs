@@ -74,8 +74,8 @@ public class DeleteTenantWorkflow : WorkflowBase
             + "clean up CP relationships. Each step runs continue-on-error; a single "
             + "terminal event reports the overall outcome.";
 
-        var tenantId = builder.WithVariable<Guid>("TenantId", Guid.Empty);
-        var attempt = builder.WithVariable<int>("Attempt", 1);
+        var tenantId = builder.WithVariable<Guid>("TenantId", Guid.Empty).Persisted();
+        var attempt = builder.WithVariable<int>("Attempt", 1).Persisted();
 
         // ── Starter trigger — bridged from TENANT.DELETE.REQUESTED ──────
         var trigger = new Event(DeleteRequestedEventName)

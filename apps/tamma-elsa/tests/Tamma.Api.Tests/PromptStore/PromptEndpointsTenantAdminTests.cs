@@ -255,7 +255,7 @@ public class PromptEndpointsTenantAdminTests
         var userId = Guid.NewGuid();
         var tc = new TenantContext();
         var principal = PrincipalWithUserId(userId, "owner");
-        var req = new RenderPromptRequest(new Dictionary<string, string>());
+        var req = new RenderPromptRequest(new Dictionary<string, System.Text.Json.JsonElement>());
 
         var result = await PromptEndpoints.RenderPrompt(
             "developer", "deploy", req, _store, principal, tc, Mode(TammaMode.SingleUser));

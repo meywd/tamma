@@ -80,8 +80,8 @@ public class WriteImplementationActivity : CodeActivity<ImplementationResult>
         var storyId = StoryId.Get(context);
         var taskDescription = TaskDescription.Get(context);
         var testCode = TestCode.Get(context);
-        var testFailureOutput = TestFailureOutput.Get(context);
-        var codeContext = CodeContext.Get(context);
+        var testFailureOutput = TestFailureOutput.GetOrDefault(context);
+        var codeContext = CodeContext.GetOrDefault(context);
         var skillLevel = Math.Clamp(SkillLevel.Get(context), 1, 5);
 
         _logger?.LogInformation(
@@ -96,7 +96,7 @@ public class WriteImplementationActivity : CodeActivity<ImplementationResult>
 
             var response = useMock
                 ? SimulateImplementation(taskDescription)
-                : await MediatedLlmText.CompleteAsync(context, "implementer", prompt, context.CancellationToken);
+                : await MediatedLlmText.CompleteAsync(context, "developer", prompt, context.CancellationToken, action: "implement-feature");
 
             var result = ParseImplementationResponse(response);
 

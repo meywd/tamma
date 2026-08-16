@@ -89,6 +89,33 @@ public static class DocumentDecisionResumeEndpoint
             .FindManyAsync(new BookmarkFilter { Name = name }, ct)
             .ConfigureAwait(false)).ToList();
 
+        // 2026-08-13 (engine-driven E2E, single-user mode-awareness): the API's
+        // service-plane binding gives every caller the sole user's PERSONAL
+        // tenant, but a single-user cycle dispatches its gates with an EMPTY
+        // tenant — so the tenant-scoped name missed a gate that IS waiting
+        // (the deployed single-user dashboard accept 404s the same way). One
+        // principal, two spellings: when the tenant-scoped lookup misses, try
+        // the tenantless (platform-plane) name for the SAME session. SaaS
+        // gates always carry their tenant, so the fallback name matches
+        // nothing cross-tenant — and the session id itself is an unguessable
+        // per-gate uuidv7.
+        if (bookmarks.Count == 0 && !string.IsNullOrWhiteSpace(request.TenantId))
+        {
+            var tenantlessName = WaitForDocumentDecisionActivity
+                .DecisionBookmarkName(null, request.SessionId);
+            bookmarks = (await bookmarkStore
+                .FindManyAsync(new BookmarkFilter { Name = tenantlessName }, ct)
+                .ConfigureAwait(false)).ToList();
+            if (bookmarks.Count > 0)
+            {
+                logger.LogInformation(
+                    "Document-decision bookmark resolved via the tenantless fallback " +
+                    "({Tenantless}) — single-user gate dispatched without a tenant scope",
+                    tenantlessName);
+                name = tenantlessName;
+            }
+        }
+
         if (bookmarks.Count == 0)
         {
             logger.LogWarning(

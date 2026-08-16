@@ -75,11 +75,11 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
     {
         var action = Action.Get(context);
         var ticketId = TicketId.Get(context);
-        var status = Status.Get(context);
-        var comment = Comment.Get(context);
-        var prUrl = PullRequestUrl.Get(context);
+        var status = Status.GetOrDefault(context);
+        var comment = Comment.GetOrDefault(context);
+        var prUrl = PullRequestUrl.GetOrDefault(context);
         var customFields = CustomFields.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;

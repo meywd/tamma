@@ -55,14 +55,14 @@ public class EmitDecompositionEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? DecompositionEvents.Failed;
-        var sessionId = SessionId.Get(context);
-        var issueId = IssueId.Get(context);
-        var tenantId = DecompositionEvents.ParseTenantId(TenantId.Get(context));
-        var subtaskCount = SubtaskCount.Get(context);
-        var detail = Detail.Get(context);
+        var type = EventType.GetOrDefault(context) ?? DecompositionEvents.Failed;
+        var sessionId = SessionId.GetOrDefault(context);
+        var issueId = IssueId.GetOrDefault(context);
+        var tenantId = DecompositionEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var subtaskCount = SubtaskCount.GetOrDefault(context);
+        var detail = Detail.GetOrDefault(context);
 
         var evt = BuildTammaEvent(type, sessionId, issueId, tenantId, subtaskCount, detail);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -71,7 +71,8 @@ public class EmitDecompositionEventActivity : Activity
             "Emitted {Type} for decomposition session {Session} issue {Issue} (subtasks={Count})",
             type, sessionId, issueId, subtaskCount);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

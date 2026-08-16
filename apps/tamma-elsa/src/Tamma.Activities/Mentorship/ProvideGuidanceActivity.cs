@@ -73,7 +73,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
         var juniorId = JuniorId.Get(context);
         var storyId = StoryId.Get(context);
         var blockerType = BlockerType.Get(context);
-        var issueContext = IssueContext.Get(context);
+        var issueContext = IssueContext.GetOrDefault(context);
         var guidanceLevel = GuidanceLevel.Get(context);
 
         _logger?.LogInformation(

@@ -166,18 +166,18 @@ public class CallLlmInlineActivity : CodeActivity
         var inputJson = InputJsonProp.Get(context);
         var providerName = ProviderNameProp.Get(context);
         var systemPrompt = SystemPromptProp.Get(context);
-        var toolsJson = ToolsJsonProp.Get(context);
+        var toolsJson = ToolsJsonProp.GetOrDefault(context);
         var attemptNumber = AttemptNumberProp.Get(context);
         var enableToolLoop = EnableToolLoopProp.Get(context);
-        var toolLoopConfigJson = ToolLoopConfigJsonProp.Get(context);
-        var tenantIdRaw = TenantIdProp.Get(context);
-        var agentRole = AgentRoleProp.Get(context);
-        var action = ActionProp.Get(context);
-        var renderedPrompt = RenderedPromptProp.Get(context);
-        var variablesJson = VariablesJsonProp.Get(context);
+        var toolLoopConfigJson = ToolLoopConfigJsonProp.GetOrDefault(context);
+        var tenantIdRaw = TenantIdProp.GetOrDefault(context);
+        var agentRole = AgentRoleProp.GetOrDefault(context);
+        var action = ActionProp.GetOrDefault(context);
+        var renderedPrompt = RenderedPromptProp.GetOrDefault(context);
+        var variablesJson = VariablesJsonProp.GetOrDefault(context);
         var registryMaxTokens = RegistryMaxTokensProp.Get(context);
-        var documentType = DocumentTypeProp.Get(context);
-        var issueId = IssueIdProp.Get(context);
+        var documentType = DocumentTypeProp.GetOrDefault(context);
+        var issueId = IssueIdProp.GetOrDefault(context);
 
         var input = ParseInput(inputJson);
         var toolLoopConfig = ParseToolLoopConfig(toolLoopConfigJson);

@@ -77,7 +77,7 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
         var storyId = StoryId.Get(context);
         var minCoverage = MinCoverage.Get(context);
         var allowWarnings = AllowWarnings.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;

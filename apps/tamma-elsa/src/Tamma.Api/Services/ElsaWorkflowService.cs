@@ -60,16 +60,21 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
         {
             try
             {
+                // 2026-08-13 (engine-driven E2E): ANY HTTP response proves the
+                // server is REACHABLE — which is all this probe guards. The
+                // deployed engine does not mount an Elsa health module at
+                // /elsa/api/health (404), and requiring a 2xx there made every
+                // decision-resume proxy fail 502 against a perfectly healthy
+                // engine. Connection-level failures still retry below.
                 var response = await _httpClient.GetAsync("/elsa/api/health");
-                if (response.IsSuccessStatusCode)
+                lock (_healthCheckLock)
                 {
-                    lock (_healthCheckLock)
-                    {
-                        _healthChecked = true;
-                    }
-                    _logger.LogInformation("ELSA server health check passed at {Url}", _elsaServerUrl);
-                    return;
+                    _healthChecked = true;
                 }
+                _logger.LogInformation(
+                    "ELSA server reachability check passed at {Url} (HTTP {Status})",
+                    _elsaServerUrl, (int)response.StatusCode);
+                return;
             }
             catch (HttpRequestException ex)
             {

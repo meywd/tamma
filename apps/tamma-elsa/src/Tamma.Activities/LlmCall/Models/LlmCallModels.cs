@@ -398,6 +398,20 @@ public class LlmProviderConfig
 
     /// <summary>Whether this provider is enabled.</summary>
     public bool Enabled { get; set; } = true;
+
+    // ── Scripted-provider call keys (2026-08-13, additive) ──────────────
+    // Set per-call by ManagedAgent so the opt-in in-process "scripted"
+    // provider can key its deterministic response on the call's identity.
+    // NEVER serialized onto any provider wire body (the request builders read
+    // only messages/model/params) and ignored by every HTTP provider.
+
+    /// <summary>Agent role wire token of the call being served (e.g.
+    /// "architect"). Null outside the managed-agent path.</summary>
+    public string? CallRole { get; set; }
+
+    /// <summary>Role+action wire token of the call being served (e.g.
+    /// "plan-system-design"). Null when the call has no action.</summary>
+    public string? CallAction { get; set; }
 }
 
 // ============================================================

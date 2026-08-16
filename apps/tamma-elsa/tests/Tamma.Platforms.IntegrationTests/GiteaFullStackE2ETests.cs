@@ -384,22 +384,18 @@ public class GiteaFullStackE2ETests
     }
 
     // ================================================================
-    // 7 — the engine-driven headline (recorded gap)
+    // 7 — the engine-driven headline: UN-BLOCKED (2026-08-13)
     // ================================================================
-
-    [Test, Order(7)]
-    public void FullEngineCycle_SingleIssue_CompletesOnGitea()
-    {
-        Assert.Ignore(
-            "Deferred pending an LLM stub: the single-issue-cycle workflow's plan/review/task "
-            + "steps run through POST /api/v1/llm/call and the codebase ships no fake/echo LLM "
-            + "provider — a scripted no-LLM seam exists only for the AGENT plane "
-            + "(LocalExecutor's IProcessRunner/CLI protocol). Every git-plane leg the engine "
-            + "would drive is proven above through the SAME governed routes the engine's "
-            + "activities call (CycleGitSurface_SeededIssue_To_MergedPr_OnGitea + the webhook "
-            + "receiver leg); the remaining delta is the Elsa host + LLM stub, tracked for the "
-            + "P5 follow-up in docs/stories/epic-31/EXECUTION-PLAN.md §3 P5.");
-    }
+    //
+    // The formerly-Ignored FullEngineCycle_SingleIssue_CompletesOnGitea now
+    // runs for real in GiteaEngineDrivenE2ETests: the scripted LLM provider
+    // (Llm:EnableScriptedProvider — the missing fake/echo provider this test
+    // was deferred on) plus the scripted agent executor join the REAL
+    // Tamma.ElsaServer process to this same topology, and the ACTUAL
+    // AdlOrchestrator/SingleIssueCycle workflows drive one seeded issue from
+    // selection to merged-in-Gitea + CYCLE.COMPLETED. This suite keeps proving
+    // the governed git SURFACE in isolation (faster, sharper failure
+    // localization); the engine-driven suite proves the cycle DRIVES it.
 
     // ── wire helpers ─────────────────────────────────────────────────
 

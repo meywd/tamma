@@ -92,7 +92,7 @@ public class AnalyzeCodeActivity : CodeActivity<RefactoringAnalysis>
 
             var response = useMock
                 ? SimulateAnalysis()
-                : await MediatedLlmText.CompleteAsync(context, "reviewer", prompt, context.CancellationToken);
+                : await MediatedLlmText.CompleteAsync(context, "senior_developer", prompt, context.CancellationToken, action: "plan-refactor");
 
             var result = ParseAnalysisResponse(response, confidenceThreshold);
 

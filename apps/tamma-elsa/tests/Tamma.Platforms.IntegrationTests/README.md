@@ -149,11 +149,97 @@ Topology (one logical deployment):
   dotnet test tests/Tamma.Platforms.IntegrationTests --filter "TestCategory=GiteaE2E"
   ```
 
-Recorded gap (see the explicitly-Ignored
-`FullEngineCycle_SingleIssue_CompletesOnGitea`): driving the cycle from
-the Tamma.ElsaServer engine process needs an LLM stub — the plan/review/
-task steps run through `POST /api/v1/llm/call` and no fake/echo provider
-exists in the codebase. The scripted no-LLM seam that DOES exist
-(`LocalExecutor`'s `IProcessRunner` / CLI exec-request protocol) covers
-only the agent plane. Until an LLM stub lands, the engine-driven variant
-cannot run anywhere, nightly CI included.
+## The engine-driven autonomous E2E (2026-08-13 — the recorded gap, closed)
+
+`GiteaEngineDrivenE2ETests` (+ `Fixtures/EngineFullStackFixture`) is the
+formerly-Ignored headline made real: the LLM stub the gap was recorded
+against now exists (the opt-in **scripted LLM provider**,
+`Llm:EnableScriptedProvider` — deterministic in-process responses keyed
+on role/action/document-type, structurally un-enablable on any
+production-shaped host), so the REAL `Tamma.ElsaServer` binary joins the
+P5 topology as a second host process and the ACTUAL
+AdlOrchestrator → SingleIssueCycle workflows drive one seeded issue:
+
+```
+┌ containers ────────────────────────────┐  ┌ host processes ──────────────┐
+│ gitea/gitea:1.21   postgres:17 ×2      │  │ Tamma.Api  (real binary)     │
+│  └ webhooks → host.docker.internal ────┼─▶│   ▲ llm/git/issue mediation  │
+│                                        │◀─┼─  │  + scripted LLM provider │
+│  (engine DB = 3rd database on the      │  │ Tamma.ElsaServer (real       │
+│   app-DB container)                    │  │   binary, drives the cycle)  │
+└────────────────────────────────────────┘  └──────────────────────────────┘
+```
+
+- **Engine config:** `Llm:DefaultProviderChain=[scripted]` (the config-tier
+  provider selection), `Testing:UseMock=true` (CI-stub trigger),
+  `Agent:Local:*` → a python3 scripted agent that makes ONE real commit
+  per task via the Gitea API (empirically required: Gitea opens a
+  zero-diff draft PR but refuses to merge a commit-less one).
+- **The harness plays only the BY-DESIGN external actors**, each through
+  its shipped seam: the document decider
+  (`POST /api/documents/decisions/{sessionId}/resume`, sessions discovered
+  from APPROVAL.REQUESTED audit rows), the CI system (the engine's DG-5
+  `/elsa/api/ci/waits` seam, now forwarding the full result fields), and
+  the human merge approver (`/elsa/api/adl/merge-approval/resume`).
+- **What it proves end-to-end:** work selected off the seeded label →
+  typed documents (plan/tasks/test-spec) produced against the REAL
+  validators and accepted → branch + draft PR in Gitea → scripted agent
+  commits → CI-stub leg green → un-draft → merge decision → REAL
+  squash-merge → the merged-PR webhook crosses the container gateway and
+  resumes `WaitForPRMerged` → scripted deployment pipeline →
+  `CYCLE.COMPLETED`. Zero GitHub configuration, zero network LLM.
+- Same nightly gating as the P5 suite (`GiteaE2E` + `Nightly`; the
+  `gitea-e2e-nightly` job / `run-gitea-e2e` PR label). Locally:
+  `dotnet build Tamma.sln` then
+  `dotnet test tests/Tamma.Platforms.IntegrationTests --filter "TestCategory=GiteaE2E"`.
+- The engine runs as `ASPNETCORE_ENVIRONMENT=Production` (matching the
+  deployed engine) — one pre-existing engine DI composition defect
+  (`HourlyAnalyticsRollupScheduler`, a captive dependency) refuses a
+  Development boot and is outside this suite's scope. Re-entry is
+  ENABLED: the engine host now defaults to the HTTP-backed
+  latest-accepted read (`HttpLifecycleReEntryService`) — the plan-review
+  shim REQUIRES that read, so the old `Documents:ReEntryDisabled=true`
+  posture made every cycle terminate needs-human. The full defect
+  inventory this suite surfaced (23 items) is recorded in
+  `.dev/findings/engine-di-composition-gaps-found-by-e2e.md`.
+
+## Running these suites in a locked-down sandbox (2026-08-14)
+
+A cloud dev sandbox may have neither the .NET SDK nor open registry access, and
+container resets can remove both mid-session. The recipe that works — recorded
+so the next run does not rediscover it:
+
+1. **No local SDK, and the installer host is blocked by network policy.** Run
+   every `dotnet` command inside the official SDK image instead, with the agent
+   proxy, the CA bundle, the NuGet cache, the docker socket AND the host's
+   `docker` binary mounted (the SDK image has no docker CLI, so the availability
+   probe throws `Win32Exception` and every fixture skips):
+
+   ```bash
+   docker run --rm --network host \
+     -e HTTP_PROXY -e HTTPS_PROXY -e NO_PROXY -e SSL_CERT_FILE=/ca/ca-bundle.crt \
+     -e TESTCONTAINERS_RYUK_DISABLED=true -e TMPDIR=/e2e-tmp \
+     -v /root/.ccr:/ca:ro -v <repo>:/src -v /root/.nuget:/root/.nuget \
+     -v <host-log-dir>:/e2e-tmp \
+     -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker:ro \
+     -w /src/apps/tamma-elsa mcr.microsoft.com/dotnet/sdk:8.0 dotnet test ...
+   ```
+
+   `TMPDIR` matters: the fixtures write their API/engine logs to the temp
+   directory, and without the mount those logs die with the container — which is
+   exactly what you need when a run fails.
+
+2. **Docker Hub blob downloads answer 403 through the proxy.** Pull from the
+   GCR mirror and retag to the names the fixtures request:
+
+   ```bash
+   docker pull mirror.gcr.io/library/postgres:17-alpine
+   docker tag  mirror.gcr.io/library/postgres:17-alpine postgres:17-alpine
+   docker pull mirror.gcr.io/gitea/gitea:1.21
+   docker tag  mirror.gcr.io/gitea/gitea:1.21 gitea/gitea:1.21
+   ```
+
+3. **The docker daemon stops on its own.** `docker info || ((sudo -n dockerd
+   >/tmp/dockerd.log 2>&1 &); sleep 15)` before any run.
+
+None of this applies to CI, which has a real SDK and registry access.

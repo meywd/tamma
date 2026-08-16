@@ -80,8 +80,8 @@ public class CreatePRActivity : CodeActivity<PRCreationResult>
         var storyId = StoryId.Get(context);
         var juniorId = JuniorId.Get(context);
         var baseBranch = BaseBranch.Get(context);
-        var headBranch = HeadBranch.Get(context) ?? $"feature/{storyId}";
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var headBranch = HeadBranch.GetOrDefault(context) ?? $"feature/{storyId}";
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;

@@ -6,6 +6,7 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using NUnit.Framework;
 using Tamma.Activities.Scheduling;
 using Tamma.Data.Abstractions;
@@ -228,6 +229,25 @@ public class TenantScheduledTriggerServiceTests
         }
     }
 
+    /// <summary>2026-08-13 — answers "&lt;definitionId&gt;" verbatim as the
+    /// published VERSION id (see PublishedWorkflowDispatch) so the existing
+    /// ROW-DATA assertions keep reading the definition id they seeded.</summary>
+    private static Elsa.Workflows.Management.IWorkflowDefinitionService StubDefinitionService()
+    {
+        var mock = new Moq.Mock<Elsa.Workflows.Management.IWorkflowDefinitionService>();
+        mock.Setup(d => d.FindWorkflowDefinitionAsync(
+                Moq.It.IsAny<string>(),
+                Moq.It.IsAny<Elsa.Common.Models.VersionOptions>(),
+                Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string id, Elsa.Common.Models.VersionOptions _, CancellationToken _) =>
+                new Elsa.Workflows.Management.Entities.WorkflowDefinition
+                {
+                    Id = id,
+                    DefinitionId = id,
+                });
+        return mock.Object;
+    }
+
     private sealed class CapturingDispatcher : IWorkflowDispatcher
     {
         public List<DispatchWorkflowDefinitionRequest> Definitions { get; } = new();
@@ -316,6 +336,11 @@ public class TenantScheduledTriggerServiceTests
             .AddSingleton<IScheduledTriggerRepository>(repository)
             .AddSingleton<IWorkflowDispatcher>(dispatcher)
             .AddSingleton<IPlatformEventPublisher>(events)
+            // 2026-08-13 — the service now resolves the PUBLISHED definition
+            // VERSION id before dispatching (PublishedWorkflowDispatch). This
+            // stub answers "<definitionId>" verbatim as the version id so the
+            // ROW-DATA assertions keep reading the definition id they seeded.
+            .AddSingleton(StubDefinitionService())
             .BuildServiceProvider();
 
         var options = new TenantScheduledTriggerOptions
@@ -622,6 +647,7 @@ public class TenantScheduledTriggerServiceTests
                 .AddSingleton<IScheduledTriggerRepository>(repository)
                 .AddSingleton<IWorkflowDispatcher>(dispatcher)
                 .AddSingleton<IPlatformEventPublisher>(events)
+                .AddSingleton(StubDefinitionService())
                 .BuildServiceProvider();
             var service = new TenantScheduledTriggerService(
                 services,
@@ -732,6 +758,7 @@ public class TenantScheduledTriggerServiceTests
                 .AddSingleton<IScheduledTriggerRepository>(repository)
                 .AddSingleton<IWorkflowDispatcher>(dispatcher)
                 .AddSingleton<IPlatformEventPublisher>(events)
+                .AddSingleton(StubDefinitionService())
                 .BuildServiceProvider();
             var service = new TenantScheduledTriggerService(
                 services,

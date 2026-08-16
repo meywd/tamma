@@ -106,8 +106,8 @@ public class CleanUpFailedTenantWorkflow : WorkflowBase
             + "Each step runs independently with continue-on-error semantics; a single "
             + "terminal event reports the overall outcome.";
 
-        var tenantId = builder.WithVariable<Guid>("TenantId", Guid.Empty);
-        var note = builder.WithVariable<string?>("Note", null);
+        var tenantId = builder.WithVariable<Guid>("TenantId", Guid.Empty).Persisted();
+        var note = builder.WithVariable<string?>("Note", null).Persisted();
 
         // Round-2 review M3: starter trigger bound to the event the
         // bridge re-publishes for every TENANT.CLEANUP.REQUESTED row

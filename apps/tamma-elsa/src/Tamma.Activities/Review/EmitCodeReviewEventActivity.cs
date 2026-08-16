@@ -73,19 +73,19 @@ public class EmitCodeReviewEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? CodeReviewEvents.Failed;
-        var sessionId = SessionId.Get(context);
-        var storyId = StoryId.Get(context);
-        var juniorId = JuniorId.Get(context);
-        var tenantId = CodeReviewEvents.ParseTenantId(TenantId.Get(context));
-        var prNumber = PrNumber.Get(context);
-        var prUrl = PrUrl.Get(context);
-        var iteration = Iteration.Get(context);
-        var mergeSha = MergeSha.Get(context);
-        var reason = Reason.Get(context);
-        var detail = Detail.Get(context);
+        var type = EventType.GetOrDefault(context) ?? CodeReviewEvents.Failed;
+        var sessionId = SessionId.GetOrDefault(context);
+        var storyId = StoryId.GetOrDefault(context);
+        var juniorId = JuniorId.GetOrDefault(context);
+        var tenantId = CodeReviewEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var prNumber = PrNumber.GetOrDefault(context);
+        var prUrl = PrUrl.GetOrDefault(context);
+        var iteration = Iteration.GetOrDefault(context);
+        var mergeSha = MergeSha.GetOrDefault(context);
+        var reason = Reason.GetOrDefault(context);
+        var detail = Detail.GetOrDefault(context);
 
         var evt = BuildTammaEvent(
             type, sessionId, storyId, juniorId, tenantId,
@@ -96,7 +96,8 @@ public class EmitCodeReviewEventActivity : Activity
             "Emitted {Type} for session {Session} story {Story} (pr=#{Pr}, iteration={Iteration})",
             type, sessionId, storyId, prNumber, iteration);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>

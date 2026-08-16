@@ -122,7 +122,7 @@ public class WaitForFixesActivity : Activity
             "Fix-submission window expired (durable timeout) for PR #{PRNumber}, iteration {Iteration} — taking the TimedOut outcome",
             prNumber, iteration);
 
-        FixesPayload.Set(context, null);
+        FixesPayload.Set(context, (FixesSubmittedPayload?)null);
         await context.CompleteActivityWithOutcomesAsync("TimedOut");
     }
 
@@ -140,7 +140,7 @@ public class WaitForFixesActivity : Activity
                 "Fix submission timed out for PR #{PRNumber}, iteration {Iteration}",
                 prNumber, iteration);
 
-            FixesPayload.Set(context, null);
+            FixesPayload.Set(context, (FixesSubmittedPayload?)null);
             await context.CompleteActivityWithOutcomesAsync("TimedOut");
             return;
         }

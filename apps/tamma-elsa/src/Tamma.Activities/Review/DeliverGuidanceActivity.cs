@@ -91,7 +91,7 @@ public class DeliverGuidanceActivity : Activity
         var prNumber = PRNumber.Get(context);
         var iteration = Iteration.Get(context);
         var commentsJson = ReviewCommentsJson.Get(context);
-        var guidanceText = GuidanceText.Get(context);
+        var guidanceText = GuidanceText.GetOrDefault(context);
 
         _logger?.LogInformation(
             "Delivering fix guidance for PR #{PRNumber}, iteration {Iteration}, session {SessionId}",
@@ -104,7 +104,7 @@ public class DeliverGuidanceActivity : Activity
             _logger?.LogWarning(
                 "No LLM guidance text for PR #{PRNumber}, iteration {Iteration}; routing to escalation",
                 prNumber, iteration);
-            Result.Set(context, null);
+            Result.Set(context, (FixGuidance?)null);
             await context.CompleteActivityWithOutcomesAsync("Failed");
             return;
         }
@@ -158,7 +158,7 @@ public class DeliverGuidanceActivity : Activity
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error delivering guidance for session {SessionId}", sessionId);
-            Result.Set(context, null);
+            Result.Set(context, (FixGuidance?)null);
             await context.CompleteActivityWithOutcomesAsync("Failed");
         }
     }

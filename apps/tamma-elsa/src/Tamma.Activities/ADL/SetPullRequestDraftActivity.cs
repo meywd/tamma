@@ -95,7 +95,7 @@ public class SetPullRequestDraftActivity : Activity
         var repository = Repository.Get(context) ?? "";
         var prNumber = PrNumber.Get(context);
         var draft = Draft.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
 
         var request = new GitPrDraftRequest
         {

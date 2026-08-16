@@ -23,13 +23,13 @@ internal static class DockerAvailability
     /// True if <c>docker info</c> returned exit code 0 within 5s at
     /// type init. Cached for the test run lifetime.
     /// </summary>
-    public static bool IsAvailable { get; }
+    public static bool IsAvailable { get; private set; }
 
     /// <summary>
     /// Reason string surfaced in skip messages — empty when
     /// <see cref="IsAvailable"/> is true.
     /// </summary>
-    public static string SkipReason { get; }
+    public static string SkipReason { get; private set; } = string.Empty;
 
     /// <summary>
     /// True when CI has set <c>PLATFORMS_REQUIRE_DOCKER=true</c>. In
@@ -45,6 +45,26 @@ internal static class DockerAvailability
 
     static DockerAvailability()
     {
+        // 2026-08-14: one 5s probe made the per-PR job flaky — a COLD CI runner's
+        // first `docker info` regularly exceeds 5s while the daemon warms, and the
+        // whole fixture then failed OneTimeSetUp (23 tests lost to one
+        // infrastructure hiccup, PR #512). Where docker is REQUIRED (CI sets
+        // PLATFORMS_REQUIRE_DOCKER=true) retry within a 60s budget; on a laptop
+        // keep the single fast probe so a misconfigured machine never stalls test
+        // discovery.
+        var deadline = DateTime.UtcNow + (RequireDocker ? TimeSpan.FromSeconds(60) : TimeSpan.Zero);
+        while (!Probe() && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(TimeSpan.FromSeconds(2));
+        }
+    }
+
+    /// <summary>
+    /// One <c>docker info</c> attempt; sets <see cref="IsAvailable"/> and
+    /// <see cref="SkipReason"/>, and returns whether docker answered.
+    /// </summary>
+    private static bool Probe()
+    {
         try
         {
             var psi = new ProcessStartInfo("docker", "info")
@@ -59,7 +79,7 @@ internal static class DockerAvailability
             {
                 IsAvailable = false;
                 SkipReason = "docker: failed to start `docker info` process";
-                return;
+                return false;
             }
             // 5s — docker info on a healthy daemon is sub-second; on a
             // broken one it sits forever. We don't want to block test
@@ -69,21 +89,23 @@ internal static class DockerAvailability
                 try { proc.Kill(true); } catch { /* best effort */ }
                 IsAvailable = false;
                 SkipReason = "docker: `docker info` timed out after 5s";
-                return;
+                return false;
             }
             if (proc.ExitCode != 0)
             {
                 IsAvailable = false;
                 SkipReason = $"docker: `docker info` exited {proc.ExitCode}";
-                return;
+                return false;
             }
             IsAvailable = true;
             SkipReason = string.Empty;
+            return true;
         }
         catch (Exception ex)
         {
             IsAvailable = false;
             SkipReason = $"docker: probe threw {ex.GetType().Name}: {ex.Message}";
+            return false;
         }
     }
 

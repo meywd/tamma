@@ -82,12 +82,12 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
     {
         var action = Action.Get(context);
         var repository = Repository.Get(context);
-        var storyId = StoryId.Get(context);
-        var branchName = BranchName.Get(context) ?? (storyId != null ? $"feature/{storyId}" : null);
-        var prNumber = PullRequestNumber.Get(context);
-        var prTitle = PrTitle.Get(context);
-        var prBody = PrBody.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var storyId = StoryId.GetOrDefault(context);
+        var branchName = BranchName.GetOrDefault(context) ?? (storyId != null ? $"feature/{storyId}" : null);
+        var prNumber = PullRequestNumber.GetOrDefault(context);
+        var prTitle = PrTitle.GetOrDefault(context);
+        var prBody = PrBody.GetOrDefault(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;

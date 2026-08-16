@@ -48,19 +48,19 @@ public class BranchCreationWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repositoryVar = builder.WithVariable<string>("Repository", "");
-        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0);
-        var issueTitleVar = builder.WithVariable<string>("IssueTitle", "");
-        var baseBranchVar = builder.WithVariable<string>("BaseBranch", "main");
-        var conflictStrategyVar = builder.WithVariable<string>("ConflictStrategy", "suffix");
-        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
+        var repositoryVar = builder.WithVariable<string>("Repository", "").Persisted();
+        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var issueTitleVar = builder.WithVariable<string>("IssueTitle", "").Persisted();
+        var baseBranchVar = builder.WithVariable<string>("BaseBranch", "main").Persisted();
+        var conflictStrategyVar = builder.WithVariable<string>("ConflictStrategy", "suffix").Persisted();
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "").Persisted();
 
-        var branchNameVar = builder.WithVariable<string>("BranchName", "");
-        var baseShaVar = builder.WithVariable<string>("BaseSha", "");
-        var conflictResolvedVar = builder.WithVariable<bool>("ConflictResolved", false);
-        var errorCodeVar = builder.WithVariable<string>("ErrorCode", "");
-        var errorVar = builder.WithVariable<string>("Error", "");
-        var startedAtTicksVar = builder.WithVariable<long>("StartedAtTicks", 0);
+        var branchNameVar = builder.WithVariable<string>("BranchName", "").Persisted();
+        var baseShaVar = builder.WithVariable<string>("BaseSha", "").Persisted();
+        var conflictResolvedVar = builder.WithVariable<bool>("ConflictResolved", false).Persisted();
+        var errorCodeVar = builder.WithVariable<string>("ErrorCode", "").Persisted();
+        var errorVar = builder.WithVariable<string>("Error", "").Persisted();
+        var startedAtTicksVar = builder.WithVariable<long>("StartedAtTicks", 0).Persisted();
 
         // ================================================================
         // 1. Read inputs (derive issueTitle from workItemJson when not supplied —

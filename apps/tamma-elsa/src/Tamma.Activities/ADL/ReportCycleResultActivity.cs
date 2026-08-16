@@ -53,19 +53,28 @@ public class ReportCycleResultActivity : TammaAsyncActivity
     {
         var reason = Reason.Get(context);
         var issueNumber = IssueNumber.Get(context);
-        var error = Error.Get(context);
+        // 2026-08-13 (engine-driven E2E): Input<T>.Get THROWS "Error is required."
+        // on any null evaluated value — an OPTIONAL input must read GetOrDefault,
+        // or every non-error exit path (needsHuman included) faults right here.
+        var error = Error.GetOrDefault(context);
 
         // Set workflow output
         context.WorkflowExecutionContext.Output["exitReason"] = reason;
         context.WorkflowExecutionContext.Output["issueNumber"] = issueNumber;
 
+        // 2026-08-13 (engine-driven E2E): store-rehydrated activities are built
+        // by the [JsonConstructor] with NULL ctor-injected members — resolve
+        // from the execution context (ctor-or-GetService idiom).
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+        var httpClientFactory = _httpClientFactory ?? context.GetService<IHttpClientFactory>();
+
         // Call engine callback if configured
-        var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (!string.IsNullOrEmpty(callbackUrl) && _httpClientFactory != null)
+        var callbackUrl = configuration?["Engine:CallbackUrl"];
+        if (!string.IsNullOrEmpty(callbackUrl) && httpClientFactory != null)
         {
             try
             {
-                var httpClient = _httpClientFactory.CreateClient();
+                var httpClient = httpClientFactory.CreateClient();
                 var payload = new
                 {
                     exitReason = reason,

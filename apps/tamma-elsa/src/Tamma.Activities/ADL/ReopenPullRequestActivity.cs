@@ -76,7 +76,7 @@ public class ReopenPullRequestActivity : Activity
     {
         var repository = Repository.Get(context) ?? "";
         var prNumber = PrNumber.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
 
         var request = new GitReopenPrRequest
         {

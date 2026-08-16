@@ -414,7 +414,16 @@ public static class PromptEndpoints
         var userId = TryGetUserId(principal);
 
         // Ensure the role variable is always available if missing from the request.
-        var variables = new Dictionary<string, string>(req.Variables ?? new Dictionary<string, string>());
+        // 2026-08-13: variables are arbitrary JSON values on the wire (the
+        // engine's produce path sends numbers) — stringify per value: strings
+        // verbatim, everything else as raw JSON text.
+        var variables = new Dictionary<string, string>();
+        foreach (var (key, value) in req.Variables ?? new Dictionary<string, System.Text.Json.JsonElement>())
+        {
+            variables[key] = value.ValueKind == System.Text.Json.JsonValueKind.String
+                ? value.GetString() ?? string.Empty
+                : value.GetRawText();
+        }
         variables.TryAdd("role", role);
 
         // Story 27-18 — resolution fails loud; translate TammaError into the

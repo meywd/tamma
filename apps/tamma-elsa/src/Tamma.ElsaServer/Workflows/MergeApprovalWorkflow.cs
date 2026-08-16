@@ -80,24 +80,24 @@ public class MergeApprovalWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repository = builder.WithVariable<string>("Repository", "");
-        var branchName = builder.WithVariable<string>("BranchName", "");
-        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0);
-        var prNumberVar = builder.WithVariable<int>("PrNumber", 0);
-        var prUrlVar = builder.WithVariable<string>("PrUrl", "");
-        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
-        var breakingChangeVar = builder.WithVariable<bool>("BreakingChange", false);
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var branchName = builder.WithVariable<string>("BranchName", "").Persisted();
+        var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var prNumberVar = builder.WithVariable<int>("PrNumber", 0).Persisted();
+        var prUrlVar = builder.WithVariable<string>("PrUrl", "").Persisted();
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "").Persisted();
+        var breakingChangeVar = builder.WithVariable<bool>("BreakingChange", false).Persisted();
 
-        var decisionVar = builder.WithVariable<string>("Decision", "");
-        var feedbackVar = builder.WithVariable<string>("Feedback", "");
-        var approverVar = builder.WithVariable<string>("Approver", "");
+        var decisionVar = builder.WithVariable<string>("Decision", "").Persisted();
+        var feedbackVar = builder.WithVariable<string>("Feedback", "").Persisted();
+        var approverVar = builder.WithVariable<string>("Approver", "").Persisted();
 
         // Result of the dispatched merge sub-workflow (CRITICAL-2) + the test loop
         // iteration counter (CRITICAL-3). subResult captures any DispatchWorkflow
         // outputs; mergeSuccessVar is the `success` flag the merge workflow emits.
-        var subResult = builder.WithVariable<IDictionary<string, object>?>();
-        var mergeSuccessVar = builder.WithVariable<bool>("MergeSuccess", false);
-        var testIterationCountVar = builder.WithVariable<int>("TestIterationCount", 0);
+        var subResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var mergeSuccessVar = builder.WithVariable<bool>("MergeSuccess", false).Persisted();
+        var testIterationCountVar = builder.WithVariable<int>("TestIterationCount", 0).Persisted();
 
         // Max test re-runs before escalating — mirrors PlanMaxRevisions /
         // TaskMaxRevisions (>=3) in SingleIssueCycleWorkflow so an unbounded

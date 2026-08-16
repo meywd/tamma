@@ -164,7 +164,13 @@ public class ExecuteAgentActivity : Activity, ITammaActivity
         var startedAt = DateTime.UtcNow;
         TammaEventEmitter.EmitStart(context, this, this, _logger);
 
-        if (_factory is null)
+        // 2026-08-13 (engine-driven E2E run 38): store-rehydrated activities are
+        // built by the [JsonConstructor] with NULL ctor-injected members — the
+        // ctor-or-GetService idiom, or EVERY agent execution in a real engine
+        // fails instantly ("AgentExecutorFactory not registered") and the task
+        // loop silently degrades to its debug-retry leg.
+        var factory = _factory ?? context.GetService<AgentExecutorFactory>();
+        if (factory is null)
         {
             const string msg = "AgentExecutorFactory not registered — ExecuteAgentActivity requires DI.";
             _logger?.LogError(msg);
@@ -183,13 +189,13 @@ public class ExecuteAgentActivity : Activity, ITammaActivity
             PlanJson: PlanJson.Get(context),
             SessionId: SessionId.Get(context),
             AgentProvider: AgentProvider.Get(context),
-            AgentConfigJson: AgentConfigJson.Get(context),
+            AgentConfigJson: AgentConfigJson.GetOrDefault(context),
             WorkflowFileName: "tamma-agent.yml",
             TimeoutMinutes: TimeoutMinutes.Get(context));
 
         try
         {
-            var executor = _factory.Create(ModeOverride.Get(context));
+            var executor = factory.Create(ModeOverride.GetOrDefault(context));
             context.SetVariable("AgentExecutionMode", executor.Mode);
 
             _logger?.LogInformation(

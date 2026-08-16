@@ -177,7 +177,7 @@ public class CollectAgentResultsActivity : Activity, ITammaActivity
             Conclusion: Conclusion.Get(context) ?? "unknown",
             WorkflowRunUrl: string.Empty,
             DurationSeconds: 0,
-            ArtifactsUrl: ArtifactsUrl.Get(context) ?? string.Empty);
+            ArtifactsUrl: ArtifactsUrl.GetOrDefault(context) ?? string.Empty);
 
         try
         {

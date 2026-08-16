@@ -59,35 +59,35 @@ public class TriageItemCycleWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repository = builder.WithVariable<string>("Repository", "");
-        var itemJson = builder.WithVariable<string>("ItemJson", "");
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var itemKey = builder.WithVariable<string>("ItemKey", "");
-        var itemNumber = builder.WithVariable<int>("ItemNumber", 0);
-        var itemSource = builder.WithVariable<string>("ItemSource", "");
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var itemJson = builder.WithVariable<string>("ItemJson", "").Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
+        var itemKey = builder.WithVariable<string>("ItemKey", "").Persisted();
+        var itemNumber = builder.WithVariable<int>("ItemNumber", 0).Persisted();
+        var itemSource = builder.WithVariable<string>("ItemSource", "").Persisted();
 
         // 39-10 re-entry position (on the item's triage-decision document).
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson = builder.WithVariable<string>();
-        var positionStage = builder.WithVariable<string>("PositionStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson = builder.WithVariable<string>().Persisted();
+        var positionStage = builder.WithVariable<string>("PositionStage", "produce").Persisted();
 
-        var contextJson = builder.WithVariable<string>("ContextJson", "");
-        var contextStatus = builder.WithVariable<string>("ContextStatus", TriageContextEvents.StatusFailed);
-        var findingsDocumentId = builder.WithVariable<string>("FindingsDocumentId", "");
+        var contextJson = builder.WithVariable<string>("ContextJson", "").Persisted();
+        var contextStatus = builder.WithVariable<string>("ContextStatus", TriageContextEvents.StatusFailed).Persisted();
+        var findingsDocumentId = builder.WithVariable<string>("FindingsDocumentId", "").Persisted();
 
-        var poDecisionJson = builder.WithVariable<string>("PODecisionJson", "");
-        var poDocumentJson = builder.WithVariable<string>("PODocumentJson", "");
-        var poCallSucceeded = builder.WithVariable<bool>("PoCallSucceeded", false);
-        var decisionStatus = builder.WithVariable<string>("DecisionStatus", "");
-        var decisionType = builder.WithVariable<string>("DecisionType", "");
-        var decisionPriority = builder.WithVariable<string>("DecisionPriority", "");
-        var decisionAutomation = builder.WithVariable<string>("DecisionAutomation", "");
-        var appliedLabels = builder.WithVariable<string[]>("AppliedLabels", System.Array.Empty<string>());
-        var appliedComment = builder.WithVariable<string>("AppliedComment", "");
-        var droppedLabels = builder.WithVariable<string[]>("DroppedLabels", System.Array.Empty<string>());
+        var poDecisionJson = builder.WithVariable<string>("PODecisionJson", "").Persisted();
+        var poDocumentJson = builder.WithVariable<string>("PODocumentJson", "").Persisted();
+        var poCallSucceeded = builder.WithVariable<bool>("PoCallSucceeded", false).Persisted();
+        var decisionStatus = builder.WithVariable<string>("DecisionStatus", "").Persisted();
+        var decisionType = builder.WithVariable<string>("DecisionType", "").Persisted();
+        var decisionPriority = builder.WithVariable<string>("DecisionPriority", "").Persisted();
+        var decisionAutomation = builder.WithVariable<string>("DecisionAutomation", "").Persisted();
+        var appliedLabels = builder.WithVariable<string[]>("AppliedLabels", System.Array.Empty<string>()).Persisted();
+        var appliedComment = builder.WithVariable<string>("AppliedComment", "").Persisted();
+        var droppedLabels = builder.WithVariable<string[]>("DroppedLabels", System.Array.Empty<string>()).Persisted();
 
-        var skipReason = builder.WithVariable<string>("SkipReason", "");
-        var subResult = builder.WithVariable<IDictionary<string, object>?>();
+        var skipReason = builder.WithVariable<string>("SkipReason", "").Persisted();
+        var subResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ================================================================
         // 1. Init — read inputs; derive itemKey/itemNumber/itemSource.

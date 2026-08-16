@@ -565,3 +565,38 @@ public class GiteaPrLifecycleTests
         pr.Mergeable.Should().BeTrue();
     }
 }
+
+/// <summary>
+/// 2026-08-13 (engine-driven E2E run 37) — pins the driver's transient-merge
+/// classifier: Gitea computes mergeability ASYNC, and the merge endpoint answers
+/// "405: Please try again later" until the checker settles. The driver retries
+/// exactly that answer (bounded) and treats every other failure as terminal.
+/// </summary>
+[TestFixture]
+public class GiteaMergeabilityRetryClassifierTests
+{
+    [Test]
+    public void The405TryAgainLaterAnswer_ClassifiesAsStillComputing()
+    {
+        GiteaPlatformClient.IsMergeabilityStillComputing(
+                new PlatformError.InvalidRequest("405", "Please try again later"))
+            .Should().BeTrue();
+        // The mapper's heuristic classifier may rewrite the code — the hint
+        // alone must still classify.
+        GiteaPlatformClient.IsMergeabilityStillComputing(
+                new PlatformError.InvalidRequest("merge_conflict", "405: Please try again later"))
+            .Should().BeTrue();
+    }
+
+    [Test]
+    public void TerminalMergeFailures_NeverClassifyAsTransient()
+    {
+        GiteaPlatformClient.IsMergeabilityStillComputing(
+                new PlatformError.InvalidRequest("merge_conflict", "merge conflict in src/foo"))
+            .Should().BeFalse("a REAL conflict must escalate, not spin the retry loop");
+        GiteaPlatformClient.IsMergeabilityStillComputing(new PlatformError.NotFound())
+            .Should().BeFalse();
+        GiteaPlatformClient.IsMergeabilityStillComputing(new PlatformError.PermissionDenied())
+            .Should().BeFalse();
+    }
+}

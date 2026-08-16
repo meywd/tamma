@@ -347,6 +347,22 @@ public static class ProviderCatalog
             Allowlisted = false,
             Aliases = new[] { "claude-code-cli" },
         },
+        new NonHttpProviderDescriptor
+        {
+            // 2026-08-13 (Epic 31 P5 follow-up) — the deterministic in-process
+            // TEST provider that unblocks the engine-driven autonomous E2E.
+            // Allowlisted=false ON PURPOSE: like the claude-code family it is
+            // never selectable by default — enabling it requires the explicit
+            // Llm:EnableScriptedProvider flag (ScriptedProviderPosture), which
+            // additionally REFUSES to register on any SaaS/production-shaped
+            // host. Catalogued (rather than left unknown) so the keyset
+            // contract stays total: every provider key the platform ships is
+            // either an HTTP descriptor or an explicit non-HTTP classification.
+            Key = "scripted",
+            DisplayName = "Scripted test provider (in-process, opt-in)",
+            Transport = NonHttpProviderTransport.InProcess,
+            Allowlisted = false,
+        },
     };
 
     private static readonly FrozenDictionary<string, ProviderDescriptor> HttpByKey =

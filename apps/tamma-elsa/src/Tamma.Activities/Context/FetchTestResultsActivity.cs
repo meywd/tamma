@@ -59,7 +59,7 @@ public class FetchTestResultsActivity : CodeActivity<TestResultsData>
     {
         var repositoryUrl = RepositoryUrl.Get(context);
         var storyId = StoryId.Get(context);
-        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.GetOrDefault(context));
         var correlationId = context.WorkflowExecutionContext.Id;
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var ct = context.CancellationToken;

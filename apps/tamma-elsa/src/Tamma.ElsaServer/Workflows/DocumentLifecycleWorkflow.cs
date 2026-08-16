@@ -67,32 +67,32 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             "lifecycle for any registered document type";
 
         // ── Loop state (D1 — ONE variable) ─────────────────────────────
-        var stateJson = builder.WithVariable<string>("LifecycleState", "");
+        var stateJson = builder.WithVariable<string>("LifecycleState", "").Persisted();
 
         // ── Plain producer-dispatch vars (default "" so the drift scanner
         //    materialises the three llm-call dispatches as DATA-DRIVEN, D3) ──
-        var producerRole = builder.WithVariable<string>("ProducerRole", "");
-        var producerAction = builder.WithVariable<string>("ProducerAction", "");
-        var producerVariablesJson = builder.WithVariable<string>("ProducerVariablesJson", "{}");
-        var documentType = builder.WithVariable<string>("DocumentType", "");
-        var issueId = builder.WithVariable<string>("IssueId", "");
-        var correlationId = builder.WithVariable<string>("CorrelationId", "");
-        var reviewDefId = builder.WithVariable<string>("ReviewDefinitionId", DefaultReviewDefinitionId);
-        var tenantId = builder.WithVariable<string>("TenantId", "");
+        var producerRole = builder.WithVariable<string>("ProducerRole", "").Persisted();
+        var producerAction = builder.WithVariable<string>("ProducerAction", "").Persisted();
+        var producerVariablesJson = builder.WithVariable<string>("ProducerVariablesJson", "{}").Persisted();
+        var documentType = builder.WithVariable<string>("DocumentType", "").Persisted();
+        var issueId = builder.WithVariable<string>("IssueId", "").Persisted();
+        var correlationId = builder.WithVariable<string>("CorrelationId", "").Persisted();
+        var reviewDefId = builder.WithVariable<string>("ReviewDefinitionId", DefaultReviewDefinitionId).Persisted();
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
         // Story 39-15 (D3) — optional cross-document validation context (default "" = skip).
         // When non-empty it is forwarded to the type's IDocumentType.ValidateWithContext at
         // VALIDATE, so a type (currently TestSpec) can check a binding that cannot be seen
         // payload-only (a test case referencing a task not in the consumed plan).
-        var validationContextJson = builder.WithVariable<string>("ValidationContextJson", "");
+        var validationContextJson = builder.WithVariable<string>("ValidationContextJson", "").Persisted();
 
         // ── Denormalised scalars for emit tags / gate inputs ───────────
-        var sessionId = builder.WithVariable<string>("SessionId", "");
-        var currentDocId = builder.WithVariable<string>("CurrentDocumentId", "");
-        var currentDocJson = builder.WithVariable<string>("CurrentDocumentJson", "");
-        var currentRound = builder.WithVariable<int>("CurrentRound", 0);
-        var rulesReference = builder.WithVariable<string>("RulesReference", "");
-        var acceptRequestedAtUtc = builder.WithVariable<string>("AcceptRequestedAtUtc", "");
-        var acceptanceRequestJson = builder.WithVariable<string>("AcceptanceRequestJson", "");
+        var sessionId = builder.WithVariable<string>("SessionId", "").Persisted();
+        var currentDocId = builder.WithVariable<string>("CurrentDocumentId", "").Persisted();
+        var currentDocJson = builder.WithVariable<string>("CurrentDocumentJson", "").Persisted();
+        var currentRound = builder.WithVariable<int>("CurrentRound", 0).Persisted();
+        var rulesReference = builder.WithVariable<string>("RulesReference", "").Persisted();
+        var acceptRequestedAtUtc = builder.WithVariable<string>("AcceptRequestedAtUtc", "").Persisted();
+        var acceptanceRequestJson = builder.WithVariable<string>("AcceptanceRequestJson", "").Persisted();
 
         // ── Story 39-11 (D6 / AC7) persist↔emit linkage ────────────────
         // The pre-minted DOCUMENT.* transition event id, minted ONCE per
@@ -102,32 +102,32 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         // (EmitDocumentEventActivity.EventId) and the adjacent persist
         // (PersistDocumentInstanceActivity.CorrelatingEventId) so the
         // domain_events row and the document_instances row share one id.
-        var transitionEventId = builder.WithVariable<string>("TransitionEventId", "");
+        var transitionEventId = builder.WithVariable<string>("TransitionEventId", "").Persisted();
 
         // ── Dispatch result containers ─────────────────────────────────
-        var produceResult = builder.WithVariable<IDictionary<string, object>?>();
-        var repairResult = builder.WithVariable<IDictionary<string, object>?>();
-        var reviseResult = builder.WithVariable<IDictionary<string, object>?>();
-        var reviewResult = builder.WithVariable<IDictionary<string, object>?>();
+        var produceResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var repairResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var reviseResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var reviewResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ── Routing flags ──────────────────────────────────────────────
-        var producedOk = builder.WithVariable<bool>("ProducedOk", false);
-        var lastDispatchOk = builder.WithVariable<bool>("LastDispatchOk", false);
-        var validationOk = builder.WithVariable<bool>("ValidationOk", false);
-        var ambiguityOver = builder.WithVariable<bool>("AmbiguityOver", false);
-        var reviewRoute = builder.WithVariable<string>("ReviewRoute", "");
-        var clampedRoute = builder.WithVariable<string>("ClampedRoute", "");
-        var escalateOutcome = builder.WithVariable<string>("EscalateOutcome", "");
-        var reviewDecisionWire = builder.WithVariable<string>("ReviewDecisionWire", "approve");
-        var reviewHasBlocking = builder.WithVariable<bool>("ReviewHasBlocking", false);
+        var producedOk = builder.WithVariable<bool>("ProducedOk", false).Persisted();
+        var lastDispatchOk = builder.WithVariable<bool>("LastDispatchOk", false).Persisted();
+        var validationOk = builder.WithVariable<bool>("ValidationOk", false).Persisted();
+        var ambiguityOver = builder.WithVariable<bool>("AmbiguityOver", false).Persisted();
+        var reviewRoute = builder.WithVariable<string>("ReviewRoute", "").Persisted();
+        var clampedRoute = builder.WithVariable<string>("ClampedRoute", "").Persisted();
+        var escalateOutcome = builder.WithVariable<string>("EscalateOutcome", "").Persisted();
+        var reviewDecisionWire = builder.WithVariable<string>("ReviewDecisionWire", "approve").Persisted();
+        var reviewHasBlocking = builder.WithVariable<bool>("ReviewHasBlocking", false).Persisted();
 
         // ── Gate outputs ───────────────────────────────────────────────
-        var decisionJson = builder.WithVariable<string>("DecisionJson", "");
-        var decisionChannel = builder.WithVariable<string>("DecisionChannel", "orchestrator");
+        var decisionJson = builder.WithVariable<string>("DecisionJson", "").Persisted();
+        var decisionChannel = builder.WithVariable<string>("DecisionChannel", "orchestrator").Persisted();
         // Story 39-13 (D6d) — the decider's notes/feedback, surfaced on the terminal as the
         // additive `decisionNotes` output so a lifecycle binding can mirror the legacy
         // Detail on DESIGN.PROPOSAL.APPROVED/REJECTED. Additive-only, like 39-12's documentJson.
-        var decisionFeedback = builder.WithVariable<string>("DecisionFeedback", "");
+        var decisionFeedback = builder.WithVariable<string>("DecisionFeedback", "").Persisted();
 
         // ── Story 39-13 (D5/D6c) — optional pre-ACCEPT delivery hook ────
         // When `deliveryWorkflowDefinitionId` is non-empty the lifecycle dispatches that
@@ -136,26 +136,26 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         // the human decides while keeping the legacy GENERATED/DELIVERED emits on the durable
         // drain. A crash re-entry that resumes AT ACCEPT skips it (DeliveryReEntryGate) so
         // delivery — and its legacy emits — happen exactly once per delivered revision.
-        var deliveryDefId = builder.WithVariable<string>("DeliveryWorkflowDefinitionId", "");
-        var deliveryRepository = builder.WithVariable<string>("DeliveryRepository", "");
-        var deliveryIssueNumber = builder.WithVariable<int>("DeliveryIssueNumber", 0);
-        var deliveryResult = builder.WithVariable<IDictionary<string, object>?>();
+        var deliveryDefId = builder.WithVariable<string>("DeliveryWorkflowDefinitionId", "").Persisted();
+        var deliveryRepository = builder.WithVariable<string>("DeliveryRepository", "").Persisted();
+        var deliveryIssueNumber = builder.WithVariable<int>("DeliveryIssueNumber", 0).Persisted();
+        var deliveryResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // ── Story 39-10 re-entry (D6) ──────────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>("ReEntryPositionJson", "");
-        var reEntryDocJson = builder.WithVariable<string>("ReEntryDocumentJson", "");
-        var reEntryStage = builder.WithVariable<string>("ReEntryStage", "produce");
+        var reEntryPositionJson = builder.WithVariable<string>("ReEntryPositionJson", "").Persisted();
+        var reEntryDocJson = builder.WithVariable<string>("ReEntryDocumentJson", "").Persisted();
+        var reEntryStage = builder.WithVariable<string>("ReEntryStage", "produce").Persisted();
 
         // ── Terminal outputs ───────────────────────────────────────────
-        var outStatus = builder.WithVariable<string>("OutStatus", "");
-        var outOutcome = builder.WithVariable<string>("OutOutcome", "");
-        var outDocId = builder.WithVariable<string>("OutDocId", "");
-        var outLifecycleResult = builder.WithVariable<string>("OutLifecycleResult", "{}");
+        var outStatus = builder.WithVariable<string>("OutStatus", "").Persisted();
+        var outOutcome = builder.WithVariable<string>("OutOutcome", "").Persisted();
+        var outDocId = builder.WithVariable<string>("OutDocId", "").Persisted();
+        var outLifecycleResult = builder.WithVariable<string>("OutLifecycleResult", "{}").Persisted();
         // Story 39-12 (D4) — the accepted revision's PAYLOAD body (not the envelope, not the
         // lineage). A lifecycle binding (e.g. IssueDecompositionWorkflow) needs the typed body to
         // project its own domain output (subtask count, decomposition JSON); the lineage on
         // lifecycleResult only carries id+state. Empty when no draft was ever produced.
-        var outDocJson = builder.WithVariable<string>("OutDocJson", "");
+        var outDocJson = builder.WithVariable<string>("OutDocJson", "").Persisted();
 
         // ================================================================
         // Init — read + validate inputs (D2/D4), mint session, seed state

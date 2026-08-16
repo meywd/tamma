@@ -55,9 +55,15 @@ public class ReadRepoConventionsActivity : TammaAsyncActivity
         var repo = Repository.Get(context);
         var conventions = "";
 
-        var callbackUrl = _configuration?["Engine:CallbackUrl"];
+        // 2026-08-13 (engine-driven E2E): store-rehydrated activities are built
+        // by the [JsonConstructor] with NULL ctor-injected members — resolve
+        // from the execution context (ctor-or-GetService idiom).
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+        var httpClientFactory = _httpClientFactory ?? context.GetService<IHttpClientFactory>();
 
-        if (string.IsNullOrEmpty(callbackUrl) || _httpClientFactory == null)
+        var callbackUrl = configuration?["Engine:CallbackUrl"];
+
+        if (string.IsNullOrEmpty(callbackUrl) || httpClientFactory == null)
         {
             Logger?.LogWarning(
                 "No Engine:CallbackUrl configured — cannot read repo conventions for {Repo}",
@@ -68,7 +74,7 @@ public class ReadRepoConventionsActivity : TammaAsyncActivity
 
         try
         {
-            var httpClient = _httpClientFactory.CreateClient();
+            var httpClient = httpClientFactory.CreateClient();
             var url = $"{callbackUrl.TrimEnd('/')}/api/engine/repo-config?repo={Uri.EscapeDataString(repo)}";
 
             Logger?.LogInformation("Fetching repo config from {Url}", url);

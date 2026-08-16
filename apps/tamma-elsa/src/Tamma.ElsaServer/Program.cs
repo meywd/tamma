@@ -222,16 +222,21 @@ Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorE
         builder.Services,
         sp => sp.GetRequiredService<Tamma.Activities.Documents.EngineChannelPublisher>());
 
-// Story 39-10 (D1/D7) — crash re-entry. 39-11 has landed, so the REAL
-// LifecycleReEntryService (over IDocumentInstanceRepository + IEventRepository) is the
-// default. The Null seam stays a config-flag fallback: set Documents:ReEntryDisabled=true
+// Story 39-10 (D1/D7) — crash re-entry. 2026-08-13 (engine-driven E2E follow-up):
+// the ENGINE host default is the HTTP-backed read over the API's 39-11 surface —
+// the REAL LifecycleReEntryService needs IDocumentInstanceRepository/IEventRepository,
+// which only the API host composes (AddTammaData is API-only), so registering it
+// here was a first-resolution landmine; before the HTTP seam existed the engine
+// shipped with the Null seam permanently selected, which blinded the plan-review
+// shim's latest-accepted read and terminated every engine-driven cycle needs-human.
+// The Null seam stays a config-flag fallback: set Documents:ReEntryDisabled=true
 // to disable a bad latest-accepted read by DI swap WITHOUT touching the lifecycle.
 if (builder.Configuration.GetValue<bool>("Documents:ReEntryDisabled"))
     builder.Services.AddScoped<Tamma.Activities.Documents.ILifecycleReEntryService,
         Tamma.Activities.Documents.NullLifecycleReEntryService>();
 else
     builder.Services.AddScoped<Tamma.Activities.Documents.ILifecycleReEntryService,
-        Tamma.Activities.Documents.LifecycleReEntryService>();
+        Tamma.Activities.Documents.HttpLifecycleReEntryService>();
 
 // Round-2 review M3 — bridge that polls platform_events for new
 // TENANT.CLEANUP.REQUESTED rows and re-publishes the matching Elsa
@@ -407,6 +412,14 @@ builder.Services.AddScoped<Tamma.Activities.AgentDispatch.LocalExecutor>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.GitHubActionsExecutor>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.AgentExecutorFactory>();
 
+// 2026-08-13 (engine-driven E2E run 39) — the self-merge race buffer: a
+// merged-PR webhook that arrives BEFORE WaitForPRMerged registers its bookmark
+// is recorded here by PrMergedResumeEndpoint and consumed by the wait at
+// registration (reconcile-on-register). Singleton on purpose: the buffer
+// bridges an in-process ordering race; the durable 12h SLA stays the
+// restart-safe exception path.
+builder.Services.AddSingleton<Tamma.Activities.ADL.PendingPrMergeBuffer>();
+
 // Story 28-5 AC4 — optional pre-drop tenant backup (pg_dump). Disabled
 // by default; the DeleteTenantWorkflow's BackupTenantDatabaseActivity
 // reads this to decide whether to snapshot before DROP DATABASE.
@@ -427,6 +440,25 @@ builder.Services.AddSingleton<IErrorRedactor, ErrorRedactor>();
 builder.Services.Configure<ProviderAllowlistOptions>(
     builder.Configuration.GetSection("Security:ProviderAllowlist"));
 builder.Services.AddSingleton<ProviderAllowlist>();
+
+// 2026-08-13 (Epic 31 P5 follow-up) — the OPT-IN scripted LLM provider, engine
+// side. The engine never serves scripted responses (the responder lives in
+// Tamma.Api); all it does here is ALLOW-LIST the "scripted" key so the
+// LlmCallWorkflow provider chain can name it (Llm:DefaultProviderChain /
+// caller / agent-config chains — see LlmProviderChainHelper). Default: no-op.
+// Flag on + any SaaS/production signal ⇒ the engine REFUSES TO START (the same
+// structural guard as the API host).
+if (ScriptedProviderPosture.AssertAllowed(builder.Configuration))
+{
+    builder.Services.PostConfigure<ProviderAllowlistOptions>(o =>
+    {
+        if (!o.AdditionalProviders.Contains(
+                ScriptedProviderPosture.ProviderKey, StringComparer.OrdinalIgnoreCase))
+        {
+            o.AdditionalProviders.Add(ScriptedProviderPosture.ProviderKey);
+        }
+    });
+}
 
 // Story 32-5 (AC9) — the engine holds NO LLM provider key.
 //

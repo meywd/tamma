@@ -49,29 +49,29 @@ public class TaskReviewWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
-        var repository = builder.WithVariable<string>("Repository", "");
-        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
-        var tasksJson = builder.WithVariable<string>("TasksJson", "[]");
-        var planJson = builder.WithVariable<string>("PlanJson", "");
+        var repository = builder.WithVariable<string>("Repository", "").Persisted();
+        var issueNumber = builder.WithVariable<int>("IssueNumber", 0).Persisted();
+        var tasksJson = builder.WithVariable<string>("TasksJson", "[]").Persisted();
+        var planJson = builder.WithVariable<string>("PlanJson", "").Persisted();
 
         // Per-role review results
-        var architectReview = builder.WithVariable<string>("ArchitectReview", "{}");
-        var seniorDevReview = builder.WithVariable<string>("SeniorDevReview", "{}");
-        var developerReview = builder.WithVariable<string>("DeveloperReview", "{}");
-        var testerReview = builder.WithVariable<string>("TesterReview", "{}");
+        var architectReview = builder.WithVariable<string>("ArchitectReview", "{}").Persisted();
+        var seniorDevReview = builder.WithVariable<string>("SeniorDevReview", "{}").Persisted();
+        var developerReview = builder.WithVariable<string>("DeveloperReview", "{}").Persisted();
+        var testerReview = builder.WithVariable<string>("TesterReview", "{}").Persisted();
 
         // Aggregation
-        var allReviewsJson = builder.WithVariable<string>("AllReviewsJson", "[]");
-        var allApproved = builder.WithVariable<bool>("AllApproved", false);
+        var allReviewsJson = builder.WithVariable<string>("AllReviewsJson", "[]").Persisted();
+        var allApproved = builder.WithVariable<bool>("AllApproved", false).Persisted();
 
-        var tenantId = builder.WithVariable<string>("TenantId", "");
+        var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
 
         // Final outputs
-        var decision = builder.WithVariable<string>("Decision", "needsHuman");
-        var reviewNotes = builder.WithVariable<string>("ReviewNotes", "");
+        var decision = builder.WithVariable<string>("Decision", "needsHuman").Persisted();
+        var reviewNotes = builder.WithVariable<string>("ReviewNotes", "").Persisted();
 
         // Shared LLM result
-        var llmResult = builder.WithVariable<IDictionary<string, object>?>();
+        var llmResult = builder.WithVariable<IDictionary<string, object>?>().Persisted();
 
         // Role-variable mapping
         var roleVariables = new Dictionary<string, Variable<string>>

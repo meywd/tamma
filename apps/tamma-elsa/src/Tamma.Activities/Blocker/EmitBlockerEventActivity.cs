@@ -79,21 +79,21 @@ public class EmitBlockerEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? BlockerEvents.DiagnosedFailed;
-        var sessionId = SessionId.Get(context);
-        var storyId = StoryId.Get(context);
-        var juniorId = JuniorId.Get(context);
-        var tenantRaw = TenantId.Get(context);
+        var type = EventType.GetOrDefault(context) ?? BlockerEvents.DiagnosedFailed;
+        var sessionId = SessionId.GetOrDefault(context);
+        var storyId = StoryId.GetOrDefault(context);
+        var juniorId = JuniorId.GetOrDefault(context);
+        var tenantRaw = TenantId.GetOrDefault(context);
         var tenantId = BlockerEvents.ParseTenantId(tenantRaw);
-        var blockerType = BlockerType.Get(context);
-        var severity = Severity.Get(context);
-        var level = Level.Get(context);
-        var attempt = Attempt.Get(context);
-        var confidence = Confidence.Get(context);
-        var progressType = ProgressType.Get(context);
-        var resolutionSeconds = ResolutionTimeSeconds.Get(context);
+        var blockerType = BlockerType.GetOrDefault(context);
+        var severity = Severity.GetOrDefault(context);
+        var level = Level.GetOrDefault(context);
+        var attempt = Attempt.GetOrDefault(context);
+        var confidence = Confidence.GetOrDefault(context);
+        var progressType = ProgressType.GetOrDefault(context);
+        var resolutionSeconds = ResolutionTimeSeconds.GetOrDefault(context);
 
         // Metrics first — they must fire on the matching transition regardless of the
         // (best-effort) durable event append. Tenant tag uses the parsed canonical form
@@ -110,7 +110,8 @@ public class EmitBlockerEventActivity : Activity
             "Emitted {Type} for session {Session} story {Story} (level={Level}, attempt={Attempt})",
             type, sessionId, storyId, level, attempt);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     private static void RecordMetric(

@@ -69,7 +69,12 @@ public static class AgentResolverServiceCollectionExtensions
             sp.GetRequiredService<IHttpContextAccessor>(),
             sp.GetService<IOptions<DefaultPersonaOptions>>(),
             sp.GetRequiredService<ITenantAgentEnablementReader>(),
-            sp.GetService<ILogger<AgentRegistryService>>()));
+            sp.GetService<ILogger<AgentRegistryService>>(),
+            // 2026-08-13 — single-user service-plane principal fallback (the
+            // engine's claims-less mediation calls resolve the sole user, the
+            // same seam the autonomy gate uses). Optional: unregistered on
+            // hosts without the governance extension.
+            sp.GetService<Tamma.Api.Services.Actions.ISoleUserProvider>()));
 
         // Story 32-15 — the persona/public prompt seam over the Epic 27 store.
         services.AddScoped<IPersonaPromptResolver, PersonaPromptResolver>();

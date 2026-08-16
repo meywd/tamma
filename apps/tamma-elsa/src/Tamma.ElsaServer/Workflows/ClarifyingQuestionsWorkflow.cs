@@ -50,42 +50,42 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
         builder.Description = "Resolve requirement ambiguity via two clarification-lifecycle runs (questions → suspend → resolution) over the generic document lifecycle";
 
         // ── Inputs ─────────────────────────────────────────────────────
-        var sessionId       = builder.WithVariable<Guid>();
-        var issueId         = builder.WithVariable<string>();
-        var requirement     = builder.WithVariable<string>();
-        var repository      = builder.WithVariable<string>();
-        var issueNumber     = builder.WithVariable<int>();
-        var ambiguityContext = builder.WithVariable<string>();
-        var tenantId        = builder.WithVariable<string>("TenantId", "");
-        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+        var sessionId       = builder.WithVariable<Guid>().Persisted();
+        var issueId         = builder.WithVariable<string>().Persisted();
+        var requirement     = builder.WithVariable<string>().Persisted();
+        var repository      = builder.WithVariable<string>().Persisted();
+        var issueNumber     = builder.WithVariable<int>().Persisted();
+        var ambiguityContext = builder.WithVariable<string>().Persisted();
+        var tenantId        = builder.WithVariable<string>("TenantId", "").Persisted();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "").Persisted();
 
         // ── 39-10 re-entry position ────────────────────────────────────
-        var reEntryPositionJson = builder.WithVariable<string>();
-        var reEntryDocJson  = builder.WithVariable<string>();
-        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
-        var existingResolved = builder.WithVariable<bool>();
+        var reEntryPositionJson = builder.WithVariable<string>().Persisted();
+        var reEntryDocJson  = builder.WithVariable<string>().Persisted();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce").Persisted();
+        var existingResolved = builder.WithVariable<bool>().Persisted();
 
         // ── Run A / Run B state ────────────────────────────────────────
-        var runAResult      = builder.WithVariable<IDictionary<string, object>?>();
-        var runBResult      = builder.WithVariable<IDictionary<string, object>?>();
-        var runAAccepted    = builder.WithVariable<bool>();
-        var runBAccepted    = builder.WithVariable<bool>();
-        var questionsJson   = builder.WithVariable<string>("QuestionsJson", "{}");
-        var questionCount   = builder.WithVariable<int>();
-        var clarifiedJson   = builder.WithVariable<string>("ClarifiedJson", "{}");
-        var resolved        = builder.WithVariable<bool>();
-        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
-        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
-        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
+        var runAResult      = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var runBResult      = builder.WithVariable<IDictionary<string, object>?>().Persisted();
+        var runAAccepted    = builder.WithVariable<bool>().Persisted();
+        var runBAccepted    = builder.WithVariable<bool>().Persisted();
+        var questionsJson   = builder.WithVariable<string>("QuestionsJson", "{}").Persisted();
+        var questionCount   = builder.WithVariable<int>().Persisted();
+        var clarifiedJson   = builder.WithVariable<string>("ClarifiedJson", "{}").Persisted();
+        var resolved        = builder.WithVariable<bool>().Persisted();
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "").Persisted();
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "").Persisted();
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "").Persisted();
 
         // ── Input-gate outputs ─────────────────────────────────────────
-        var deliveryResult  = builder.WithVariable<ClarifyDeliveryResult>();
-        var inputReceived   = builder.WithVariable<bool>();
-        var inputTimedOut   = builder.WithVariable<bool>();
-        var answers         = builder.WithVariable<string>("Answers", "");
+        var deliveryResult  = builder.WithVariable<ClarifyDeliveryResult>().Persisted();
+        var inputReceived   = builder.WithVariable<bool>().Persisted();
+        var inputTimedOut   = builder.WithVariable<bool>().Persisted();
+        var answers         = builder.WithVariable<string>("Answers", "").Persisted();
 
         // ── Outputs ────────────────────────────────────────────────────
-        var outputStatus        = builder.WithVariable<string>();
+        var outputStatus        = builder.WithVariable<string>().Persisted();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable

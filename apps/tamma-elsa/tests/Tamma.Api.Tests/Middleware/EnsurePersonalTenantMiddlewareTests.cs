@@ -367,6 +367,145 @@ public class EnsurePersonalTenantMiddlewareTests
             "an already-existing tenant must NOT be re-provisioned on every request");
     }
 
+    // ── 2026-08-13 (engine-driven E2E): single-user SERVICE-PLANE binding ──
+    // The engine's mediated calls (llm/call, git callbacks, event drain)
+    // carry no user claim; in single-user mode their principal IS the sole
+    // user, and the middleware must bind (or mint) the personal tenant so
+    // tenant-resident reads (acceptance rules, document instances) resolve
+    // instead of throwing "requires an ambient tenant id" — which made the
+    // autonomy gate fail closed and 500 every engine LLM call.
+
+    private sealed class StubSoleUserProvider(Guid? id) : Tamma.Api.Services.Actions.ISoleUserProvider
+    {
+        public Task<Guid> GetSoleUserIdAsync(CancellationToken ct = default) =>
+            id is Guid g
+                ? Task.FromResult(g)
+                : throw new InvalidOperationException("no sole user");
+    }
+
+    private static DefaultHttpContext BuildAnonymousContext(string path)
+    {
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Path = path;
+        ctx.Response.Body = new MemoryStream();
+        return ctx;
+    }
+
+    [Test]
+    public async Task SingleUserMode_AnonymousServiceCall_BindsTheSoleUsersExistingTenant()
+    {
+        var userId = Guid.NewGuid();
+        var existingTenantId = Guid.NewGuid();
+        var ctx = BuildAnonymousContext("/api/v1/llm/call");
+        ctx.RequestServices = new ServiceCollection()
+            .AddSingleton<ITenantProvisioningService>(new FakeTenantProvisioningService())
+            .AddSingleton<Tamma.Api.Services.Actions.ISoleUserProvider>(
+                new StubSoleUserProvider(userId))
+            .BuildServiceProvider();
+
+        var tenantContext = new StubTenantContext();
+        var tenantRepo = new Mock<ITenantRepository>(MockBehavior.Strict);
+        var membershipRepo = new Mock<ITenantMembershipRepository>(MockBehavior.Loose);
+        var userRepo = new Mock<IUserRepository>(MockBehavior.Loose);
+        var events = new Mock<IEventRepository>(MockBehavior.Loose);
+        var modeProvider = new StubModeProvider(TammaMode.SingleUser);
+
+        membershipRepo
+            .Setup(r => r.GetUserTenantsAsync(userId))
+            .ReturnsAsync(new List<TenantMembership>
+            {
+                new()
+                {
+                    TenantId = existingTenantId,
+                    UserId = userId,
+                    Role = "owner",
+                    JoinedAt = DateTime.UtcNow.AddDays(-1),
+                },
+            });
+
+        var nextCalled = false;
+        var mw = new EnsurePersonalTenantMiddleware(_ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        });
+
+        await mw.InvokeAsync(
+            ctx, tenantContext, tenantRepo.Object, membershipRepo.Object,
+            userRepo.Object, events.Object, modeProvider,
+            NullLogger<EnsurePersonalTenantMiddleware>.Instance);
+
+        nextCalled.Should().BeTrue();
+        tenantContext.TenantId.Should().Be(existingTenantId,
+            "an anonymous service-plane call in single-user mode binds the sole "
+            + "user's personal tenant — the ambient home every tenant-resident "
+            + "read resolves against");
+    }
+
+    [Test]
+    public async Task SingleUserMode_AnonymousServiceCall_NoSoleUser_PassesThroughTenantless()
+    {
+        // Pre-setup deployment: no configured owner, empty users table — the
+        // request proceeds tenant-less exactly as before this branch landed.
+        var ctx = BuildAnonymousContext("/api/v1/llm/call");
+        ctx.RequestServices = new ServiceCollection()
+            .AddSingleton<Tamma.Api.Services.Actions.ISoleUserProvider>(
+                new StubSoleUserProvider(null))
+            .BuildServiceProvider();
+
+        var tenantContext = new StubTenantContext();
+        var tenantRepo = new Mock<ITenantRepository>(MockBehavior.Strict);
+        var membershipRepo = new Mock<ITenantMembershipRepository>(MockBehavior.Strict);
+        var userRepo = new Mock<IUserRepository>(MockBehavior.Strict);
+        var events = new Mock<IEventRepository>(MockBehavior.Strict);
+        var modeProvider = new StubModeProvider(TammaMode.SingleUser);
+
+        var nextCalled = false;
+        var mw = new EnsurePersonalTenantMiddleware(_ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        });
+
+        await mw.InvokeAsync(
+            ctx, tenantContext, tenantRepo.Object, membershipRepo.Object,
+            userRepo.Object, events.Object, modeProvider,
+            NullLogger<EnsurePersonalTenantMiddleware>.Instance);
+
+        nextCalled.Should().BeTrue();
+        tenantContext.TenantId.Should().BeNull();
+    }
+
+    [Test]
+    public async Task SaaSMode_AnonymousServiceCall_IsUntouched()
+    {
+        // The single-user service-plane binding must NOT leak into SaaS —
+        // the mode short-circuit stays first.
+        var ctx = BuildAnonymousContext("/api/v1/llm/call");
+
+        var tenantContext = new StubTenantContext();
+        var tenantRepo = new Mock<ITenantRepository>(MockBehavior.Strict);
+        var membershipRepo = new Mock<ITenantMembershipRepository>(MockBehavior.Strict);
+        var userRepo = new Mock<IUserRepository>(MockBehavior.Strict);
+        var events = new Mock<IEventRepository>(MockBehavior.Strict);
+        var modeProvider = new StubModeProvider(TammaMode.SaaS);
+
+        var nextCalled = false;
+        var mw = new EnsurePersonalTenantMiddleware(_ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        });
+
+        await mw.InvokeAsync(
+            ctx, tenantContext, tenantRepo.Object, membershipRepo.Object,
+            userRepo.Object, events.Object, modeProvider,
+            NullLogger<EnsurePersonalTenantMiddleware>.Instance);
+
+        nextCalled.Should().BeTrue();
+        tenantContext.TenantId.Should().BeNull();
+    }
+
     [Test]
     public async Task SingleUserMode_ProvisioningThrows_RequestFails()
     {

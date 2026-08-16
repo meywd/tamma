@@ -58,15 +58,15 @@ public class EmitResearchEventActivity : Activity
         _logger = logger;
     }
 
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var type = EventType.Get(context) ?? ResearchEvents.Failed;
-        var sessionId = SessionId.Get(context);
-        var issueId = IssueId.Get(context);
-        var tenantId = ResearchEvents.ParseTenantId(TenantId.Get(context));
-        var findingCount = FindingCount.Get(context);
-        var confidence = Confidence.Get(context);
-        var detail = Detail.Get(context);
+        var type = EventType.GetOrDefault(context) ?? ResearchEvents.Failed;
+        var sessionId = SessionId.GetOrDefault(context);
+        var issueId = IssueId.GetOrDefault(context);
+        var tenantId = ResearchEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        var findingCount = FindingCount.GetOrDefault(context);
+        var confidence = Confidence.GetOrDefault(context);
+        var detail = Detail.GetOrDefault(context);
 
         var evt = BuildTammaEvent(type, sessionId, issueId, tenantId, findingCount, confidence, detail);
         TammaEventEmitter.Emit(context, this, _logger, evt);
@@ -75,7 +75,8 @@ public class EmitResearchEventActivity : Activity
             "Emitted {Type} for research session {Session} issue {Issue} (findings={Count})",
             type, sessionId, issueId, findingCount);
 
-        return default;
+        await context.CompleteActivityAsync(); // 2026-08-13 — bare Activity does NOT auto-complete (see EmitEscalationEventActivity precedent); without this the workflow hangs here forever
+        return;
     }
 
     /// <summary>
