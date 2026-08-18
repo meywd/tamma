@@ -448,11 +448,33 @@ public class ApiKeyAuthHandlerTests
             .ReturnsAsync(new List<ApiKey> { installationRow });
     }
 
+    /// <summary>
+    /// The installation ENTITY id both issuance sites write into OwnerId. Using a real
+    /// Guid here matters: this fixture used to write "12345" — the GitHub installation id
+    /// shape, which production never stores — and the handler's ticket branch parsed
+    /// OwnerId as a long, so the mismatch cancelled out and the suite went green on a
+    /// path no real key could take.
+    /// </summary>
+    private static readonly Guid InstallationEntityId = Guid.NewGuid();
+
+    private const long GitHubInstallationId = 12345L;
+
+    /// <summary>Make the entity lookup resolve, as it does against a real database.</summary>
+    private void SeedInstallationEntity(DateTime? suspendedAt = null) =>
+        _instRepo.Setup(r => r.GetByEntityIdAsync(InstallationEntityId))
+            .ReturnsAsync(new GitHubInstallation
+            {
+                Id = InstallationEntityId,
+                InstallationId = GitHubInstallationId,
+                AccountLogin = "acme",
+                SuspendedAt = suspendedAt,
+            });
+
     private static ApiKey BuildInstallationRow(string rawKey, string storedPrefix) => new()
     {
         Id = Guid.NewGuid(),
         Scope = "installation",
-        OwnerId = "12345",
+        OwnerId = InstallationEntityId.ToString(),
         KeyHash = ApiKeyHasher.HashArgon2(rawKey),
         KeyPrefix = storedPrefix,
         Label = "installation-key",
@@ -466,11 +488,48 @@ public class ApiKeyAuthHandlerTests
     {
         var rawKey = ApiKeyHasher.NewKey();
         SeedArgon2PrefixScan(BuildInstallationRow(rawKey, ApiKeyHasher.Prefix(rawKey)));
+        SeedInstallationEntity();
 
-        var (result, _) = await RunAsync($"Bearer {rawKey}", allowLegacy: true);
+        var (result, ctx) = await RunAsync($"Bearer {rawKey}", allowLegacy: true);
 
         result.Succeeded.Should().BeTrue(
             "the stored KeyPrefix is exactly what ResolveByVerify computes from the raw key");
+
+        // The prefix fix alone was not enough: the ticket branch resolved OwnerId as a
+        // long, so a Guid OwnerId — the only shape production writes — failed here with
+        // "Invalid API key scope" AFTER the lookup succeeded. Asserting the resolved
+        // principal, not just Succeeded, is what makes this test see that.
+        ctx.GetAuthPrincipal().Should().BeOfType<InstallationAuthPrincipal>()
+            .Which.InstallationId.Should().Be(GitHubInstallationId,
+                "the principal carries the GitHub installation id, resolved from the entity row");
+    }
+
+    [Test]
+    public async Task InstallationKey_WhoseInstallationRowIsGone_IsRefused()
+    {
+        // The entity lookup is deliberately NOT seeded. This used to authenticate: the
+        // branch read `inst?.SuspendedAt`, so a null installation skipped the suspension
+        // check and still built a valid ticket.
+        var rawKey = ApiKeyHasher.NewKey();
+        SeedArgon2PrefixScan(BuildInstallationRow(rawKey, ApiKeyHasher.Prefix(rawKey)));
+
+        var (result, _) = await RunAsync($"Bearer {rawKey}", allowLegacy: true);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Message.Should().Be("Invalid API key scope");
+    }
+
+    [Test]
+    public async Task InstallationKey_ForASuspendedInstallation_IsRefused()
+    {
+        var rawKey = ApiKeyHasher.NewKey();
+        SeedArgon2PrefixScan(BuildInstallationRow(rawKey, ApiKeyHasher.Prefix(rawKey)));
+        SeedInstallationEntity(suspendedAt: DateTime.UtcNow);
+
+        var (result, _) = await RunAsync($"Bearer {rawKey}", allowLegacy: true);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Message.Should().Be("Installation is suspended");
     }
 
     [Test]
