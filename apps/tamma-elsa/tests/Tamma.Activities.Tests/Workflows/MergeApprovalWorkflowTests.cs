@@ -81,15 +81,20 @@ public class MergeApprovalWorkflowTests
             .ToList();
 
         fromGate.Should().NotBeEmpty();
+        // "TimedOut" added 2026-08-18 — the gate's durable approval SLA
+        // (Adl:MergeApprovalTimeoutMinutes, default 24h). It is a genuinely new outcome,
+        // not a widened assertion: before it the gate waited forever, pinning the cycle
+        // instance and one of the ADL's MaxConcurrent slots on a PR nobody answered.
         fromGate.Should().OnlyContain(c =>
             c.Source.Port == "Merge" || c.Source.Port == "Test" ||
-            c.Source.Port == "Reject" || c.Source.Port == "Invalid");
+            c.Source.Port == "Reject" || c.Source.Port == "Invalid" ||
+            c.Source.Port == "TimedOut");
     }
 
     [Test]
     public void EveryGateOutcome_IsRouted()
     {
-        foreach (var outcome in new[] { "Merge", "Test", "Reject", "Invalid" })
+        foreach (var outcome in new[] { "Merge", "Test", "Reject", "Invalid", "TimedOut" })
         {
             _flowchart.Connections.Any(c =>
                 c.Source.Activity.Id == "WaitMergeApproval" && c.Source.Port == outcome)

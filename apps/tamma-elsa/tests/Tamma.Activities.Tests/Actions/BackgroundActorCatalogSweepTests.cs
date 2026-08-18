@@ -78,8 +78,14 @@ public class BackgroundActorCatalogSweepTests
     }
 
     [Test]
-    public void The_hosted_service_count_is_pinned_at_33()
+    public void The_hosted_service_count_is_pinned_at_35()
     {
+        // 33 → 35 (autonomous-loop liveness, 2026-08-18): + AdlLoopWatchdogService and
+        // + OrphanedCycleRecoveryService (Tamma.ElsaServer.Workflows) — the out-of-band
+        // detector for a stopped adl-orchestrator loop, and the sweep that clears cycle
+        // instances a crash left mid-execution inside the non-durable agent wait.
+        // Catalogued as automation:adl-loop-watchdog-service and
+        // automation:orphaned-cycle-recovery-service.
         // 32 → 33 (Epic 31 P4 M3, 2026-08-08): + WebhookRegistrationStartupService
         // (Tamma.Api.Services.Webhooks.Registration) — the single-user startup
         // validation pass for webhook ingress; catalogued as
@@ -102,6 +108,6 @@ public class BackgroundActorCatalogSweepTests
         // GovernancePolicySnapshotPrimingService — both registered via
         // TryAddEnumerable in AddActionCatalogGovernance) +
         // PlatformTaskWorker = 29.
-        HostedServiceTypes().Should().HaveCount(33);
+        HostedServiceTypes().Should().HaveCount(35);
     }
 }

@@ -675,6 +675,18 @@ public static partial class ActionCatalog
         // Enabled=false (AC9), so cataloguing it changes nothing at runtime.
         Automation(BackgroundActor.TenantScheduledTriggerService, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Tenant scheduled-trigger service", "Fires tenant-scoped scheduled workflow dispatches at most once per (tenant, trigger, window).",
             "Tamma.ElsaServer.Workflows.TenantScheduledTriggerService"),
+        // 2026-08-18 — new members, autonomous-loop liveness. Mutating at Min for the
+        // same reason as TenantScheduledTriggerService: the watchdog only DISPATCHES
+        // adl-orchestrator, whose own work is separately governed by that workflow's
+        // catalog members, and it re-arms with the config the loop was already running.
+        Automation(BackgroundActor.AdlLoopWatchdogService, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "ADL loop watchdog", "Detects a stopped autonomous loop and re-arms adl-orchestrator with its live config.",
+            "Tamma.ElsaServer.Workflows.AdlLoopWatchdogService"),
+        // Destructive + irreversible: it CANCELS workflow instances. Only ever instances
+        // a host crash already stranded mid-execution (Running/Executing, no bookmark,
+        // stale past the window) — but a cancel cannot be undone, so it is catalogued
+        // honestly rather than as a sweeper.
+        Automation(BackgroundActor.OrphanedCycleRecoveryService, ActionGroup.PlatformAutomation, ActionRisk.Destructive, "Orphaned cycle recovery", "Terminates cycle instances a crash left mid-execution so they stop holding an ADL concurrency slot.",
+            "Tamma.ElsaServer.Workflows.OrphanedCycleRecoveryService", reversible: false),
         Automation(BackgroundActor.PoolWarmupService, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Pool warmup", "Warms tenant connection pools.",
             "Tamma.Api.Services.PoolWarmupService"),
         Automation(BackgroundActor.WorkflowSyncService, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Workflow sync", "Synchronizes workflow definitions.",
