@@ -305,7 +305,9 @@ public class ActionCatalogLevelTests
         // (automation:*, machinery by class).
         // 42 → 44 (Epic 31 P2): + the driver-cache invalidator + the
         // installation-bridge backfill (both automation:*, machinery by class).
-        ActionCatalog.All.Count(d => d.IsMachinery).Should().Be(47);
+        // 47 → 49 (2026-08-18: + AdlLoopWatchdogService and OrphanedCycleRecoveryService, the autonomous-loop watchdog and the orphaned-cycle sweeper — both IHostedService classes in Tamma.ElsaServer, machinery by class like every hosted service.) The dial-row count above stays 176:
+        // 225 catalog rows − 49 machinery, both sides growing by two.
+        ActionCatalog.All.Count(d => d.IsMachinery).Should().Be(49);
         ActionCatalog.All.Where(d => d.IsMachinery).Select(d => d.Key.ToWire())
             .Should().OnlyContain(k => !LevelTable.ContainsKey(k));
     }
