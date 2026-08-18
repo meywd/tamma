@@ -304,7 +304,20 @@ public class LlmCallWorkflow : WorkflowBase
         };
         resolvePrompt.SetDisplayText("Resolve Prompt");
 
-        // 2. Parse input and set up budget
+        // 2. Parse input and set up budget.
+        //
+        // SCOPE (stated exactly, 2026-08-18): this seeds a PER-CALL bucket. CapUsd comes
+        // from the caller's params.budgetCapUsd and SpentUsd starts at 0 on EVERY call, so
+        // the CheckBudget gate below can only ever stop a single call from overrunning its
+        // own cap — it never accumulates and is not a spend ceiling. Do not read it as one.
+        //
+        // The cumulative ceiling is owned server-side by RunningSpendBudgetGuard, which
+        // every model call passes through: CallLlmInlineActivity is a thin client over
+        // POST /api/v1/llm/call, and ManagedAgent.RunAsync consults that guard before the
+        // provider call and fails the run closed with BUDGET_EXCEEDED. It reads the PERIOD
+        // spend the API tracks, so it is the one check that can accumulate. Duplicating it
+        // here would add an HTTP round-trip per provider attempt inside the engine hot path
+        // and give two ceilings that can disagree — so this stays per-call by design.
         var setupBudget = new SetVariable
         {
             Id = "SetupBudget",
@@ -474,7 +487,10 @@ public class LlmCallWorkflow : WorkflowBase
                                         Name = "CB Closed",
                                         Activities =
                                         {
-                                            // ── 3b. Check budget ──
+                                            // ── 3b. Check the PER-CALL budget ──
+                                            // Per-call only — see SetupBudget above for why,
+                                            // and for where the cumulative ceiling actually
+                                            // lives (RunningSpendBudgetGuard, server-side).
                                             WithLabel(new If
                                             {
                                                 Id = "CheckBudget",

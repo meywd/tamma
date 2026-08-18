@@ -393,6 +393,18 @@ public class TddWorkflow : WorkflowBase
         };
         commitChanges.SetDisplayText("Commit Changes");
 
+        // Did the commit actually happen? CommitChangesActivity throws a typed
+        // TammaError on every non-commit path, so a faulted cycle normally never
+        // reaches here — but the graph must not depend on an activity throwing to
+        // avoid reporting success. Before this decision existed, SetCompletedOutputs
+        // set the workflow's `success` output to a literal true no matter what
+        // CommitResult said, so any commit failure that did NOT throw was reported
+        // as a completed TDD cycle. Null (activity completed without binding Result)
+        // takes the False edge too — fail closed.
+        var commitSucceededCheck = new FlowDecision(ctx => commitResultVar.Get(ctx)?.Success == true)
+        { Id = "CommitSucceededCheck", Name = "Commit Succeeded?" };
+        commitSucceededCheck.SetDisplayText("Commit Succeeded?");
+
         // --- UPDATE CODE INDEX (fire-and-forget) ---
         var updateCodeIndex = new UpdateCodeIndexActivity
         {
@@ -465,6 +477,23 @@ public class TddWorkflow : WorkflowBase
         };
         setSyntaxInvalidOutputs.SetDisplayText("Set Syntax Invalid Outputs");
 
+        // Dedicated failure sink for the commit step. SetFailedOutputs is the GREEN
+        // phase's sink and hardcodes a debug-iteration message, which would mislabel
+        // a commit failure; this one carries the commit's own error text through.
+        var setCommitFailedOutputs = new Sequence
+        {
+            Id = "SetCommitFailedOutputs",
+            Name = "Set Commit Failed Outputs",
+            Activities =
+            {
+                WithLabel(new SetOutput { Id = "SetOutputCommitFailed", Name = "Set Failed (Commit)", OutputName = new("success"), OutputValue = new(ctx => (object)false) }, "Set Failed (Commit)"),
+                WithLabel(new SetOutput { Id = "SetOutputFinishReasonCommit", Name = "Set Finish Reason", OutputName = new("finishReason"), OutputValue = new(ctx => (object)"commit-failed") }, "Set Finish Reason"),
+                WithLabel(new SetOutput { Id = "SetOutputCommitErrorMessage", Name = "Set Error Message", OutputName = new("errorMessage"), OutputValue = new(ctx =>
+                    (object)(commitResultVar.Get(ctx)?.ErrorMessage ?? "commit step reported no commit")) }, "Set Error Message")
+            }
+        };
+        setCommitFailedOutputs.SetDisplayText("Set Commit Failed Outputs");
+
         var finish = new Finish { Id = "FinishSuccess", Name = "Finish Success" };
         finish.SetDisplayText("Finish Success");
         var finishFailed = new Finish { Id = "FinishFailed", Name = "Finish Failed" };
@@ -511,11 +540,12 @@ public class TddWorkflow : WorkflowBase
                 revertRefactoring,
 
                 // Commit & Index
-                commitChanges,
+                commitChanges, commitSucceededCheck,
                 updateCodeIndex,
 
                 // Outputs
                 setCompletedOutputs, setFailedOutputs, setSyntaxInvalidOutputs,
+                setCommitFailedOutputs,
                 finish, finishFailed, finishSyntaxInvalid
             },
 
@@ -600,7 +630,10 @@ public class TddWorkflow : WorkflowBase
                 Connect(revertRefactoring, commitChanges),
 
                 // --- COMMIT & INDEX & OUTPUT ---
-                Connect(commitChanges, updateCodeIndex),
+                Connect(commitChanges, commitSucceededCheck),
+                ConnectOutcome(commitSucceededCheck, "True", updateCodeIndex),
+                ConnectOutcome(commitSucceededCheck, "False", setCommitFailedOutputs),
+                Connect(setCommitFailedOutputs, finishFailed),
                 Connect(updateCodeIndex, setCompletedOutputs),
                 Connect(setCompletedOutputs, finish),
 

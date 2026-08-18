@@ -175,7 +175,8 @@ public sealed class AgentDispatchMediationService : IAgentDispatchMediationServi
             if (probe is PlatformResult<byte[]>.Failed { Error: PlatformError.NotFound })
                 return await DispatchFailAsync(tenantId, repo, body.CorrelationId, dispatchedAt,
                     AgentDispatchFailureCodes.WorkflowNotFound,
-                    $"Workflow file '{workflowFile}' not found in {owner}/{name}. Add the Tamma agent workflow template to .github/workflows/.",
+                    $"Workflow file '{workflowFile}' not found in {owner}/{name}. Install the Tamma agent runner: " +
+                    "apps/tamma-elsa/runner/github-actions/install-runner.sh --repo <owner/repo> (see that directory's README).",
                     404, ct)
                     .ConfigureAwait(false);
         }

@@ -625,3 +625,66 @@ is null — an unreadable configuration is the ABSENCE of evidence, not evidence
 of a single-user deployment. An explicit `single-user` input is still honoured.
 Pinned by `AdlModeThreadingTests.ResolveMode_NoConfigAtAll_FailsSafeToBusiness_
 GateOn` and `…_RehydratedInstance_DoesNotSilentlyDisableTheProdGate`.
+
+## 37. `tdd-cycle` reported `success: true` no matter what the commit step said — and the retry orchestrator gates on exactly that field — FIXED
+
+`TddWorkflow` (`DefinitionId = "tdd-cycle"`) ends at a `SetCompletedOutputs`
+sequence whose first step is
+`SetOutput { OutputName = "success", OutputValue = true }` — a literal, never a
+read of `commitResultVar.Success`. The graph wired `CommitChanges` straight into
+`UpdateCodeIndex` → that terminal, so nothing stood between a failed commit and
+a reported-successful TDD cycle.
+
+This was not cosmetic. `tdd-with-debug-retry` — the orchestrator that owns the
+bounded debug-retry loop — dispatches `tdd-cycle` with `WaitForCompletion` and
+then gates on `result["success"]` in its `TddSuccess` FlowDecision. Because the
+sub-workflow always answered `true`, that gate was permanently satisfied: a
+commit failure could never route into the debug leg, and the retry bound the
+`TddWithDebugRetryWorkflowTests` suite carefully pins was unreachable through
+this path. Item 28's fix (a typed throw on every non-commit path) closes it in
+practice, since a faulted cycle never reaches a terminal at all — but reporting
+success must not depend on an activity remembering to throw.
+
+Contributing cause worth naming on its own: **`TddWorkflow` had no test file.**
+`TddWithDebugRetryWorkflowTests` exists and is thorough, and its thoroughness is
+what made the gap invisible — the orchestrator's guarantees were pinned, the
+sub-workflow's were not, and the orchestrator's guarantees depended on the
+sub-workflow's.
+
+**Fixed (2026-08-18):** a `CommitSucceededCheck` FlowDecision on
+`commitResultVar?.Success == true` now sits between `CommitChanges` and
+`UpdateCodeIndex`; `False` routes to a dedicated `SetCommitFailedOutputs` sink
+(`success=false`, `finishReason="commit-failed"`, the commit's own error text —
+the GREEN-phase sink hardcodes a debug-iteration message and would mislabel it)
+and on to `FinishFailed`. Null takes the `False` edge too. Pinned by the new
+`TddWorkflowCommitHonestyTests`, which asserts the success terminal is reachable
+through exactly one route: the gate's `True` port.
+
+## 38. The engine's in-workflow budget gate is per-call, not a ceiling — the activity that COULD accumulate is wired to nothing — DOCUMENTED, no code change
+
+`LlmCallWorkflow.SetupBudget` re-seeds `BudgetStateJson` from the caller's
+`params.budgetCapUsd` with `SpentUsd = 0` on every call, so its `CheckBudget`
+`If` node can only stop one call from overrunning its own cap. It never
+accumulates. The ADL loop passes no `budgetCapUsd` at all, which makes the gate
+inert there.
+
+Separately, `CheckBudgetActivity` — which *does* prefer the API's cumulative
+period spend over the local bucket, and which gained an `Adl:BudgetOwnerId`
+fallback on 2026-08-18 — **is not on any coded workflow graph.** It is registered
+in the Elsa activity registry (so it is selectable in Studio) and it has its own
+test file, but no `.cs` workflow constructs it. The fix that was applied to it
+therefore changes nothing at runtime today.
+
+**No code change, deliberately.** The cumulative ceiling is already owned, and
+enforced fail-closed, on the server: `CallLlmInlineActivity` is a thin client
+over `POST /api/v1/llm/call`, and `ManagedAgent.RunAsync` consults
+`RunningSpendBudgetGuard` before the provider call. That guard reads the period
+spend the API tracks and denies with `BUDGET_EXCEEDED`. Adding a second
+cumulative check inside the engine would put an HTTP round-trip on every provider
+attempt in the hot path and create two ceilings that can disagree. What was
+actually wrong was the *implication* — so `SetupBudget` and the `CheckBudget`
+node now state their scope exactly and name where the real ceiling lives.
+
+Open, for an owner: either wire `CheckBudgetActivity` onto the graph it was
+written for or delete it. A registered, tested, unreachable activity is the kind
+of thing a later reader trusts.
