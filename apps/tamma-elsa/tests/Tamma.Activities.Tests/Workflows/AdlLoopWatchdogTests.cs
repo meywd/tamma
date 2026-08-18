@@ -34,6 +34,18 @@ public class AdlLoopWatchdogTests
     private const string LiveConfig = """{"repository":"owner/repo","cooldownSeconds":3600}""";
 
     [Test]
+    public void ASuspendedInstance_CountsAsRunning()
+    {
+        // The watchdog's whole "a long cooldown is not a stall" argument rests on this:
+        // Elsa models suspension as a SUB-status, so an orchestrator parked on its
+        // cooldown timer bookmark is still WorkflowStatus.Running. If that ever changed,
+        // the liveness query would read every cooldown as a dead loop and re-arm on top
+        // of a healthy one. Pinned here rather than assumed in a comment.
+        Enum.GetNames<WorkflowStatus>().Should().BeEquivalentTo(new[] { "Running", "Finished" });
+        Enum.GetNames<WorkflowSubStatus>().Should().Contain("Suspended");
+    }
+
+    [Test]
     public async Task ALiveInstance_IsNotAStall()
     {
         var h = new Harness(live: 1, everRan: 1);
