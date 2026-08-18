@@ -405,7 +405,7 @@ and the loop fell through to its debug-retry leg — which "worked", masking the
 fact that the REAL implementer (the agent that commits actual code to the
 branch) never ran once. Fixed with the ctor-or-GetService idiom (run 38).
 
-## 28. The TDD fallback leg's `CommitChangesActivity` fabricates commit SHAs — `COMMIT.CREATED.SUCCESS` for commits that never happened
+## 28. The TDD fallback leg's `CommitChangesActivity` fabricates commit SHAs — `COMMIT.CREATED.SUCCESS` for commits that never happened — FABRICATION FIXED; the missing commit seam stays OPEN
 
 Two independent lies compose on the fallback path:
 (a) the rehydrated activity's `_configuration` is null, so
@@ -416,10 +416,41 @@ its `SimulateCommit` branch — emitting `COMMIT.CREATED.SUCCESS` with a
 (b) even with DI intact, the "real" path POSTs `action=git_commit` to
 `POST /api/engine/execute-task` — which is an LLM-proxy bridge that does not
 implement git operations at all. The activity cannot create a real commit by
-EITHER path. OPEN: the fallback TDD leg needs a real commit seam (the
-mediated contents API, or dispatching the agent executor); until then its
-green terminal must not be read as "code landed". The E2E's real-commit proof
-rides the agent-executor path (item 27), not this one.
+EITHER path. The E2E's real-commit proof rides the agent-executor path
+(item 27), not this one.
+
+**Fixed (2026-08-18) — the lies, not the gap.** `SimulateCommit` is deleted, so
+no `COMMIT.CREATED.SUCCESS` can carry an invented SHA any more. The activity
+takes the ctor-or-GetService fallback for `IConfiguration` (the null field was
+what made the fabricating branch the DEFAULT branch in a deployed engine), and
+every path that did not produce a commit now emits the loud
+`COMMIT.CREATED.FAILED` **and throws a typed `TammaError`** — `TDD.COMMIT.
+NO_FILES` / `NO_SEAM` / `NO_SHA` / `BRIDGE_FAILED`. Half of (b) is closed too:
+the bridge answer is accepted only when it carries something that IS a commit
+id (`TryReadCommitSha`), where the old code took HTTP 200 as proof and copied
+`commitSha` even when absent — i.e. `""`. `tdd-cycle` sets no incident
+strategy, so it runs on Elsa's default fault strategy and the throw faults the
+cycle. Pinned by `CommitHonestyTests`.
+
+**Still OPEN — the fallback TDD leg has no commit seam at all, and one was NOT
+built here.** Routing it through the Epic 31 mediation plane needs two things
+that do not exist: (1) a contents-write verb on `IGitPlatformClient` — it can
+read a file and create/delete a branch, but there is no create-commit /
+put-contents member on the interface, its three drivers, or the null seam;
+(2) file CONTENTS — `CommitChangesActivity` receives `TestFiles` /
+`ImplementationFiles` as PATHS only, so it could not populate such a call even
+if the verb existed. Adding both is a cross-cutting change to the platform
+abstraction, its drivers, and the mediated effect surface. Until it lands, the
+leg fails loudly instead of lying; its terminal is no longer green either way.
+
+**Adjacent, NOT fixed (needs the `tdd-cycle` graph, not the activity):**
+`TddWorkflow` wires `commitChanges → updateCodeIndex → setCompletedOutputs`,
+and `setCompletedOutputs` sets `success = true` unconditionally — it never
+reads `CommitResult.Success`. So before this change, even the pre-existing loud
+failure edges (empty change set, callback failure) still reported a successful
+TDD cycle. The typed throw closes the hole in practice (a faulted cycle never
+reaches that terminal), but the graph should route a commit failure to
+`setFailedOutputs` explicitly rather than depend on the activity throwing.
 
 ## 29. The self-merge race: the merged-PR webhook fires BEFORE `WaitForPRMerged` registers — the once-only delivery was lost
 
@@ -526,3 +557,40 @@ cold GitHub runner exceeded it, `RequireOrSkip` threw under
 OneTimeSetUp on an infrastructure hiccup (PR #512, 2026-08-14). **Fixed:**
 where docker is required (CI) the probe retries within a 60s budget; on a
 laptop it keeps the single fast probe so test discovery never stalls.
+
+## 36. The item-27/28 null-`_configuration` family also switched the PRODUCTION-DEPLOY APPROVAL GATE off — in exactly the deployments that need it — FIXED
+
+Same root as items 27/28, but the consequence is governance rather than audit.
+Both terms that engage `deployment-pipeline`'s `ProdApprovalNeeded` gate are
+computed in `DispatchCycleActivity.RunAsync` from its ctor-injected
+`IConfiguration`:
+
+- `mode` ← `ResolveMode` → `DeploymentMode.Resolve(Tamma:Mode,
+  hasTenantSharedSecret, hasControlPlaneConnection)`;
+- `requireProdApproval` ← `Deployment:RequireProdApproval`.
+
+`DispatchCycleActivity` already had the ctor-or-GetService fallback for
+`IWorkflowDispatcher` — but **not** for `_configuration`. On the rehydrated
+path (`[JsonConstructor]`, i.e. every execution in a deployed engine) that
+field is null, so both SaaS signals read as ABSENT, which `DeploymentMode.
+Resolve` treats as "no SaaS signal" → `dev` → gate OFF, and
+`Deployment:RequireProdApproval` fell to its `?? false`. A Business/SaaS
+deployment therefore threaded `mode="dev"` and promoted to production with no
+human — the exact inverse of the fail-safe the call site documents ("an
+absent/unknown mode resolves to business (REQUIRE approval)"). Nothing in the
+pipeline graph was wrong: the F1 work on `prodApprovalNeeded` / the
+`CheckActionGateActivity` edges is correct and stays as-is. The gate simply
+never saw a reason to fire.
+
+A shipped unit test pinned the defect under a self-contradicting name —
+`ResolveMode_NoConfigAtAll_FailsSafeToDev_ButExplicitSaaSWins` asserted
+`.Be(Dev)`, and "fails safe to dev" is the arm that deploys to production
+unattended. Same shape as the 2026-08-01 F1 note about a test asserting the
+opposite of its own name.
+
+**Fixed (2026-08-18):** `_configuration ?? context.GetService<IConfiguration>()`
+at both read sites, and `ResolveMode` now returns `business` when configuration
+is null — an unreadable configuration is the ABSENCE of evidence, not evidence
+of a single-user deployment. An explicit `single-user` input is still honoured.
+Pinned by `AdlModeThreadingTests.ResolveMode_NoConfigAtAll_FailsSafeToBusiness_
+GateOn` and `…_RehydratedInstance_DoesNotSilentlyDisableTheProdGate`.
