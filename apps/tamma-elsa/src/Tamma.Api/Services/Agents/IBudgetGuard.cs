@@ -10,8 +10,16 @@ namespace Tamma.Api.Services.Agents;
 /// endpoint checks BEFORE the provider call (fail-closed). It mirrors the
 /// existing <c>CheckBudgetActivity</c> contract — a cap of <c>0</c> (or less)
 /// means "unlimited" (always within budget); a positive cap that cannot be
-/// satisfied, or any error during evaluation, ⇒ DENY (the loop is never
-/// invoked). This is the named owner of the budget gate in the rule-2 sequence.
+/// satisfied ⇒ DENY (the loop is never invoked). This is the named owner of the
+/// budget gate in the rule-2 sequence.
+///
+/// <para>On an EVALUATION ERROR the posture is deny-if-capped, not deny-always:
+/// an implementation denies when it knows a cap exists and allows when it does
+/// not, because blocking every model call in a deployment that sets no caps at
+/// all would be a self-inflicted outage. This sentence used to promise DENY on
+/// "any error during evaluation", which no implementation has ever done — see
+/// <see cref="RunningSpendBudgetGuard"/> for how "knows a cap exists" is
+/// established, and for the one residual case that still allows.</para>
 ///
 /// <para>The minimal seam keeps the heavy <c>CheckBudgetActivity</c> /
 /// <c>TammaApiClient.GetBudgetAsync</c> integration out of the per-call hot
@@ -100,7 +108,10 @@ public sealed class PerCallBudgetGuard : IBudgetGuard
 ///
 /// <para><b>Fail-closed, scoped.</b> An evaluation error denies ONLY when a cap is
 /// actually configured; with no cap there is nothing to evaluate, and denying every model
-/// call because the diagnostics DB blinked would be a self-inflicted outage.</para>
+/// call because the diagnostics DB blinked would be a self-inflicted outage. "Configured"
+/// means EITHER cap: <c>Adl:MaxSpendUsd</c>, or a per-owner limit this process has
+/// previously read successfully. Consulting only the first fails open in SaaS, where
+/// <c>Adl:*</c> is not set and the cap lives in the store that just failed.</para>
 /// </summary>
 public sealed class RunningSpendBudgetGuard : IBudgetGuard
 {
@@ -108,6 +119,23 @@ public sealed class RunningSpendBudgetGuard : IBudgetGuard
     private readonly IConfiguration? _configuration;
     private readonly ILogger<RunningSpendBudgetGuard>? _logger;
     private int _unmeteredWarned;
+
+    /// <summary>
+    /// Owners observed to carry a positive budget limit. The limit lives in the
+    /// diagnostics store, so when a read fails there is no way to ask whether a cap
+    /// exists — this records the answer from the last read that worked, which is what
+    /// lets the failure path fail CLOSED for a capped owner. Registered as a singleton,
+    /// so the memory is process-wide; bounded by the number of distinct owners.
+    ///
+    /// <para>RESIDUAL, stated rather than papered over: an owner whose cap lives ONLY in
+    /// the store and whose very FIRST evaluation fails is still allowed through — nothing
+    /// has ever observed a limit for it. Closing that would mean denying every model call
+    /// for any tenant whenever the store blinks, including deployments that set no caps at
+    /// all, which is a self-inflicted outage. Set Adl:MaxSpendUsd to make the cap knowable
+    /// without a store read.</para>
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, bool>
+        _ownersWithAKnownLimit = new();
 
     public RunningSpendBudgetGuard(
         IDiagnosticsService diagnostics,
@@ -142,6 +170,15 @@ public sealed class RunningSpendBudgetGuard : IBudgetGuard
         try
         {
             var status = await _diagnostics.GetBudgetAsync(owner.Value, ct).ConfigureAwait(false);
+
+            // Remember that this owner HAS a cap, so a later evaluation failure knows to
+            // fail closed. See the catch block for why this has to be remembered rather
+            // than derived from configuration.
+            if (status.Limit > 0m)
+            {
+                _ownersWithAKnownLimit[owner.Value] = true;
+            }
+
             var decision = AdlSpendCeiling.Evaluate(status.Spent, status.Limit, ceiling);
             if (decision.Stop)
             {
@@ -154,10 +191,19 @@ public sealed class RunningSpendBudgetGuard : IBudgetGuard
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            var capConfigured = ceiling > 0m;
+            // "Is a cap configured?" has TWO sources, and this used to consult only one.
+            // Adl:MaxSpendUsd is the autonomous-loop key; the other cap is the per-owner
+            // budget limit set through PUT /api/providers/budget/{id} or Budget:LimitUsd,
+            // which lives in the very store that just failed — so it is unknowable here.
+            // A SaaS deployment has no reason to set Adl:*, so `ceiling` was 0 there and
+            // EVERY evaluation failure returned allow: a tenant with a $100 limit had its
+            // ceiling silently removed for as long as the diagnostics DB was unreachable,
+            // which is the opposite of what this class documents.
+            var capConfigured = ceiling > 0m || _ownersWithAKnownLimit.ContainsKey(owner.Value);
             _logger?.LogWarning(ex,
-                "Budget evaluation failed; {Posture}.",
-                capConfigured ? "DENYING (a ceiling is configured — fail closed)" : "allowing (no ceiling configured)");
+                "Budget evaluation failed for owner {Owner}; {Posture}.",
+                owner.Value,
+                capConfigured ? "DENYING (a cap is configured — fail closed)" : "allowing (no cap known)");
             return !capConfigured;
         }
     }

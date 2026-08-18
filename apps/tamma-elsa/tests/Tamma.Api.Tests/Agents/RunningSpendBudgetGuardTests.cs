@@ -117,6 +117,34 @@ public class RunningSpendBudgetGuardTests
             + "diagnostics blip would be a self-inflicted outage");
     }
 
+    [Test]
+    public async Task FailsClosed_WhenEvaluationBreaks_ForAnOwnerKnownToHaveAStoreSideCap()
+    {
+        // The SaaS shape: a tenant with a limit set through PUT /api/providers/budget/{id}
+        // and no Adl:MaxSpendUsd. "Is a cap configured" used to be read from that config key
+        // alone, so every evaluation failure allowed — the tenant's ceiling silently vanished
+        // for as long as the diagnostics store was unreachable.
+        var diagnostics = new Mock<IDiagnosticsService>();
+        var calls = 0;
+        diagnostics.Setup(d => d.GetBudgetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                calls++;
+                return calls == 1
+                    ? Task.FromResult(Status(spent: 10m, limit: 100m))
+                    : Task.FromException<BudgetStatus>(new InvalidOperationException("diagnostics down"));
+            });
+
+        var guard = new RunningSpendBudgetGuard(diagnostics.Object, Config(new Dictionary<string, string?>()));
+
+        (await guard.IsWithinBudgetAsync(Tenant, 0m)).Should().BeTrue(
+            "the first call reads cleanly and is well under the limit");
+
+        (await guard.IsWithinBudgetAsync(Tenant, 0m)).Should().BeFalse(
+            "the limit read a moment ago proves this owner IS capped, so an unreadable "
+            + "store must deny rather than hand out an uncapped call");
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static RunningSpendBudgetGuard Guard(
