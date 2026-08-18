@@ -259,10 +259,43 @@ public class HourlyAnalyticsRollupSchedulerTests
             new DateTimeOffset(2026, 04, 26, 12, 06, 00, TimeSpan.Zero),
             _ => new GrantingLease());
 
-        scheduler.TryValidateDataSeams(out var missing).Should().BeFalse(
+        scheduler.TryValidateDataSeams(out var missing, out var degraded).Should().BeFalse(
             "the engine host registers neither AddTammaData nor the CP context factory");
-        missing.Should().Contain("ITenantDbContextFactory");
+
+        // REQUIRED vs DEGRADED (2026-08-18, second pass). Only the control-plane factory
+        // is required: without it not even ComputePlatformRollupActivity — the FIRST step
+        // in the graph — can run. The tenant seam is degraded-only.
         missing.Should().Contain("IDbContextFactory<ControlPlaneDbContext>");
+        missing.Should().NotContain("ITenantDbContextFactory",
+            "a missing tenant data plane must not stop the platform-wide rollup");
+        degraded.Should().Contain("ITenantDbContextFactory");
+    }
+
+    [Test]
+    public void TryValidateDataSeams_True_ButDegraded_WhenOnlyTheTenantSeamIsAbsent()
+    {
+        // The engine's real shape once a control-plane connection is configured. The first
+        // version of this preflight refused to start here, which killed the platform-wide
+        // rollup that had been writing a platform_analytics_hourly row every hour.
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new Mock<IWorkflowDefinitionService>().Object);
+        services.AddScoped(_ => new Mock<IWorkflowDispatcher>().Object);
+        services.AddScoped(_ => new Mock<IDbContextFactory<Tamma.Data.ControlPlaneDbContext>>().Object);
+        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+
+        var scheduler = new HourlyAnalyticsRollupScheduler(
+            scopeFactory,
+            Options.Create(new HourlyAnalyticsRollupSchedulerOptions()),
+            new FakeTimeProvider(DateTimeOffset.UnixEpoch),
+            NullLogger<HourlyAnalyticsRollupScheduler>.Instance,
+            configuration: null,
+            leaderLock: new FakeLeaderLock(_ => new GrantingLease()));
+
+        scheduler.TryValidateDataSeams(out var missing, out var degraded).Should().BeTrue(
+            "the control-plane factory is present, so the platform-wide rollup can run");
+        missing.Should().BeEmpty();
+        degraded.Should().Contain("ITenantDbContextFactory",
+            "the caller still has to say, loudly and once, that per-tenant rollups are off");
     }
 
     [Test]

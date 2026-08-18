@@ -61,7 +61,27 @@ public sealed class FanOutTenantRollupsActivity : TammaAsyncActivity
         Logger ??= context.GetService<ILogger<FanOutTenantRollupsActivity>>();
 
         var cpFactory = context.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
-        var tenantFactory = context.GetRequiredService<ITenantDbContextFactory>();
+        // 2026-08-18 — DEGRADE, do not fault. This was GetRequiredService, so on a host
+        // that composes no tenant data plane (the engine: ITenantDbContextFactory ships
+        // from AddTammaData, which only Tamma.Api calls) the activity threw every hour and
+        // ContinueWithIncidentsStrategy buried it. Refusing to start the whole scheduler
+        // was the first attempt at a fix, but that also killed ComputePlatformRollupActivity
+        // — which runs FIRST, needs only the control-plane factory, and was succeeding every
+        // hour. The tenant fan-out is the only part that needs this seam, so it is the only
+        // part that skips.
+        var tenantFactory = context.GetService<ITenantDbContextFactory>();
+        if (tenantFactory is null)
+        {
+            Logger?.LogWarning(
+                "analytics.rollup.tenant_fanout_skipped hour={Hour} reason=no_tenant_data_plane — "
+                + "this host composes no ITenantDbContextFactory, so per-tenant rollups cannot run. "
+                + "The platform-wide rollup is unaffected.",
+                hour);
+            TenantsSuccess.Set(context, 0);
+            TenantsFailed.Set(context, 0);
+            return;
+        }
+
         var publisher = context.GetRequiredService<IPlatformEventPublisher>();
 
         // Target set: active tenants whose row existed at hour-end. The

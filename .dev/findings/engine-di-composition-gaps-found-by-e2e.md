@@ -688,3 +688,42 @@ node now state their scope exactly and name where the real ceiling lives.
 Open, for an owner: either wire `CheckBudgetActivity` onto the graph it was
 written for or delete it. A registered, tested, unreachable activity is the kind
 of thing a later reader trusts.
+
+## 39. A missing-seam preflight disabled the half of the analytics rollup that was working — FIXED
+
+Item 2's fix added a startup preflight to `HourlyAnalyticsRollupScheduler`: if
+`ITenantDbContextFactory` or `IDbContextFactory<ControlPlaneDbContext>` is absent,
+refuse to start rather than dispatch work that faults every hour. The reasoning was
+right and the effect was wrong.
+
+`ITenantDbContextFactory` ships only from `AddTammaData`, which `Tamma.ElsaServer`
+never calls — and the engine is the ONLY host that registers this scheduler. So the
+condition is permanently true on the only host that runs it, and the preflight did not
+make a doomed rollup loud; it turned the whole rollup off.
+
+What that cost: `hourly-analytics-rollup` runs `ComputePlatformRollupActivity` FIRST,
+and that step needs only `IDbContextFactory<ControlPlaneDbContext>` plus
+`IPlatformEventPublisher`, both of which the engine registers whenever a control-plane
+connection is configured. The engine's own log shows the sequence — `analytics.rollup.
+dispatched`, then `ANALYTICS.ROLLUP.PLATFORM.COMPLETED | success`, and only then
+`ANALYTICS.ROLLUP.FANOUT.FAILED`. The platform-wide `platform_analytics_hourly` row the
+ops dashboard reads was being written every hour, and the preflight stopped it.
+
+**Fixed (2026-08-18, second pass):**
+- the preflight now separates REQUIRED (the control-plane factory — without it not even
+  the first step runs) from DEGRADED (the tenant factory). Only a missing required seam
+  refuses to start; a missing tenant seam warns once and starts;
+- `FanOutTenantRollupsActivity` and `FanOutTenantDimensionalRollupsActivity` resolve the
+  tenant factory with `GetService` instead of `GetRequiredService`, and when it is absent
+  they log `…tenant_fanout_skipped` and complete with zero counts instead of throwing —
+  so the buried hourly fault that started all this is gone without taking the working
+  step with it.
+
+Pinned by `TryValidateDataSeams_True_ButDegraded_WhenOnlyTheTenantSeamIsAbsent`.
+
+**The general lesson, since this is the second time in one day:** a guard added to stop
+work that always fails must be scoped to the failing step. `ComputePlatformRollupActivity`
+and the tenant fan-out are separate steps with separate dependencies; gating both on the
+union of their seams turned a partial outage into a total one, and the "fix" would have
+read as working — one loud line at startup, then silence — for as long as nobody checked
+whether the hourly row was still appearing.

@@ -138,15 +138,28 @@ public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
         // per hour, buried by ContinueWithIncidentsStrategy. Refuse loudly
         // ONCE at startup instead: no doomed dispatches, and one actionable
         // line in the engine log rather than an hourly silent no-op.
-        if (!TryValidateDataSeams(out var missingSeams))
+        if (!TryValidateDataSeams(out var missingSeams, out var degradedSeams))
         {
             _logger.LogError(
-                "analytics.rollup.disabled_missing_data_seam missing={Missing} — this host does "
-                + "not register the data seams hourly-analytics-rollup's fan-out resolves, so every "
-                + "dispatch would fault at fan-out. Compose them on this host (Tamma.Api wires them "
-                + "via AddTammaData + AddTenantConnectionPool) or set HourlyAnalyticsRollup:Enabled=false.",
+                "analytics.rollup.disabled_missing_data_seam missing={Missing} — without the "
+                + "control-plane context factory not even the platform-wide rollup can run, so "
+                + "every dispatch would fault immediately. Compose it on this host or set "
+                + "HourlyAnalyticsRollup:Enabled=false.",
                 missingSeams);
             return;
+        }
+
+        if (degradedSeams.Length > 0)
+        {
+            // Loud, once, and NOT a refusal: the platform-wide rollup still runs and still
+            // writes its hourly row. Disabling the scheduler outright over this seam is what
+            // the first version of this check did, and it took the working half down with it.
+            _logger.LogWarning(
+                "analytics.rollup.degraded missing={Missing} — this host composes no tenant data "
+                + "plane, so PER-TENANT rollups will be skipped every hour. The platform-wide "
+                + "rollup is unaffected and still runs. Compose the tenant seam (Tamma.Api wires "
+                + "it via AddTammaData + AddTenantConnectionPool) to enable per-tenant rollups.",
+                degradedSeams);
         }
 
         _logger.LogInformation(
@@ -206,17 +219,35 @@ public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
     /// throwing resolution counts as missing — a seam that cannot be
     /// constructed is no better than an absent one.</para>
     /// </summary>
-    internal bool TryValidateDataSeams(out string missing)
+    /// <summary>
+    /// 2026-08-18 (second pass) — REQUIRED vs DEGRADED. This method used to demand BOTH
+    /// seams and the scheduler refused to start without them, which silently killed work
+    /// that was succeeding: <c>ComputePlatformRollupActivity</c> runs FIRST in the graph,
+    /// needs only the control-plane factory, and had been writing the platform-wide
+    /// <c>platform_analytics_hourly</c> row every hour on exactly the hosts this check
+    /// disabled. Only the tenant fan-out needs <see cref="ITenantDbContextFactory"/>, and
+    /// that fan-out now skips loudly on its own rather than faulting.
+    /// <paramref name="degraded"/> reports the tenant seam so startup can say so once.
+    /// </summary>
+    internal bool TryValidateDataSeams(out string missing) =>
+        TryValidateDataSeams(out missing, out _);
+
+    internal bool TryValidateDataSeams(out string missing, out string degraded)
     {
         var absent = new List<string>();
+        var reduced = new List<string>();
         using var scope = _scopeFactory.CreateScope();
 
-        if (Resolve<ITenantDbContextFactory>(scope) is null)
-            absent.Add(nameof(ITenantDbContextFactory));
+        // REQUIRED: without the control-plane factory not even the platform rollup can run.
         if (Resolve<IDbContextFactory<Tamma.Data.ControlPlaneDbContext>>(scope) is null)
             absent.Add("IDbContextFactory<ControlPlaneDbContext>");
 
+        // DEGRADED: the per-tenant fan-out cannot run, the rest of the graph can.
+        if (Resolve<ITenantDbContextFactory>(scope) is null)
+            reduced.Add(nameof(ITenantDbContextFactory));
+
         missing = string.Join(", ", absent);
+        degraded = string.Join(", ", reduced);
         return absent.Count == 0;
 
         static object? Resolve<T>(IServiceScope s)
