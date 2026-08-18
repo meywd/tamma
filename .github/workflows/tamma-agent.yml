@@ -1,0 +1,356 @@
+# tamma-runner-version: 1.0.0
+#
+# Tamma coding-agent runner — the CI side of Tamma's dispatch → monitor → collect
+# contract (story 40-1; contract originally specified by story 19-1).
+#
+# INSTALL: copy this file to .github/workflows/tamma-agent.yml in YOUR repository,
+# together with .github/tamma/scripts/{run-claude-code.sh,collect-results.sh}.
+# `apps/tamma-elsa/runner/github-actions/install-runner.sh` does that for you.
+# See apps/tamma-elsa/runner/github-actions/README.md for the required secrets.
+#
+# WHO OWNS WHAT
+#   SaaS (GitHub App):  this workflow runs in YOUR Actions, on YOUR runners, with
+#                       YOUR repo secrets. Tamma dispatches it and reads back only
+#                       the `tamma-result` artifact — it never sees your agent keys.
+#   Single-user:        this file is not used; the engine runs the agent locally
+#                       through LocalExecutor. See README.md § single-user.
+#
+# CONTRACT — do not rename inputs or result.json keys without changing Tamma:
+#   inputs        ← AgentDispatchService.BuildDispatchInputs (exactly these seven)
+#   result.json   → AgentResultArtifactParser.ParseResultJson
+#   artifact name → ActionsResultAggregator.ResultArtifactName ("tamma-result")
+# Both directions are pinned by RunnerContractTests (Tamma.Activities.Tests).
+
+name: Tamma Agent
+run-name: Tamma agent — issue #${{ inputs.issue_number }} (${{ inputs.task }})
+
+# Dispatch-only: Tamma triggers this through the GitHub App installation token.
+# It must never run on push/PR — an agent run is always a deliberate dispatch.
+on:
+  workflow_dispatch:
+    inputs:
+      # ── The seven inputs Tamma sends. All are strings: workflow_dispatch
+      # ── inputs are string-only over the API, so numbers arrive as text.
+      issue_number:
+        description: 'Issue number the agent is working on'
+        required: true
+        type: string
+      task:
+        description: 'Task type: implement, fix, debug, review, test'
+        required: true
+        type: string
+      plan_json:
+        description: 'Serialized plan slice from Tamma (JSON string)'
+        required: true
+        type: string
+      branch_name:
+        description: 'Branch to check out, work on, and push to'
+        required: true
+        type: string
+      tamma_session_id:
+        description: 'Tamma session id — correlates this run with the Tamma audit trail'
+        required: true
+        type: string
+      agent_provider:
+        description: 'Coding agent to run (claude-code, mock)'
+        required: false
+        default: 'claude-code'
+        type: string
+      agent_config_json:
+        description: 'Extra agent configuration (JSON string)'
+        required: false
+        default: '{}'
+        type: string
+
+# One run at a time per Tamma session: a duplicate dispatch of the same session
+# queues behind the first instead of racing it onto the same branch (AC5,
+# idempotency). Never cancel — a cancelled run would lose its result artifact.
+concurrency:
+  group: tamma-agent-${{ inputs.tamma_session_id }}
+  cancel-in-progress: false
+
+env:
+  # Bumped whenever this template's contract changes. Tamma reads it back to
+  # detect a stale copy in a user repo; the scripts carry the same marker.
+  TAMMA_RUNNER_VERSION: '1.0.0'
+  # Installed location of the runner scripts inside the consuming repo.
+  TAMMA_SCRIPTS_DIR: .github/tamma/scripts
+  # Scratch dir. Never committed — the prepare step adds it to .git/info/exclude.
+  TAMMA_DIR: .tamma
+
+jobs:
+  tamma-agent:
+    # Self-hosted runners: set the repo/org variable TAMMA_RUNNER_LABEL to your
+    # label (e.g. `self-hosted`). Unset → GitHub-hosted ubuntu-latest.
+    runs-on: ${{ vars.TAMMA_RUNNER_LABEL || 'ubuntu-latest' }}
+    # Whole-job budget. The agent step has its own, smaller budget so the collect
+    # + upload steps always have room to run inside this one.
+    timeout-minutes: ${{ fromJSON(vars.TAMMA_RUNNER_TIMEOUT_MINUTES || '30') }}
+    # Least privilege: write code to the branch, comment on the issue/PR. Nothing else.
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      # ── 1. Check out the branch Tamma already created for this issue. ──
+      # fetch-depth: 0 so collect-results.sh can diff against the branch point.
+      # persist-credentials keeps the token for the push in step 6.
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch_name }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      # ── 2. Fail loud on a stale or partial install. ──
+      # The scripts carry the same tamma-runner-version marker as this file; a
+      # mismatch means only half the template was upgraded.
+      - name: Verify runner installation
+        run: |
+          set -euo pipefail
+          echo "tamma-runner-version=${TAMMA_RUNNER_VERSION}"
+          echo "tamma-runner-version \`${TAMMA_RUNNER_VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+          for script in run-claude-code.sh collect-results.sh; do
+            path="${TAMMA_SCRIPTS_DIR}/${script}"
+            if [ ! -f "$path" ]; then
+              echo "::error::Missing ${path}. Reinstall the Tamma runner (runner/github-actions/README.md)."
+              exit 1
+            fi
+            chmod +x "$path"
+            version="$(sed -n 's/^# tamma-runner-version: //p' "$path" | head -n1)"
+            if [ "$version" != "$TAMMA_RUNNER_VERSION" ]; then
+              echo "::error::${path} is version '${version}' but this workflow is '${TAMMA_RUNNER_VERSION}'. Reinstall the runner as a set."
+              exit 1
+            fi
+          done
+          for tool in git jq; do
+            command -v "$tool" >/dev/null 2>&1 || echo "::warning::'${tool}' not found on this runner; results will be degraded."
+          done
+
+      # ── 3. Node is what the claude-code CLI runs on. ──
+      # Skipped for providers that do not need it (mock).
+      - name: Set up Node.js
+        if: inputs.agent_provider != 'mock'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # ── 4. Materialize the task for the agent. ──
+      # Every Tamma input is passed through `env` and never interpolated into the
+      # shell body: plan_json is untrusted, attacker-shaped text, and `${{ }}`
+      # inside a run block is a script-injection sink.
+      - name: Prepare workspace
+        id: prepare
+        env:
+          PLAN_JSON: ${{ inputs.plan_json }}
+          AGENT_CONFIG_JSON: ${{ inputs.agent_config_json }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          TASK: ${{ inputs.task }}
+          BRANCH_NAME: ${{ inputs.branch_name }}
+          SESSION_ID: ${{ inputs.tamma_session_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$TAMMA_DIR"
+
+          # Keep Tamma's scratch files out of the agent's commit. `git add -A`
+          # runs later; .git/info/exclude hides these untracked files from it
+          # without touching the repo's own .gitignore.
+          mkdir -p .git/info
+          grep -qxF "/${TAMMA_DIR}/" .git/info/exclude 2>/dev/null || echo "/${TAMMA_DIR}/" >> .git/info/exclude
+
+          printf '%s' "$PLAN_JSON" > "$TAMMA_DIR/plan.json"
+          printf '%s' "$AGENT_CONFIG_JSON" > "$TAMMA_DIR/agent-config.json"
+
+          # Record where the branch started so collect-results.sh reports the
+          # files THIS run changed rather than everything on the branch.
+          git rev-parse HEAD > "$TAMMA_DIR/base-sha"
+          date +%s > "$TAMMA_DIR/start-epoch"
+
+          {
+            echo "# Tamma task"
+            echo
+            echo "You are running headless in GitHub Actions on branch \`${BRANCH_NAME}\`."
+            echo "Tamma has already created the branch and (usually) the pull request."
+            echo
+            echo "- Issue: #${ISSUE_NUMBER}"
+            echo "- Task type: ${TASK}"
+            echo "- Tamma session: ${SESSION_ID}"
+            echo
+            echo "## Plan slice"
+            echo
+            echo '```json'
+            cat "$TAMMA_DIR/plan.json"
+            echo
+            echo '```'
+            echo
+            echo "## What to do"
+            echo
+            echo "1. Implement exactly the plan slice above — nothing outside it."
+            echo "2. Write or update tests first where the repo has a test suite (TDD)."
+            echo "3. Run the repo's tests and make them pass."
+            echo "4. Do NOT commit, push, or open a pull request — the runner does that."
+            echo "5. Do NOT print secrets or environment variables."
+          } > "$TAMMA_DIR/INSTRUCTIONS.md"
+
+          # Repo conventions, when the repo publishes them. Capped so a huge
+          # CLAUDE.md cannot blow the agent's context budget.
+          if [ -f CLAUDE.md ]; then
+            {
+              echo
+              echo "## Repository conventions (CLAUDE.md, truncated)"
+              echo
+              head -c 20000 CLAUDE.md
+            } >> "$TAMMA_DIR/INSTRUCTIONS.md"
+          fi
+
+      # ── 5. Run the coding agent. ──
+      # `continue-on-error` + a step timeout smaller than the job's: an agent crash
+      # or hang must NOT skip the collect/upload steps, or Tamma would see a run
+      # with no artifact and have to guess (AC5, fail-safe).
+      - name: Run coding agent
+        id: agent
+        continue-on-error: true
+        timeout-minutes: ${{ fromJSON(vars.TAMMA_AGENT_TIMEOUT_MINUTES || '25') }}
+        env:
+          # ── Agent credentials. Repo/org secrets only: they exist on this runner
+          # ── and nowhere else. Tamma never sends, receives, or logs them.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AGENT_PROVIDER: ${{ inputs.agent_provider }}
+          TAMMA_TASK: ${{ inputs.task }}
+          # Pin the agent CLI by setting the repo variable TAMMA_CLAUDE_CODE_VERSION
+          # (strongly recommended — 'latest' can change under you mid-epic).
+          TAMMA_CLAUDE_CODE_VERSION: ${{ vars.TAMMA_CLAUDE_CODE_VERSION || 'latest' }}
+          TAMMA_CLAUDE_EXTRA_ARGS: ${{ vars.TAMMA_CLAUDE_EXTRA_ARGS }}
+        run: |
+          set -euo pipefail
+          # Provider dispatch seam: one script per agent, all producing the same
+          # side effects (edited working tree + .tamma/{agent.log,tokens,agent-version}).
+          # Adding an agent = add a script + a case branch; nothing else moves.
+          case "$AGENT_PROVIDER" in
+            claude-code)
+              "${TAMMA_SCRIPTS_DIR}/run-claude-code.sh"
+              ;;
+            mock)
+              # Self-test provider: proves the dispatch → artifact → collect loop
+              # without spending tokens. Not for production use.
+              echo "mock agent: no repository changes made" | tee "$TAMMA_DIR/agent.log"
+              echo "0" > "$TAMMA_DIR/tokens"
+              echo "mock-1.0.0" > "$TAMMA_DIR/agent-version"
+              ;;
+            *)
+              # An unsupported provider is a fail-SAFE, not a crash: collect still
+              # runs and Tamma gets success:false with this reason.
+              echo "unsupported agent_provider: ${AGENT_PROVIDER}" | tee "$TAMMA_DIR/agent-error.txt"
+              exit 64
+              ;;
+          esac
+
+      # ── 6. Commit and push whatever the agent changed. ──
+      # The per-task call pushes to the branch Tamma already created; it never
+      # opens a pull request (the Tamma cycle does that before the task loop).
+      # Nothing changed → no commit, no push, no error.
+      - name: Commit and push
+        id: push
+        if: always() && steps.agent.outcome == 'success'
+        env:
+          BRANCH_NAME: ${{ inputs.branch_name }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          SESSION_ID: ${{ inputs.tamma_session_id }}
+          TASK: ${{ inputs.task }}
+        run: |
+          set -euo pipefail
+          git config user.name "tamma-agent[bot]"
+          git config user.email "tamma-agent[bot]@users.noreply.github.com"
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes produced by the agent — nothing to commit."
+            exit 0
+          fi
+
+          # Idempotency: a re-dispatch of the same session that produced no new
+          # edits stops above; one that did produce edits gets its own commit,
+          # trailer-tagged so a replay is identifiable in `git log`.
+          git add -A
+          git commit -m "tamma(${TASK}): issue #${ISSUE_NUMBER}" \
+                     -m "Tamma-Session: ${SESSION_ID}"
+          git push origin "HEAD:${BRANCH_NAME}"
+
+      # ── 7. Always emit the result artifact — this is the contract. ──
+      # Runs on success, on agent failure, and on cancellation/timeout. A run that
+      # uploads no artifact is indistinguishable from a lost run on Tamma's side.
+      - name: Collect results
+        if: always()
+        env:
+          TAMMA_TASK: ${{ inputs.task }}
+          TAMMA_ISSUE_NUMBER: ${{ inputs.issue_number }}
+          TAMMA_BRANCH_NAME: ${{ inputs.branch_name }}
+          TAMMA_SESSION_ID: ${{ inputs.tamma_session_id }}
+          TAMMA_AGENT_PROVIDER: ${{ inputs.agent_provider }}
+          TAMMA_AGENT_OUTCOME: ${{ steps.agent.outcome }}
+          TAMMA_PUSH_OUTCOME: ${{ steps.push.outcome }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$TAMMA_DIR"
+          chmod +x "${TAMMA_SCRIPTS_DIR}/collect-results.sh" 2>/dev/null || true
+          "${TAMMA_SCRIPTS_DIR}/collect-results.sh"
+
+      # ── 8. Hand the result to Tamma. ──
+      # Name and entry filename are read verbatim by ActionsResultAggregator.
+      # Retention is 1 day: Tamma collects within minutes and the artifact is
+      # metadata only, never source.
+      - name: Upload result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tamma-result
+          path: .tamma/result.json
+          retention-days: 1
+          if-no-files-found: error
+
+      # ── 9. Human-readable trace on the issue. Never fails the run. ──
+      - name: Post issue comment
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          SESSION_ID: ${{ inputs.tamma_session_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          command -v gh >/dev/null 2>&1 || { echo "gh CLI not available; skipping issue comment."; exit 0; }
+          [ -f "$TAMMA_DIR/result.json" ] || { echo "no result.json; skipping issue comment."; exit 0; }
+          success="$(jq -r '.success' "$TAMMA_DIR/result.json" 2>/dev/null || echo false)"
+          files="$(jq -r '.files_changed | length' "$TAMMA_DIR/result.json" 2>/dev/null || echo 0)"
+          err="$(jq -r '.error_message // ""' "$TAMMA_DIR/result.json" 2>/dev/null || echo '')"
+          if [ "$success" = "true" ]; then icon='OK'; else icon='FAILED'; fi
+          {
+            echo "**Tamma agent ${icon}** (session \`${SESSION_ID}\`) — success: \`${success}\`, files changed: \`${files}\`."
+            if [ -n "$err" ]; then echo; echo "> ${err}"; fi
+            echo
+            echo "[Run log](${RUN_URL}) · runner v${TAMMA_RUNNER_VERSION}"
+          } > "$TAMMA_DIR/comment.md"
+          gh issue comment "$ISSUE_NUMBER" --body-file "$TAMMA_DIR/comment.md" || \
+            echo "::warning::Could not post the issue comment (needs issues: write and an existing #${ISSUE_NUMBER})."
+
+      # ── 10. Reflect the agent's verdict in the run conclusion. ──
+      # Runs LAST so the artifact is already uploaded. Tamma trusts result.json
+      # over the conclusion, but a red run is what a human scanning Actions needs.
+      - name: Report agent failure
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f "$TAMMA_DIR/result.json" ]; then
+            echo "::error::No result.json was produced."
+            exit 1
+          fi
+          success="$(jq -r '.success' "$TAMMA_DIR/result.json" 2>/dev/null || echo false)"
+          if [ "$success" != "true" ]; then
+            echo "::error::Agent run failed: $(jq -r '.error_message // "no error_message"' "$TAMMA_DIR/result.json" 2>/dev/null || echo 'unreadable result.json')"
+            exit 1
+          fi
