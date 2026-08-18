@@ -63,16 +63,59 @@ DST_WORKFLOW="${TARGET_REPO}/.github/workflows/tamma-agent.yml"
 SHIPPED_VERSION="$(version_of "$SRC_WORKFLOW")"
 
 # ── State ──────────────────────────────────────────────────────────────────
-if [ ! -f "$DST_WORKFLOW" ]; then
-  STATE="absent"
-elif cmp -s "$SRC_WORKFLOW" "$DST_WORKFLOW"; then
-  STATE="current"
-elif [ "$(version_of "$DST_WORKFLOW")" != "$SHIPPED_VERSION" ]; then
-  STATE="drifted"
-else
-  # Same version marker, different bytes — someone edited it on purpose.
-  STATE="customized"
-fi
+# Evaluated across ALL THREE files, not the workflow alone. Two bugs came from
+# reading only the workflow (both fixed 2026-08-18):
+#
+#   1. Workflow present and current, scripts missing => STATE was "current", the
+#      installer exited 0 saying "Already up to date", and wrote nothing. That is
+#      unrecoverable from the customer's side: tamma-agent.yml's "Verify runner
+#      installation" step hard-fails every run with "Reinstall the Tamma runner",
+#      and reinstalling is exactly what did nothing.
+#   2. A locally edited run-claude-code.sh — the documented provider-dispatch
+#      extension point — was overwritten with no prompt whenever the WORKFLOW was
+#      absent or drifted, despite this script's own promise never to clobber a
+#      customized copy without --force.
+#
+# Per-file state, then the worst one wins: customized > drifted > absent > current.
+file_state() {
+  # $1 = source path, $2 = destination path
+  if [ ! -f "$2" ]; then
+    echo "absent"
+  elif cmp -s "$1" "$2"; then
+    echo "current"
+  elif [ "$(version_of "$2")" != "$SHIPPED_VERSION" ]; then
+    echo "drifted"
+  else
+    # Same version marker, different bytes — someone edited it on purpose.
+    echo "customized"
+  fi
+}
+
+STATE="current"
+CUSTOMIZED_FILES=""
+rank() {
+  case "$1" in
+    current) echo 0 ;;
+    absent) echo 1 ;;
+    drifted) echo 2 ;;
+    customized) echo 3 ;;
+  esac
+}
+
+note_state() {
+  # $1 = per-file state, $2 = human-readable path
+  [ "$1" = "customized" ] && CUSTOMIZED_FILES="${CUSTOMIZED_FILES} $2"
+  if [ "$(rank "$1")" -gt "$(rank "$STATE")" ]; then
+    STATE="$1"
+  fi
+}
+
+note_state "$(file_state "$SRC_WORKFLOW" "$DST_WORKFLOW")" ".github/workflows/tamma-agent.yml"
+for script in run-claude-code.sh collect-results.sh; do
+  note_state \
+    "$(file_state "${SOURCE_DIR}/scripts/${script}" "${TARGET_REPO}/.github/tamma/scripts/${script}")" \
+    ".github/tamma/scripts/${script}"
+done
 
 echo "tamma runner ${SHIPPED_VERSION} → ${TARGET_REPO}: ${STATE}"
 
@@ -88,13 +131,15 @@ case "$STATE" in
   current) echo "Already up to date."; exit 0 ;;
   drifted)
     if [ "$MODE" != "upgrade" ] && [ "$MODE" != "force" ]; then
-      echo "Installed copy is version '$(version_of "$DST_WORKFLOW")'. Re-run with --upgrade to replace it." >&2
+      echo "Installed runner is version '$(version_of "$DST_WORKFLOW")', shipped is '${SHIPPED_VERSION}'." >&2
+      echo "Re-run with --upgrade to replace it." >&2
       exit 3
     fi
     ;;
   customized)
     if [ "$MODE" != "force" ]; then
-      echo "Installed copy has been edited locally. Re-run with --force to overwrite it (your changes are lost)." >&2
+      echo "Edited locally:${CUSTOMIZED_FILES}" >&2
+      echo "Re-run with --force to overwrite (your changes are lost)." >&2
       exit 4
     fi
     ;;
