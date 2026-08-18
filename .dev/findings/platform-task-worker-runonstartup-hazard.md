@@ -68,3 +68,49 @@ Either of:
 Until then `PlatformTaskWorker:RunOnStartup` must stay unset/false in production; queued
 `tenant.move` rows wait harmlessly in `pending` and execute on the first deploy that enables the
 worker safely.
+
+## Re-verified 2026-08-18 — verdict unchanged, but most of the hazard list above is now stale
+
+Checked against the tree, not against this document. Three of the original hazards are closed and
+one new one has appeared; the flag stays `false`.
+
+**Closed.** Every type any producer in this repo enqueues now has a registered
+`IPlatformTaskHandler`, in the same composition that enables its producer:
+
+| type | producer | handler |
+|---|---|---|
+| `RETIRE_SECRET_VERSION` | `RetireScheduler` | `RetireSecretVersionTaskHandler` (+ a first-class `VisibleAt = runAfter` column, so a not-due retire is never claimed) |
+| `tenant.move` | `AdminTenantsEndpoints` | `MoveTenantTaskHandler` |
+| `plan.activate_scheduled` | `PlanAssignmentService` | `ActivateScheduledPlanTaskHandler` (`AddPlanAssignment`) |
+| `provisioning.tenant.v2` | `ProvisionTenantV2Dispatcher` | `ProvisionTenantV2TaskHandler` |
+| `provisioning.tenant`[`.deprovision`] | `CranlTenantProviderV2` | `CranlProvision`/`CranlDeprovisionPlatformTaskHandler`, registered by `AddTenantProviderCranl`, which only runs when Cranl is configured — i.e. exactly when those rows can exist |
+| `billing.customer.create` | `BillingTenantCreateHook` | `CreateBillingCustomerTaskHandler` |
+| `billing.webhook.followup` | `StripeWebhookProcessor` | `BillingWebhookFollowupTaskHandler` |
+
+Hazard 2 above (orphan-webhook fallback rows) no longer exists at all: `InstallationRouterService`
+enqueues nothing onto `platform_queued_tasks`.
+
+**Still open — and these are why the flag does not move.**
+
+1. **The "secondary wart" is now the primary blocker.** `ReserveNextAsync(workerId, ct)` is still
+   type-blind — no `types[]` overload was ever added. `RetireScheduler.SweepDueRetireTasksAsync`,
+   driven by the always-on `RetireSweepHostedService`, loops `while (true)` reserving until the
+   queue is empty and releases every non-retire row with
+   `FailAsync(..., maxRetries: int.MaxValue)`, which increments `RetryCount`. It never
+   dead-letters on its own, so today this is invisible. Switch the generic worker on and its
+   `MaxRetries = 5` is measured against a counter the other sweeper has been inflating once per
+   sweep: a `tenant.move` that sat in `pending` for a few sweeps dead-letters on its FIRST real
+   failure. The two reserve-loops also race for the same rows.
+2. **The V2 Cranl saga self-deadlocks on a single worker process.**
+   `ProvisionTenantV2Workflow.ExecuteAsync` block-polls (~30 min) for an inner `provisioning.tenant`
+   row it enqueues on this same queue, and `PlatformTaskWorker` processes one task at a time per
+   process. One process ⇒ the saga occupies the only slot, the inner task is never reserved, and the
+   provision times out to `Failed`. Enabling the worker there converts "provisioning never starts"
+   into "provisioning fails after half an hour" — strictly worse. Already recorded as a Known
+   constraint in CLAUDE.md; it is a reason not to blanket-enable, not a new discovery.
+
+**Prerequisite: unchanged.** Type-aware reservation — `ReserveNextAsync(workerId, types[], ct)` so
+the worker claims only types in its `IPlatformTaskHandlerRegistry` and the rotation sweeper claims
+only `RETIRE_SECRET_VERSION`. That single change closes (1) outright and reduces (2) to a Cranl-only
+process-count requirement. Nothing is stranded meanwhile: retires drain through their own always-on
+sweeper, and `tenant.move` rows wait in `pending`.
