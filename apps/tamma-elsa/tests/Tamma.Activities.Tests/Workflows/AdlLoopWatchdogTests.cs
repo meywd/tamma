@@ -6,12 +6,14 @@ using Elsa.Workflows.Runtime;
 using Elsa.Workflows.Runtime.Requests;
 using Elsa.Workflows.Runtime.Responses;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using NUnit.Framework;
 using Tamma.Activities.ADL;
+using Tamma.Activities.LlmCall;
 using Tamma.ElsaServer.Workflows;
 
 namespace Tamma.Activities.Tests.Workflows;
@@ -124,6 +126,17 @@ public class AdlLoopWatchdogTests
             "restarting a loop a human deliberately stopped would defeat the brake — and it is "
             + "not reported as a stall either, or ADL.LOOP.STALLED would fire every threshold "
             + "window for an intentional stop and stop meaning anything");
+
+        h.EventSink.Emitted(AdlLoopEvents.LoopStalled).Should().BeFalse(
+            "a loop stopped on purpose is not a stall");
+
+        // But it must not be silent. Reaching this branch means the loop is stopped AND no
+        // instance is live — the stop switch halts new dispatch while leaving the
+        // orchestrator running — so an operator who later clears the stop file needs the
+        // event stream to show the loop had died. Before this assertion existed the branch
+        // returned after one Information log line and emitted nothing at all.
+        h.EventSink.Emitted(AdlLoopEvents.LoopReArmSkipped).Should().BeTrue(
+            "an operator-stopped AND dead loop still leaves a durable error-status record");
     }
 
     [Test]
@@ -204,6 +217,19 @@ public class AdlLoopWatchdogTests
             var services = new ServiceCollection();
             services.AddSingleton(store.Object);
             services.AddSingleton(definitions.Object);
+            // EmitAsync resolves the concrete TammaApiClient and no-ops when it is absent,
+            // so without this every durable-event assertion would pass vacuously. The client
+            // is cheap to build over a stub handler, which records what was appended.
+            EventSink = new EventCapturingHandler();
+            services.AddSingleton(new TammaApiClient(
+                new HttpClient(EventSink),
+                NullLogger<TammaApiClient>.Instance,
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Tamma:ApiUrl"] = "http://tamma.test",
+                    })
+                    .Build()));
             // The dispatcher is resolved from the per-tick scope, not injected — see
             // AdlLoopWatchdogService's ctor doc for why holding it would be a captive
             // scoped dependency.
@@ -222,7 +248,28 @@ public class AdlLoopWatchdogTests
             _service.SetLastAliveForTests(T0);
         }
 
+        public EventCapturingHandler EventSink { get; private set; } = null!;
+
         public Task TickAsync() => _service.InvokeTickForTestsAsync(CancellationToken.None);
+    }
+
+    /// <summary>Records the event types appended through TammaApiClient.</summary>
+    private sealed class EventCapturingHandler : HttpMessageHandler
+    {
+        public List<string> Bodies { get; } = new();
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Content is not null)
+                Bodies.Add(await request.Content.ReadAsStringAsync(cancellationToken));
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}"),
+            };
+        }
+
+        public bool Emitted(string eventType) => Bodies.Any(b => b.Contains(eventType, StringComparison.Ordinal));
     }
 
     private sealed class StubStopSwitch(string? reason) : IAdlStopSwitch

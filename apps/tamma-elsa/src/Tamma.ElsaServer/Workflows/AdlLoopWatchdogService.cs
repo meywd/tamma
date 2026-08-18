@@ -82,11 +82,22 @@ public sealed class AdlLoopWatchdogOptions
 /// <para>A live instance stamps the liveness clock. When the clock has been stale for
 /// longer than <see cref="AdlLoopWatchdogOptions.StallThreshold"/>, the loop is stalled.</para>
 ///
-/// <para><b>Escalation.</b> Always LogCritical + a durable error-status
-/// <c>ADL.LOOP.STALLED</c> DCB event. Then re-arm (<c>ADL.LOOP.REARMED</c>) unless the
-/// operator stop switch is engaged, re-arm is disabled, or no config seed is available —
-/// each of which is itself recorded as <c>ADL.LOOP.REARM_SKIPPED</c> (error status: the
-/// loop is still down).</para>
+/// <para><b>Escalation.</b> A loop a human deliberately stopped is not a stall, so the
+/// two cases are reported differently — but BOTH are reported, and both durably:
+/// <list type="bullet">
+///   <item><description><b>Operator stop engaged</b> and no live instance: an error-status
+///     <c>ADL.LOOP.REARM_SKIPPED</c> carrying the stop reason. No <c>STALLED</c> event —
+///     that one has to keep meaning "this broke" or operators learn to ignore it. Note
+///     this state is not the ordinary stopped state: the stop switch halts new dispatch
+///     while leaving the orchestrator alive, so reaching here means the loop is stopped
+///     AND gone.</description></item>
+///   <item><description><b>Otherwise</b>: LogCritical + a durable error-status
+///     <c>ADL.LOOP.STALLED</c>, then re-arm (<c>ADL.LOOP.REARMED</c>) unless re-arm is
+///     disabled or no config seed is available — each recorded as
+///     <c>ADL.LOOP.REARM_SKIPPED</c>.</description></item>
+/// </list>
+/// Every path through a down loop leaves an error-status event behind; none exits on a
+/// log line alone.</para>
 ///
 /// <para>Re-arm is one-shot per stall: the liveness clock is stamped after a dispatch so a
 /// broken loop is not re-dispatched every poll interval.</para>
@@ -220,9 +231,26 @@ public sealed class AdlLoopWatchdogService : BackgroundService
         var stopReason = _stopSwitch.GetStopReason();
         if (stopReason is not null)
         {
+            // Not a STALLED event — that one has to keep meaning "this broke". But not
+            // silence either: the stop switch halts NEW dispatch while leaving the
+            // orchestrator running, so reaching here means the loop is BOTH operator-stopped
+            // AND actually gone. That is precisely the state a durable record is for. An
+            // operator who later clears the stop file, expecting the loop to resume, would
+            // otherwise find nothing in the event stream saying it had died — only one
+            // Information line in a rotating log. REARM_SKIPPED is the event the signal's own
+            // doc already names for "found a stall, deliberately did not re-arm".
+            var operatorDownMinutes = (int)down.TotalMinutes;
             _lastAliveUtc = now;
-            _logger.LogInformation(
-                "adl.loop.down_by_operator reason={Reason} — not reported as a stall.", stopReason);
+            _logger.LogWarning(
+                "adl.loop.down_by_operator reason={Reason} downMinutes={DownMinutes} — the loop is "
+                + "stopped AND no instance is live; not reported as a stall.",
+                stopReason, operatorDownMinutes);
+            await EmitAsync(scope, AdlLoopEvents.LoopReArmSkipped, "error", new Dictionary<string, object?>
+            {
+                ["reason"] = stopReason,
+                ["downMinutes"] = operatorDownMinutes,
+                ["operatorStopped"] = true,
+            }, ct).ConfigureAwait(false);
             return;
         }
 

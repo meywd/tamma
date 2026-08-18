@@ -32,9 +32,14 @@ public static class AdlLoopEvents
     public const string LoopReArmed = "ADL.LOOP.REARMED";
 
     /// <summary>
-    /// The watchdog found a stall but did NOT re-arm — because the operator stop switch
-    /// is engaged, or re-arm is disabled, or no config seed was available. Error status:
-    /// the loop is still down and a human has to act.
+    /// The watchdog found the loop down but did NOT re-arm it — because the operator stop
+    /// switch is engaged, or re-arm is disabled, or no config seed was available. Error
+    /// status: the loop is still down and a human has to act.
+    ///
+    /// <para>In the operator-stop case this is the ONLY event emitted — deliberately no
+    /// <see cref="LoopStalled"/>, since a loop someone stopped on purpose is not a stall.
+    /// It carries <c>operatorStopped=true</c> and the stop reason, so the two causes stay
+    /// distinguishable in the stream.</para>
     /// </summary>
     public const string LoopReArmSkipped = "ADL.LOOP.REARM_SKIPPED";
 
