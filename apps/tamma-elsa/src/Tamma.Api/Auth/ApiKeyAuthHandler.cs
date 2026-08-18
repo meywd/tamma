@@ -340,16 +340,16 @@ public class ApiKeyAuthHandler(
         // number of active rows per prefix is effectively 1.
         if (apiKey is null)
         {
-            var candidates = await apiKeyRepo.ListByScopeAsync("service");
+            var candidates = await apiKeyRepo.ListValidByScopeAsync("service");
             apiKey = ResolveByVerify(candidates, rawKey, keyPrefix);
             if (apiKey is null)
             {
-                var userCandidates = await apiKeyRepo.ListByScopeAsync("user");
+                var userCandidates = await apiKeyRepo.ListValidByScopeAsync("user");
                 apiKey = ResolveByVerify(userCandidates, rawKey, keyPrefix);
             }
             if (apiKey is null)
             {
-                var instCandidates = await apiKeyRepo.ListByScopeAsync("installation");
+                var instCandidates = await apiKeyRepo.ListValidByScopeAsync("installation");
                 apiKey = ResolveByVerify(instCandidates, rawKey, keyPrefix);
             }
         }

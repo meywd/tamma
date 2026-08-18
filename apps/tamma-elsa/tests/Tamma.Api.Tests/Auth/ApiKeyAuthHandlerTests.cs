@@ -128,9 +128,9 @@ public class ApiKeyAuthHandlerTests
             returned.KeyHash = sha;
         _apiKeyRepo.Setup(r => r.GetByHashAsync(sha))
             .ReturnsAsync(returned);
-        // ListByScopeAsync is used by the legacy fallback path to scan for
+        // ListValidByScopeAsync is used by the legacy fallback path to scan for
         // Argon2-format rows; Strict mock needs a default empty list.
-        _apiKeyRepo.Setup(r => r.ListByScopeAsync(It.IsAny<string>()))
+        _apiKeyRepo.Setup(r => r.ListValidByScopeAsync(It.IsAny<string>()))
             .ReturnsAsync(new List<ApiKey>());
     }
 
@@ -144,7 +144,7 @@ public class ApiKeyAuthHandlerTests
             returnedFromScrypt.KeyHash = scrypt;
         _apiKeyRepo.Setup(r => r.GetByHashAsync(sha)).ReturnsAsync(returnedFromSha);
         _apiKeyRepo.Setup(r => r.GetByHashAsync(scrypt)).ReturnsAsync(returnedFromScrypt);
-        _apiKeyRepo.Setup(r => r.ListByScopeAsync(It.IsAny<string>()))
+        _apiKeyRepo.Setup(r => r.ListValidByScopeAsync(It.IsAny<string>()))
             .ReturnsAsync(new List<ApiKey>());
     }
 
@@ -440,11 +440,11 @@ public class ApiKeyAuthHandlerTests
     {
         _apiKeyRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>()))
             .ReturnsAsync((ApiKey?)null);
-        _apiKeyRepo.Setup(r => r.ListByScopeAsync("service"))
+        _apiKeyRepo.Setup(r => r.ListValidByScopeAsync("service"))
             .ReturnsAsync(new List<ApiKey>());
-        _apiKeyRepo.Setup(r => r.ListByScopeAsync("user"))
+        _apiKeyRepo.Setup(r => r.ListValidByScopeAsync("user"))
             .ReturnsAsync(new List<ApiKey>());
-        _apiKeyRepo.Setup(r => r.ListByScopeAsync("installation"))
+        _apiKeyRepo.Setup(r => r.ListValidByScopeAsync("installation"))
             .ReturnsAsync(new List<ApiKey> { installationRow });
     }
 
@@ -545,6 +545,41 @@ public class ApiKeyAuthHandlerTests
 
         result.Succeeded.Should().BeFalse();
         result.Failure!.Message.Should().Be("Invalid API key");
+    }
+
+    [Test]
+    public async Task InstallationKey_InsideItsRotationGraceWindow_StillAuthenticates()
+    {
+        // RotateAsync stamps RevokedAt = now + 24h so dependent services can roll over
+        // without an outage — the TAMMA_API_KEY sitting in every customer repo's Actions
+        // secrets is exactly that case. But the candidate scan listed only RevokedAt == null
+        // rows, so a rotated key vanished from the only lookup path a used key has left
+        // (its first auth rehashes the row to per-key-salted Argon2, after which no hash
+        // lookup can find it). The documented grace period was unreachable in practice.
+        var rawKey = ApiKeyHasher.NewKey();
+        var row = BuildInstallationRow(rawKey, ApiKeyHasher.Prefix(rawKey));
+        row.RevokedAt = DateTime.UtcNow.AddHours(24);
+        SeedArgon2PrefixScan(row);
+        SeedInstallationEntity();
+
+        var (result, _) = await RunAsync($"Bearer {rawKey}", allowLegacy: true);
+
+        result.Succeeded.Should().BeTrue(
+            "a key whose RevokedAt is still in the future is inside its rotation grace window");
+    }
+
+    [Test]
+    public async Task InstallationKey_PastItsRevocationMoment_IsRefused()
+    {
+        var rawKey = ApiKeyHasher.NewKey();
+        var row = BuildInstallationRow(rawKey, ApiKeyHasher.Prefix(rawKey));
+        row.RevokedAt = DateTime.UtcNow.AddHours(-1);
+        SeedArgon2PrefixScan(row);
+        SeedInstallationEntity();
+
+        var (result, _) = await RunAsync($"Bearer {rawKey}", allowLegacy: true);
+
+        result.Succeeded.Should().BeFalse("the grace window has closed");
     }
 
     [Test]
