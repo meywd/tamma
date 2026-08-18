@@ -71,6 +71,22 @@ Without `gh` the issue comment is skipped (never fatal).
 6. Always writes `.tamma/result.json`, uploads it as the `tamma-result` artifact
    (1-day retention), comments on the issue, and fails the run if the agent failed.
 
+## Verify the install without spending tokens
+
+The `mock` provider exercises the whole loop — dispatch, prepare, collect, upload,
+comment — and makes no repository changes:
+
+```bash
+gh workflow run tamma-agent.yml --ref <your-branch> \
+  -f issue_number=1 -f task=implement -f plan_json='{}' \
+  -f branch_name=<your-branch> -f tamma_session_id=selftest-1 \
+  -f agent_provider=mock -f agent_config_json='{}'
+gh run download --name tamma-result   # expect a schema-valid result.json
+```
+
+A `mock` run reports `success: true` with `files_changed: []`. If it fails, the
+reason is in `result.json` — that is the same path Tamma reads.
+
 ## The contract (do not drift)
 
 Tamma sends exactly seven `workflow_dispatch` inputs — `issue_number`, `task`,
