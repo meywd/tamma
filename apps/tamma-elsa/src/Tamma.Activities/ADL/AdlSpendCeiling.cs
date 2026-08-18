@@ -57,11 +57,26 @@ public static class AdlSpendCeiling
     }
 
     /// <summary>
-    /// Decide when the spend could NOT be read. Stops only if a cap was configured —
-    /// see the fail-closed note on the type.
+    /// Decide when the budget owner IS known but its spend could not be read (transient
+    /// API failure, missing status). Stops only if a cap was configured — see the
+    /// fail-closed note on the type.
     /// </summary>
     public static Decision EvaluateUnknown(bool ceilingConfigured, string detail)
         => ceilingConfigured
             ? new Decision(true, $"spend unknown while a ceiling is configured — {detail}")
             : new Decision(false, string.Empty);
+
+    /// <summary>
+    /// Decide when there is no budget bucket to meter against at all — the default in a
+    /// single-user deployment, where no tenant is ever stamped on the workflow.
+    ///
+    /// <para>Deliberately NOT a stop. Stopping here would brick a fresh deployment on its
+    /// first tick with no in-band way to recover, which is the same class of silent
+    /// outage this lane exists to remove. Instead the tick continues and the
+    /// unenforceable ceiling is reported loudly — WARN plus
+    /// <c>ceilingEnforceable=false</c> on the <c>ADL.LIMITS.CHECK.COMPLETED</c> event —
+    /// so "the loop is running without a cap" is a queryable fact rather than an
+    /// assumption. Setting <see cref="BudgetOwnerKey"/> to a GUID turns the cap on.</para>
+    /// </summary>
+    public static Decision EvaluateNoBudgetOwner() => new(false, string.Empty);
 }

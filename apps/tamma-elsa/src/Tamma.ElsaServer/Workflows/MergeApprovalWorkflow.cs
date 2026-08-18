@@ -389,8 +389,19 @@ public class MergeApprovalWorkflow : WorkflowBase
                 ConnectOutcome(waitMerge, "Invalid", emitInvalid),
                 Connect(emitInvalid, emitEscalated),
 
+                // ── TimedOut → straight to the shared escalate terminal ──
+                // The gate's durable approval SLA (Adl:MergeApprovalTimeoutMinutes,
+                // default 24h) fired with nobody having decided. Before it existed this
+                // gate waited forever, pinning the cycle instance — and one of the ADL's
+                // MaxConcurrent slots — on a PR no human ever looked at. Routed to the
+                // SAME loud terminal as an invalid decision (outcome="escalated", which
+                // the cycle routes to reportError): an expired gate is a human-attention
+                // problem, never an implicit approval.
+                ConnectOutcome(waitMerge, "TimedOut", emitEscalated),
+
                 // Shared loud escalate terminal (invalid decision / failed merge /
-                // test-loop cap exceeded) → notify owners → escalate outputs → finish
+                // test-loop cap exceeded / expired approval SLA) → notify owners →
+                // escalate outputs → finish
                 Connect(emitEscalated, notifyEscalated),
                 Connect(notifyEscalated, escalateOutputs),
                 Connect(escalateOutputs, finish),

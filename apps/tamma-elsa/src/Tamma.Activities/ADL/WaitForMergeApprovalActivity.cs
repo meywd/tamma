@@ -4,6 +4,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Core;
 
@@ -28,7 +29,21 @@ namespace Tamma.Activities.ADL;
 ///   <item><description><c>Invalid</c> — unknown / empty decision. Emitted
 ///     instead of silently defaulting to "reject" (no-silent-failure rule); the
 ///     parent routes it to escalation / re-prompt.</description></item>
+///   <item><description><c>TimedOut</c> — nobody decided within the SLA. See below.</description></item>
 /// </list></para>
+///
+/// <para><b>Durable approval SLA.</b> The gate used to wait FOREVER: a merge nobody
+/// looked at pinned the cycle instance in <c>Running</c> for good, which also holds an ADL
+/// <c>MaxConcurrent</c> slot, so one forgotten PR could stop the loop dispatching anything
+/// else. It now arms a durable <c>context.DelayFor</c> bookmark alongside the decision
+/// bookmark — EF-persisted and re-armed by <c>Elsa.Scheduling</c>'s startup task, so a
+/// host restart inside the window does not drop it — at
+/// <c>Adl:MergeApprovalTimeoutMinutes</c> (default 1440 = 24h). Expiry takes the
+/// deterministic <c>TimedOut</c> edge, which the parent routes to the SAME escalate
+/// terminal an <c>Invalid</c> decision uses: a real, audited, terminal outcome rather than
+/// a hang. Whichever bookmark resumes first completes the activity and Elsa burns the
+/// other, so there is no stale double-resume. Same primitive and same rationale as
+/// <see cref="WaitForPRMergedActivity"/>'s merge SLA.</para>
 ///
 /// <para>Events: this is a <see cref="TammaOutcomeActivity"/> with
 /// <c>EventType = APPROVAL.GATE</c>, so the engine auto-emits
@@ -43,13 +58,29 @@ namespace Tamma.Activities.ADL;
     "Suspend workflow and wait for merge/test/reject decision",
     Kind = ActivityKind.Task
 )]
-[FlowNode("Merge", "Test", "Reject", "Invalid")]
+[FlowNode("Merge", "Test", "Reject", "Invalid", "TimedOut")]
 public class WaitForMergeApprovalActivity : TammaOutcomeActivity
 {
     /// <summary>Recognised decisions (case-insensitive). Anything else → <c>Invalid</c>.</summary>
     public const string DecisionMerge = "merge";
     public const string DecisionTest = "test";
     public const string DecisionReject = "reject";
+
+    /// <summary>Canonical token surfaced on <see cref="Decision"/> when the SLA expires.</summary>
+    public const string DecisionTimedOut = "timed_out";
+
+    /// <summary>Config key for the approval SLA.</summary>
+    public const string TimeoutConfigKey = "Adl:MergeApprovalTimeoutMinutes";
+
+    /// <summary>
+    /// Default merge-approval SLA in minutes when <see cref="TimeoutConfigKey"/> is unset.
+    /// 24h — one full working day for a human to look at a PR, so a weekend or an
+    /// overnight review never trips it spuriously, while an abandoned gate still reaches a
+    /// terminal within a day instead of holding a concurrency slot indefinitely.
+    /// </summary>
+    public const int DefaultTimeoutMinutes = 1440;
+
+    private readonly IConfiguration? _configuration;
 
     public override string? EventType => MergeApprovalEvents.GatePrefix;
 
@@ -102,9 +133,12 @@ public class WaitForMergeApprovalActivity : TammaOutcomeActivity
     [JsonConstructor]
     public WaitForMergeApprovalActivity() { }
 
-    public WaitForMergeApprovalActivity(ILogger<WaitForMergeApprovalActivity> logger)
+    public WaitForMergeApprovalActivity(
+        ILogger<WaitForMergeApprovalActivity> logger,
+        IConfiguration? configuration = null)
     {
         Logger = logger;
+        _configuration = configuration;
     }
 
     /// <summary>
@@ -163,7 +197,48 @@ public class WaitForMergeApprovalActivity : TammaOutcomeActivity
                 IncludeActivityInstanceId = false,
             });
 
+        // Durable approval SLA — a DelayFor (Delay) bookmark, NOT the in-memory
+        // IWorkflowScheduler: Elsa.Scheduling's startup task re-arms it after a host
+        // restart, which an in-process timer would silently lose inside a 24h window.
+        var slaMinutes = ResolveTimeoutMinutes(context);
+        context.DelayFor(TimeSpan.FromMinutes(slaMinutes), OnTimeoutAsync);
+
+        Logger?.LogInformation(
+            "Merge approval gate armed for PR #{PrNumber}; durable SLA at +{SlaMinutes}min",
+            prNumber, slaMinutes);
+
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// SLA in minutes: <see cref="TimeoutConfigKey"/>, else
+    /// <see cref="DefaultTimeoutMinutes"/>. Floored at 1 so a misconfigured 0 cannot arm a
+    /// zero-length delay that fires before a human could possibly answer.
+    /// </summary>
+    private int ResolveTimeoutMinutes(ActivityExecutionContext context)
+    {
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+        var minutes = configuration?.GetValue<int?>(TimeoutConfigKey) ?? DefaultTimeoutMinutes;
+        return Math.Max(1, minutes);
+    }
+
+    /// <summary>
+    /// Durable timeout path: nobody decided within the SLA. Takes the deterministic
+    /// <c>TimedOut</c> edge — which the parent routes to the shared escalate terminal — so
+    /// the gate reaches an audited terminal instead of pinning the cycle (and an ADL
+    /// concurrency slot) forever. The still-armed decision bookmark is burned on completion.
+    /// </summary>
+    private async ValueTask OnTimeoutAsync(ActivityExecutionContext context)
+    {
+        Decision.Set(context, DecisionTimedOut);
+        Feedback.Set(context, "no merge decision was made within the approval SLA");
+        Approver.Set(context, (string?)null);
+
+        Logger?.LogWarning(
+            "Merge approval SLA expired (durable timeout) for PR #{PrNumber} — taking the TimedOut edge",
+            PrNumber.Get(context));
+
+        await context.CompleteActivityWithOutcomesAsync("TimedOut");
     }
 
     private async ValueTask OnMergeDecisionAsync(ActivityExecutionContext context)

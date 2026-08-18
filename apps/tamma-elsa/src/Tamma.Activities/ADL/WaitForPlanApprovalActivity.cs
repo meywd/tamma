@@ -4,6 +4,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.ADL.Models;
 using Tamma.Activities.Core;
@@ -21,6 +22,21 @@ namespace Tamma.Activities.ADL;
 ///   - Approved: plan accepted
 ///   - Rejected: plan rejected, cycle should end
 ///   - EditRequested: plan needs revision, loop back to plan generation
+///   - TimedOut: nobody decided within the approval SLA
+///
+/// <para><b>Durable approval SLA.</b> The gate had no timeout: an unanswered plan pinned
+/// the instance in <c>Running</c> forever. It now arms a <c>context.DelayFor</c> bookmark
+/// (EF-persisted, re-armed by <c>Elsa.Scheduling</c>'s startup task, so a host restart
+/// inside the window does not drop it) at <c>Adl:PlanApprovalTimeoutMinutes</c>
+/// (default 1440 = 24h) and completes <c>TimedOut</c> with a
+/// <c>PLAN_APPROVAL.DECISION.TIMED_OUT</c> DCB event. A timeout is a REJECTION of the
+/// plan for routing purposes — never an implicit approval — so a parent that has not yet
+/// wired the <c>TimedOut</c> edge still cannot auto-proceed on an unanswered gate.</para>
+///
+/// <para><b>Not currently in any workflow graph.</b> No workflow constructs this activity
+/// today (the cycle's human gate is the merge-approval sub-workflow), so the SLA is armed
+/// for whoever wires the plan gate rather than fixing a live hang. Recorded here so the
+/// next wiring does not have to rediscover it.</para>
 ///
 /// <para>Events (Story 4-6): emits <c>PLAN_APPROVAL.REQUESTED</c> at the RAISE point
 /// (when the gate suspends on its bookmark) and a <c>PLAN_APPROVAL.DECISION.*</c> event on
@@ -35,10 +51,21 @@ namespace Tamma.Activities.ADL;
     "Suspend workflow and wait for human approval of the generated plan",
     Kind = ActivityKind.Task
 )]
-[FlowNode("Approved", "Rejected", "EditRequested")]
+[FlowNode("Approved", "Rejected", "EditRequested", "TimedOut")]
 public class WaitForPlanApprovalActivity : Activity
 {
+    /// <summary>Config key for the plan-approval SLA.</summary>
+    public const string TimeoutConfigKey = "Adl:PlanApprovalTimeoutMinutes";
+
+    /// <summary>
+    /// Default plan-approval SLA in minutes when <see cref="TimeoutConfigKey"/> is unset.
+    /// 24h, matching <see cref="WaitForMergeApprovalActivity.DefaultTimeoutMinutes"/> —
+    /// one working day, so an overnight or weekend review never trips it spuriously.
+    /// </summary>
+    public const int DefaultTimeoutMinutes = 1440;
+
     private readonly ILogger<WaitForPlanApprovalActivity>? _logger;
+    private readonly IConfiguration? _configuration;
 
     [Input(Description = "Issue number for bookmark identification")]
     public Input<int> IssueNumber { get; set; } = default!;
@@ -59,9 +86,12 @@ public class WaitForPlanApprovalActivity : Activity
     [JsonConstructor]
     public WaitForPlanApprovalActivity() { }
 
-    public WaitForPlanApprovalActivity(ILogger<WaitForPlanApprovalActivity> logger)
+    public WaitForPlanApprovalActivity(
+        ILogger<WaitForPlanApprovalActivity> logger,
+        IConfiguration? configuration = null)
     {
         _logger = logger;
+        _configuration = configuration;
     }
 
     protected override void Execute(ActivityExecutionContext context)
@@ -88,6 +118,51 @@ public class WaitForPlanApprovalActivity : Activity
                 Callback = OnApprovalReceivedAsync,
                 AutoBurn = true
             });
+
+        // Durable approval SLA — a DelayFor (Delay) bookmark, NOT the in-memory
+        // IWorkflowScheduler: Elsa.Scheduling's startup task re-arms it after a host
+        // restart, which an in-process timer would silently lose inside a 24h window.
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+        var slaMinutes = Math.Max(1,
+            configuration?.GetValue<int?>(TimeoutConfigKey) ?? DefaultTimeoutMinutes);
+        context.DelayFor(TimeSpan.FromMinutes(slaMinutes), OnTimeoutAsync);
+
+        _logger?.LogInformation(
+            "Plan approval gate armed for issue #{IssueNumber}; durable SLA at +{SlaMinutes}min",
+            issueNumber, slaMinutes);
+    }
+
+    /// <summary>
+    /// Durable timeout path: nobody decided within the SLA. Emits a distinct
+    /// <c>PLAN_APPROVAL.DECISION.TIMED_OUT</c> error-status event (so "nobody looked" is
+    /// not filed as "a human said no") and takes the <c>TimedOut</c> edge. The recorded
+    /// decision is <see cref="ApprovalDecision.Reject"/> — fail-closed, so a parent that
+    /// reads the result JSON can never treat an expired gate as an approval.
+    /// </summary>
+    private async ValueTask OnTimeoutAsync(ActivityExecutionContext context)
+    {
+        var issueNumber = IssueNumber.Get(context);
+        var tenantId = PlanApprovalEvents.ParseTenantId(TenantId.GetOrDefault(context));
+        const string feedback = "no plan decision was made within the approval SLA";
+
+        var result = new ApprovalResult
+        {
+            Decision = ApprovalDecision.Reject,
+            Feedback = feedback,
+        };
+        ApprovalResultJson.Set(context, System.Text.Json.JsonSerializer.Serialize(result));
+        EditedPlanJson.Set(context, (string?)null);
+
+        _logger?.LogWarning(
+            "Plan approval SLA expired (durable timeout) for issue #{IssueNumber} — taking the TimedOut edge",
+            issueNumber);
+
+        TammaEventEmitter.Emit(context, this, _logger,
+            BuildTammaEvent(
+                PlanApprovalEvents.DecisionTimedOut, issueNumber, tenantId,
+                decision: "timed_out", approvedBy: null, feedback: feedback));
+
+        await context.CompleteActivityWithOutcomesAsync("TimedOut");
     }
 
     private async ValueTask OnApprovalReceivedAsync(ActivityExecutionContext context)

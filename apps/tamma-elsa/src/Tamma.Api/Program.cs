@@ -671,8 +671,17 @@ builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IProviderMarkupEngine
     Tamma.Api.Services.Agents.PassthroughProviderMarkupEngine>();
 builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IUsageEmitter,
     Tamma.Api.Services.Agents.NullUsageEmitter>();
-builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IBudgetGuard,
-    Tamma.Api.Services.Agents.PerCallBudgetGuard>();
+// The budget gate now reads the tenant's RUNNING period spend instead of waving every
+// call through: PerCallBudgetGuard's own doc named "consult running tenant spend" as the
+// 32-9 follow-on, and until it landed nothing in the request path could stop the
+// autonomous loop spending. Same two caps as the loop's dispatch ceiling
+// (account limit + Adl:MaxSpendUsd) so a deployment cannot be capped in one place and
+// uncapped in the other.
+builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IBudgetGuard>(sp =>
+    new Tamma.Api.Services.Agents.RunningSpendBudgetGuard(
+        sp.GetRequiredService<Tamma.Api.Services.Diagnostics.IDiagnosticsService>(),
+        sp.GetService<IConfiguration>(),
+        sp.GetService<ILogger<Tamma.Api.Services.Agents.RunningSpendBudgetGuard>>()));
 builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.ILlmCallResponseMapper,
     Tamma.Api.Services.Agents.LlmCallResponseMapper>();
 
