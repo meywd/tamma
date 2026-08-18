@@ -1,6 +1,11 @@
 # Story 34-3: BYOK vs Platform-Provided Pricing Mode (per-provider mode selection)
 
-Status: drafted
+Status: done
+<!-- Flipped drafted -> done 2026-08-18. The deliverable named in the acceptance criteria
+     was located in apps/tamma-elsa/src (and its suites in apps/tamma-elsa/tests) before this
+     header was changed — not taken from a changelog. The per-story evidence is recorded
+     inline on this story's line in docs/sprint-status.yaml.
+-->
 
 ## MANDATORY: Before You Code
 

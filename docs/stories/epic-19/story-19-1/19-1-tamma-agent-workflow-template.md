@@ -1,6 +1,9 @@
 # Story 19-1: Tamma Agent GitHub Actions Workflow Template
 
-Status: ready-for-dev
+Status: delivered-by-40-1
+<!-- 2026-08-18: the workflow template this story specifies was written under story 40-1 and
+     lives at apps/tamma-elsa/runner/github-actions/tamma-agent.yml, together with its installer
+     and result contract. Nothing is left to build here; see docs/stories/epic-40/story-40-1/. -->
 
 ## Story
 

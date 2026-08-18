@@ -61,6 +61,10 @@
 #
 #   ALSO STALE, NOT MINE TO EDIT: every story flipped here still reads `Status: drafted` in its own
 #   docs/stories/epic-NN/story-NN-M/*.md header. This file is now ahead of those.)
+# updated: 2026-08-18 (follow-on to the line above: all 28 story headers now read `Status: done`, each
+#   carrying a comment that points back to its evidence line here, so the tracker and the story files
+#   agree again. 36-2's and 34-9's caveats were carried across verbatim. Separately, epic-19 story 19-1
+#   now reads `delivered-by-40-1` — its workflow template was written under 40-1.)
 #
 # last_reconciled_against_code: 2026-08-18 — scope: epic-32, epic-34, epic-35, epic-36, epic-37, epic-38 (this pass);
 #   2026-07-24 for epic-39/40/41/42 (evidence = deliverables present in apps/tamma-elsa/src + their tests present in
