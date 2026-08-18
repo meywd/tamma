@@ -103,17 +103,30 @@ public class DispatchCycleActivity : TammaAsyncActivity
             return;
         }
 
+        // 2026-08-18 — the ctor-or-GetService fallback belongs on the CONFIGURATION
+        // too, not only the dispatcher, and its absence silently DISABLED the
+        // production-deploy approval gate in exactly the deployments that need it.
+        // A store-rehydrated instance runs through the [JsonConstructor], so
+        // `_configuration` is null in the deployed engine (findings 27/28 family).
+        // Both prod-gate terms then read that null: `Tamma:TenantSharedSecret` /
+        // `ConnectionStrings:ControlPlane` came back absent, which
+        // DeploymentMode.Resolve reads as "no SaaS signal" => "dev" => gate OFF, and
+        // `Deployment:RequireProdApproval` fell to its `?? false`. So a SaaS/Business
+        // deployment threaded mode="dev" and deployed to production with no human —
+        // the inverse of the fail-safe this activity documents.
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+
         // Resolve the deployment mode end-to-end so the pipeline's production
         // approval gate engages for business/SaaS deployments. An explicit Mode
         // input wins; otherwise derive it from configuration (mirrors
         // TammaModeProvider's single-vs-SaaS detection). Fail-safe: an
         // absent/unknown mode resolves to "business" (REQUIRE approval).
-        var mode = ResolveMode(context);
+        var mode = ResolveMode(Mode.Get(context), configuration);
 
         // requireProdApproval lets an operator force the gate even in single-user
         // mode (Deployment:RequireProdApproval=true). Defaults false.
         var requireProdApproval =
-            _configuration?.GetValue<bool>("Deployment:RequireProdApproval") ?? false;
+            configuration?.GetValue<bool>("Deployment:RequireProdApproval") ?? false;
 
         var input = new Dictionary<string, object>
         {
@@ -178,7 +191,7 @@ public class DispatchCycleActivity : TammaAsyncActivity
     }
 
     private string ResolveMode(ActivityExecutionContext context)
-        => ResolveMode(Mode.Get(context), _configuration);
+        => ResolveMode(Mode.Get(context), _configuration ?? context.GetService<IConfiguration>());
 
     /// <summary>
     /// Resolve the deployment <c>mode</c> threaded to the cycle/pipeline. An
@@ -199,6 +212,14 @@ public class DispatchCycleActivity : TammaAsyncActivity
             // resolver so "saas"/"single-user" aliases map to the wire tokens.
             return DeploymentMode.Resolve(explicitInput, false, false);
         }
+
+        // NO configuration at all is not the same as "configuration says
+        // self-hosted": with nothing to read we cannot see a SaaS signal that IS
+        // there, and reading that blindness as "dev" is what silently switched the
+        // production approval gate off. Unknown => gate ON, matching this method's
+        // documented fail-safe and DeploymentMode.Resolve's own unrecognised-mode
+        // arm.
+        if (configuration is null) return DeploymentMode.Business;
 
         var tammaMode = configuration?["Tamma:Mode"];
         var hasSharedSecret = !string.IsNullOrWhiteSpace(configuration?["Tamma:TenantSharedSecret"]);

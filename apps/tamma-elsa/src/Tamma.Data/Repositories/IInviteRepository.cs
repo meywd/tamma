@@ -37,6 +37,9 @@ public interface IInviteRepository
     /// <summary>Delete all invites for a tenant (cascade on tenant purge).</summary>
     Task<int> DeleteAllByTenantAsync(Guid tenantId);
 
-    [Obsolete("Use DeleteScopedAsync for per-tenant invariant. Kept for transitional callers.")]
-    Task DeleteAsync(Guid id);
+    // The id-only DeleteAsync(Guid) is GONE (2026-08-18). It was [Obsolete] for
+    // "transitional callers" and its last one — AdminEndpoints.DeleteInvite —
+    // was the cross-tenant revoke hole itself. Deleting the member, rather than
+    // leaving it deprecated, is what makes the per-tenant invariant structural:
+    // there is no unscoped delete left to call. Use DeleteScopedAsync.
 }

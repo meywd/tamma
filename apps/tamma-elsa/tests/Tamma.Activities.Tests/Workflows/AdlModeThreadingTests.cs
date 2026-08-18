@@ -146,14 +146,54 @@ public class AdlModeThreadingTests
     }
 
     [Test]
-    public void ResolveMode_NoConfigAtAll_FailsSafeToDev_ButExplicitSaaSWins()
+    public void ResolveMode_NoConfigAtAll_FailsSafeToBusiness_GateOn()
     {
-        // A null config with no explicit mode is a self-hosted single-user run → dev.
-        DispatchCycleActivity.ResolveMode(null, configuration: null).Should().Be(DeploymentMode.Dev);
+        // 2026-08-18 — this assertion used to read `.Be(DeploymentMode.Dev)` under
+        // the name "FailsSafeToDev", which is a contradiction: dev is the arm that
+        // deploys to production with NO human. An UNREADABLE configuration is not
+        // evidence of a self-hosted deployment — it is the absence of evidence, and
+        // it is the state a store-rehydrated DispatchCycleActivity is actually in
+        // inside the deployed engine ([JsonConstructor] leaves _configuration null).
+        // So the deployment most likely to hit this arm was a SaaS one, and it got
+        // the gate switched off. Unknown now means gate ON.
+        DispatchCycleActivity.ResolveMode(null, configuration: null)
+            .Should().Be(DeploymentMode.Business,
+                "an unreadable configuration must not be read as 'no SaaS signal' — gate ON");
 
-        // An explicit "saas" input overrides regardless of config.
+        // An explicit "saas" input engages the gate regardless of config.
         DispatchCycleActivity.ResolveMode("saas", configuration: null)
             .Should().Be(DeploymentMode.Business, "an explicit saas mode must engage the gate even without config");
+
+        // An explicit single-user input is still honoured — this is a fail-safe on
+        // ABSENT information, not a refusal to believe an operator.
+        DispatchCycleActivity.ResolveMode("single-user", configuration: null)
+            .Should().Be(DeploymentMode.Dev);
+    }
+
+    /// <summary>
+    /// The gate's two enable terms both read <c>IConfiguration</c>, and in the
+    /// deployed engine the activity instance is store-rehydrated with every
+    /// DI field null (findings 27/28). Pin that the activity does not read the
+    /// ctor field directly for either term: it must fall back to
+    /// <c>context.GetService&lt;IConfiguration&gt;()</c> first, and the pure
+    /// resolver must fail safe when even that yields nothing.
+    /// </summary>
+    [Test]
+    public void ResolveMode_RehydratedInstance_DoesNotSilentlyDisableTheProdGate()
+    {
+        // The rehydration ctor is the one Elsa uses; it takes no configuration.
+        var rehydrated = new DispatchCycleActivity();
+
+        var configField = typeof(DispatchCycleActivity)
+            .GetField("_configuration",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        configField.Should().NotBeNull();
+        configField!.GetValue(rehydrated).Should().BeNull(
+            "the [JsonConstructor] path is exactly the state that used to resolve mode=dev");
+
+        // With nothing readable, the resolver the activity calls must gate.
+        DispatchCycleActivity.ResolveMode(null, (IConfiguration?)null)
+            .Should().Be(DeploymentMode.Business);
     }
 
     [Test]
