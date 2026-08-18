@@ -41,17 +41,23 @@ an internal read does not belong on the effect plane).
 `Documents:ReEntryDisabled=true` still swaps in the Null seam. Pinned by
 `HttpLifecycleReEntryServiceTests`.
 
-## 2. `HourlyAnalyticsRollupScheduler` is a captive-dependency violation
+## 2. `HourlyAnalyticsRollupScheduler` is a captive-dependency violation — FIXED (2026-08-18)
 
-The singleton hosted service takes the **scoped** Elsa `IWorkflowDispatcher`
+The singleton hosted service took the **scoped** Elsa `IWorkflowDispatcher`
 (made scoped by Elsa's own registration) in its constructor. Development scope
-validation refuses to build the host; Production silently promotes the
-dispatcher (captive dependency). The scheduler should resolve the dispatcher
-per-tick from an `IServiceScopeFactory` scope (the
-`TenantScheduledTriggerService` pattern in the same directory).
+validation refused to build the host; Production silently promoted the
+dispatcher (captive dependency).
 
-*E2E stance:* the fixture runs the engine as Production (matching deployment),
-documented at the env-var site in `EngineFullStackFixture`.
+**Fixed:** the dispatcher is gone from the constructor and is resolved from the
+same per-tick `IServiceScopeFactory` scope that already resolved the (scoped)
+`IWorkflowDefinitionService` — the `TenantScheduledTriggerService` pattern in
+the same directory. Pinned by
+`HourlyAnalyticsRollupSchedulerTests.Scheduler_ResolvesUnderScopeValidation_NoCaptiveDependency`,
+which builds the provider with `ValidateScopes`/`ValidateOnBuild` on — the exact
+check that used to fail.
+
+*E2E stance:* the fixture still runs the engine as Production, now because that
+is the deployed shape rather than because Development refuses to boot.
 
 ## 3. `Output.Set(context, null)` binds to the Variable overload and NREs
 
@@ -115,13 +121,36 @@ throws `"<name> is required."` — faulting every CYCLE.STARTED/COMPLETED emit
 wherever an optional input defaulted to a literal null is read via `.Get`
 after a store round-trip.
 
-## 7. Engine rollup fan-out needs `ITenantDbContextFactory` (open)
+## 7. Engine rollup fan-out needs `ITenantDbContextFactory` — MADE LOUD, NOT WIRED (2026-08-18)
 
 `hourly-analytics-rollup`'s fan-out activity resolves
 `Tamma.Data.Abstractions.ITenantDbContextFactory`, which no engine
 composition registers (same family as item 1) — the rollup workflow now
 DISPATCHES correctly (item 4) but faults at fan-out in an engine-only
-deployment. Open, same fix direction as item 1.
+deployment.
+
+**Why item 1's fix direction does NOT transfer.** Item 1 could be re-pointed at
+an HTTP read. This one cannot: registering `ITenantDbContextFactory` needs
+`ITenantConnectionResolver`, which needs an `IConnectionStringDecryptor`, and the
+only production decryptor (`AesGcmConnectionStringDecryptor` + `KekProvider`)
+lives in `Tamma.Api` — a project `Tamma.ElsaServer` does not reference. Wiring
+the engine with the `Passthrough` decryptor instead would read AES-GCM envelope
+bytes as UTF-8 cleartext and hand the pool a garbage connection string. Moving
+the decryptor down into `Tamma.Data` is a real change with its own review, not a
+scheduler fix.
+
+**Landed instead:** `HourlyAnalyticsRollupScheduler.TryValidateDataSeams` runs
+ONCE at startup and refuses to start the loop when either seam
+(`ITenantDbContextFactory`, `IDbContextFactory<ControlPlaneDbContext>`) is
+absent, logging `analytics.rollup.disabled_missing_data_seam` at ERROR with the
+missing names and what to compose. An hourly buried activity fault becomes one
+actionable startup line, and no doomed workflow is dispatched. The moment a host
+composes both seams the scheduler starts with no code change. Pinned by
+`TryValidateDataSeams_False_WhenEngineCompositionHasNoTenantDataPlane`,
+`TryValidateDataSeams_True_WhenBothSeamsAreComposed`, and
+`StartAsync_DispatchesNothing_WhenDataSeamsAreMissing`.
+
+Still open as an ENHANCEMENT: actually giving the engine a tenant data plane.
 
 ## 8. A bare `Activity` does NOT auto-complete — 24 emit activities hung their workflow forever
 

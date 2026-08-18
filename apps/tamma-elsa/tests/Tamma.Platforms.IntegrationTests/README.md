@@ -193,9 +193,10 @@ AdlOrchestrator → SingleIssueCycle workflows drive one seeded issue:
   `dotnet build Tamma.sln` then
   `dotnet test tests/Tamma.Platforms.IntegrationTests --filter "TestCategory=GiteaE2E"`.
 - The engine runs as `ASPNETCORE_ENVIRONMENT=Production` (matching the
-  deployed engine) — one pre-existing engine DI composition defect
-  (`HourlyAnalyticsRollupScheduler`, a captive dependency) refuses a
-  Development boot and is outside this suite's scope. Re-entry is
+  deployed engine). The DI defect that used to make that mandatory —
+  `HourlyAnalyticsRollupScheduler` capturing the scoped
+  `IWorkflowDispatcher` — was fixed 2026-08-18; Production stays because
+  this suite exercises the deployed shape. Re-entry is
   ENABLED: the engine host now defaults to the HTTP-backed
   latest-accepted read (`HttpLifecycleReEntryService`) — the plan-review
   shim REQUIRES that read, so the old `Documents:ReEntryDisabled=true`

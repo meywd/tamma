@@ -1,10 +1,12 @@
 using Elsa.Workflows.Runtime;
 using Elsa.Workflows.Runtime.Requests;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Pooling;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -67,12 +69,22 @@ public sealed class HourlyAnalyticsRollupSchedulerOptions
 /// <para><b>Failure isolation</b>: a dispatch failure is logged at
 /// WARN and the scheduler continues — the next hour's fire is the
 /// recovery path, not a tight retry loop.</para>
+///
+/// <para><b>2026-08-18 — no captive dependencies.</b> Elsa registers
+/// <see cref="IWorkflowDispatcher"/> SCOPED, and an
+/// <see cref="IHostedService"/> is a SINGLETON: taking the dispatcher in
+/// the constructor made Development's <c>ValidateScopes</c> refuse to
+/// build the host and made Production silently promote one dispatcher
+/// (and everything behind it) to process lifetime. Every scoped service
+/// this class needs is resolved from a per-tick
+/// <see cref="IServiceScopeFactory"/> scope, matching
+/// <c>TenantScheduledTriggerService</c> in this directory.</para>
 /// </summary>
 public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
 {
-    private readonly IWorkflowDispatcher _dispatcher;
     // 2026-08-13 — per-fire scope for the (scoped) IWorkflowDefinitionService
     // used by the version-id resolve (see PublishedWorkflowDispatch).
+    // 2026-08-18 — and for the (scoped) IWorkflowDispatcher itself.
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptions<HourlyAnalyticsRollupSchedulerOptions> _options;
     private readonly TimeProvider _timeProvider;
@@ -87,7 +99,6 @@ public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
     private (int Year, int DayOfYear, int Hour) _lastFired;
 
     public HourlyAnalyticsRollupScheduler(
-        IWorkflowDispatcher dispatcher,
         IServiceScopeFactory scopeFactory,
         IOptions<HourlyAnalyticsRollupSchedulerOptions> options,
         TimeProvider timeProvider,
@@ -95,12 +106,10 @@ public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
         IConfiguration? configuration = null,
         IRollupSchedulerLeaderLock? leaderLock = null)
     {
-        ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(scopeFactory);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
-        _dispatcher = dispatcher;
         _scopeFactory = scopeFactory;
         _options = options;
         _timeProvider = timeProvider;
@@ -119,6 +128,24 @@ public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
         {
             _logger.LogInformation(
                 "HourlyAnalyticsRollupScheduler disabled — skipping background dispatch.");
+            return;
+        }
+
+        // 2026-08-18 — the rollup's fan-out resolves its data seams with
+        // GetRequiredService, and no engine composition registers them
+        // (ITenantDbContextFactory ships from AddTammaData, which only
+        // Tamma.Api calls). Dispatching anyway produced an activity fault
+        // per hour, buried by ContinueWithIncidentsStrategy. Refuse loudly
+        // ONCE at startup instead: no doomed dispatches, and one actionable
+        // line in the engine log rather than an hourly silent no-op.
+        if (!TryValidateDataSeams(out var missingSeams))
+        {
+            _logger.LogError(
+                "analytics.rollup.disabled_missing_data_seam missing={Missing} — this host does "
+                + "not register the data seams hourly-analytics-rollup's fan-out resolves, so every "
+                + "dispatch would fault at fan-out. Compose them on this host (Tamma.Api wires them "
+                + "via AddTammaData + AddTenantConnectionPool) or set HourlyAnalyticsRollup:Enabled=false.",
+                missingSeams);
             return;
         }
 
@@ -166,6 +193,39 @@ public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
     internal Task InvokeTickForTestsAsync(CancellationToken ct)
         => TickAsync(_options.Value, ct);
 
+    /// <summary>
+    /// Startup preflight for the rollup's data plane. Returns <c>false</c>
+    /// (with the missing service names in <paramref name="missing"/>) when
+    /// this composition cannot run <c>hourly-analytics-rollup</c> at all.
+    ///
+    /// <para>The two seams checked are exactly the ones the fan-out
+    /// activities resolve with <c>GetRequiredService</c>:
+    /// <see cref="ITenantDbContextFactory"/> (per-tenant
+    /// <c>domain_events</c> / <c>analytics_usage_hourly</c>) and the
+    /// control-plane context factory (the active-tenant directory). A
+    /// throwing resolution counts as missing — a seam that cannot be
+    /// constructed is no better than an absent one.</para>
+    /// </summary>
+    internal bool TryValidateDataSeams(out string missing)
+    {
+        var absent = new List<string>();
+        using var scope = _scopeFactory.CreateScope();
+
+        if (Resolve<ITenantDbContextFactory>(scope) is null)
+            absent.Add(nameof(ITenantDbContextFactory));
+        if (Resolve<IDbContextFactory<Tamma.Data.ControlPlaneDbContext>>(scope) is null)
+            absent.Add("IDbContextFactory<ControlPlaneDbContext>");
+
+        missing = string.Join(", ", absent);
+        return absent.Count == 0;
+
+        static object? Resolve<T>(IServiceScope s)
+        {
+            try { return s.ServiceProvider.GetService<T>(); }
+            catch { return null; }
+        }
+    }
+
     private async Task TickAsync(
         HourlyAnalyticsRollupSchedulerOptions opts,
         CancellationToken ct)
@@ -209,15 +269,12 @@ public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
             // definition id (see PublishedWorkflowDispatch: this dispatch died
             // WorkflowGraphNotFound in the queue on every fire before this
             // resolve existed). Resolved per-fire from a fresh scope — the
-            // definition service is scoped.
-            string definitionVersionId;
-            using (var scope = _scopeFactory.CreateScope())
-            {
-                definitionVersionId = await Tamma.Activities.Core.PublishedWorkflowDispatch
-                    .ResolvePublishedVersionIdAsync(
-                        scope.ServiceProvider.GetRequiredService<Elsa.Workflows.Management.IWorkflowDefinitionService>(),
-                        HourlyAnalyticsRollupWorkflow.DefinitionId, ct);
-            }
+            // definition service AND the dispatcher are both scoped.
+            using var scope = _scopeFactory.CreateScope();
+            var definitionVersionId = await Tamma.Activities.Core.PublishedWorkflowDispatch
+                .ResolvePublishedVersionIdAsync(
+                    scope.ServiceProvider.GetRequiredService<Elsa.Workflows.Management.IWorkflowDefinitionService>(),
+                    HourlyAnalyticsRollupWorkflow.DefinitionId, ct);
 
             var request = new DispatchWorkflowDefinitionRequest(definitionVersionId)
             {
@@ -229,7 +286,8 @@ public sealed class HourlyAnalyticsRollupScheduler : BackgroundService
             // Newer Elsa versions take a DispatchWorkflowOptions as the
             // second parameter (cancellation token lives in options).
             // The empty-options default keeps the call shape minimal.
-            await _dispatcher.DispatchAsync(request, new DispatchWorkflowOptions(), ct)
+            var dispatcher = scope.ServiceProvider.GetRequiredService<IWorkflowDispatcher>();
+            await dispatcher.DispatchAsync(request, new DispatchWorkflowOptions(), ct)
                 .ConfigureAwait(false);
             _lastFired = hourKey;
             _logger.LogInformation(

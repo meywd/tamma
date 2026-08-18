@@ -154,13 +154,13 @@ public sealed class EngineFullStackFixture : IAsyncDisposable
                 psi.Environment.Remove(key);
             }
 
-            // Production, DELIBERATELY (matching the deployed engine): under
-            // Development, DI ValidateOnBuild refuses to boot the engine on a
-            // pre-existing registration defect — HourlyAnalyticsRollupScheduler
-            // (singleton hosted service) consumes the scoped IWorkflowDispatcher.
-            // The deployed engine never sees it (no ValidateOnBuild outside
-            // Development). Recorded in .dev/findings/ (engine-driven E2E
-            // follow-up, 2026-08-13).
+            // Production, DELIBERATELY: it is what the deployed engine runs.
+            // (2026-08-18 — the reason this line USED to be load-bearing is
+            // gone: HourlyAnalyticsRollupScheduler no longer consumes the
+            // scoped IWorkflowDispatcher from its constructor, so Development's
+            // ValidateOnBuild no longer refuses that registration. Production
+            // stays because the suite exists to exercise the deployed shape,
+            // not to prove Development boots.)
             //
             // Documents:ReEntryDisabled is deliberately NOT set: the engine now
             // defaults to HttpLifecycleReEntryService (latest-accepted read over
