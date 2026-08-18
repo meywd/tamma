@@ -1,8 +1,7 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using Tamma.Activities.AgentDispatch;
+using Tamma.Api.Auth;
 using Tamma.Core.Logging;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -30,7 +29,6 @@ public sealed class InstallationRouterService : IInstallationRouterService
 
     private const string InstallationApiKeyScope = "installation";
     private const string InstallationApiKeyLabel = "installation-key";
-    private const int InstallationApiKeyPrefixLength = 16;
 
     private readonly IInstallationRepository _installations;
     private readonly IEventRepository _events;
@@ -278,9 +276,16 @@ public sealed class InstallationRouterService : IInstallationRouterService
 
         var plaintext = GenerateInstallationKey();
         var keyHash = HashKey(plaintext);
-        var keyPrefix = plaintext.Length >= InstallationApiKeyPrefixLength
-            ? plaintext[..InstallationApiKeyPrefixLength]
-            : plaintext;
+        // 2026-08-18 — api_keys.KeyPrefix MUST be ApiKeyHasher.Prefix (12
+        // chars). ApiKeyAuthHandler.ResolveByVerify filters candidates on
+        // KeyPrefix EQUALITY against that 12-char value, so the 16-char slice
+        // this used to store matched nothing. The key still authed on its
+        // first request (the SHA-256 KeyHash lookup runs first), that success
+        // rehashed the row to per-key-salted Argon2, and from the second
+        // request on the only path left was the prefix filter — which could
+        // never match. An installation key worked exactly once, then 401'd
+        // forever.
+        var keyPrefix = ApiKeyHasher.Prefix(plaintext);
 
         var stored = await _apiKeys.CreateAsync(new ApiKey
         {
@@ -320,18 +325,12 @@ public sealed class InstallationRouterService : IInstallationRouterService
     private sealed record KeyIssueOutcome(
         bool Issued, Guid? KeyId, int ReposProvisioned, int ReposFailed);
 
-    private static string GenerateInstallationKey()
-    {
-        var bytes = RandomNumberGenerator.GetBytes(32);
-        var body = Convert.ToBase64String(bytes)
-            .Replace('+', '-')
-            .Replace('/', '_')
-            .TrimEnd('=');
-        return $"tamma_sk_{body}";
-    }
+    // 2026-08-18 — the wire format and its SHA-256 storage form have exactly
+    // one owner (ApiKeyHasher). The hand-rolled copies these replaced were
+    // byte-identical, but a local copy is how the KeyPrefix above drifted.
+    private static string GenerateInstallationKey() => ApiKeyHasher.NewKey();
 
-    private static string HashKey(string plaintext)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(plaintext))).ToLowerInvariant();
+    private static string HashKey(string plaintext) => ApiKeyHasher.Hash(plaintext);
 
     // ─── Webhook dispatch ───────────────────────────────────────────────────
 

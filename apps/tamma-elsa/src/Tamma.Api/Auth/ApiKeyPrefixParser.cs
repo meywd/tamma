@@ -129,6 +129,26 @@ public static class ApiKeyPrefixParser
         return ApiKeyHasher.Prefix(rawKey);
     }
 
+    /// <summary>
+    /// True when <paramref name="rawKey"/> carries the banner AND one of the
+    /// three shipped scope markers — i.e. this parser will NOT treat it as a
+    /// legacy un-prefixed key. <see cref="ApiKeyHasher.NewKey"/> uses it to
+    /// reject a random body that accidentally opens with a marker.
+    /// </summary>
+    internal static bool StartsWithScopeMarker(string rawKey)
+    {
+        if (string.IsNullOrEmpty(rawKey)
+            || !rawKey.StartsWith(ApiKeyHasher.KeyPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var afterBanner = rawKey[ApiKeyHasher.KeyPrefix.Length..];
+        return TryStripScope(afterBanner, "pl_", out _)
+            || TryStripScope(afterBanner, "u_", out _)
+            || TryStripScope(afterBanner, "t_", out _);
+    }
+
     private static bool TryStripScope(string s, string marker, out string remainder)
     {
         if (s.StartsWith(marker, StringComparison.Ordinal))

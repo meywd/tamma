@@ -1,16 +1,18 @@
 # 2026-08-13 — engine defects surfaced by the engine-driven E2E
 
-> Scope note: items 2 and 7 are OPEN composition gaps; everything else is a
-> REAL runtime defect the E2E surfaced in the autonomous loop itself — every
-> one shipped latent because no test had ever driven the loop through a real
-> engine process end-to-end. All non-open items are FIXED in the same change
-> that added the E2E.
+> Scope note: items 2 and 7 were the two OPEN composition gaps; everything else
+> is a REAL runtime defect the E2E surfaced in the autonomous loop itself —
+> every one shipped latent because no test had ever driven the loop through a
+> real engine process end-to-end. All non-open items are FIXED in the same
+> change that added the E2E. **2026-08-18:** item 2 is fixed and item 7 is
+> closed as a loud startup refusal (its wiring half stays open as an
+> enhancement) — see each item.
 
 **Status:** open follow-ups. Found while booting the REAL `Tamma.ElsaServer`
 binary under `ASPNETCORE_ENVIRONMENT=Development` for the engine-driven
 autonomous E2E (`EngineFullStackFixture`) — Development turns on
 `ValidateOnBuild`/`ValidateScopes`, which the deployed engine (Production)
-never runs, so both defects ship latent today.
+never runs, so both defects shipped latent.
 
 ## 1. `LifecycleReEntryService` is unresolvable in every engine composition — FIXED (HTTP seam)
 

@@ -121,6 +121,54 @@ public class InstallationRouterServiceTests
     }
 
     [Test]
+    public async Task HandleCallbackAsync_StoresTheKeyPrefixTheAuthHandlerLooksUp()
+    {
+        // 2026-08-18 — the issued key's api_keys.KeyPrefix must equal
+        // ApiKeyHasher.Prefix(plaintext): ApiKeyAuthHandler.ResolveByVerify
+        // filters candidates on KeyPrefix EQUALITY against that value, and it
+        // is the ONLY route left once the row's first successful auth rehashes
+        // it to per-key-salted Argon2. Storing a 16-char slice made every
+        // GitHub-App installation key work once and 401 forever after.
+        var userId = Guid.NewGuid();
+        var tenantId = Guid.NewGuid();
+
+        _userRepo.Setup(r => r.GetByIdAsync(userId))
+            .ReturnsAsync(new User { Id = userId, Email = "t@example.com", TenantId = tenantId });
+        _tenantRepo.Setup(r => r.GetByIdAsync(tenantId))
+            .ReturnsAsync(new Tenant { Id = tenantId, Name = "Acme", Slug = "acme" });
+        _installRepo.Setup(r => r.GetByInstallationIdAsync(12345L))
+            .ReturnsAsync((GitHubInstallation?)null);
+        _installRepo.Setup(r => r.CreateAsync(It.IsAny<GitHubInstallation>()))
+            .ReturnsAsync((GitHubInstallation i) => i);
+
+        ApiKey? stored = null;
+        _apiKeyRepo.Setup(r => r.CreateAsync(It.IsAny<ApiKey>()))
+            .ReturnsAsync((ApiKey k) => { k.Id = Guid.NewGuid(); stored = k; return k; });
+
+        // The plaintext never leaves the service except on the secrets push.
+        string? plaintext = null;
+        _provisioner
+            .Setup(p => p.PushAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyList<(string, string)>>(),
+                "TAMMA_API_KEY",
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, IReadOnlyList<(string, string)> _, string _, string value, CancellationToken _) =>
+            {
+                plaintext = value;
+                return (IReadOnlyList<SecretProvisionResult>)Array.Empty<SecretProvisionResult>();
+            });
+
+        await _service.HandleCallbackAsync(12345L, null, userId);
+
+        stored.Should().NotBeNull();
+        plaintext.Should().NotBeNull();
+        stored!.KeyPrefix.Should().Be(Tamma.Api.Auth.ApiKeyHasher.Prefix(plaintext!));
+        stored.KeyHash.Should().Be(Tamma.Api.Auth.ApiKeyHasher.Hash(plaintext!));
+    }
+
+    [Test]
     public async Task HandleCallbackAsync_BridgesTheInstallation_BeforePushingSecrets()
     {
         // Epic 31 review (F-high) — DriverInstallationSecretsPusher resolves

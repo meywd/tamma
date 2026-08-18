@@ -60,11 +60,26 @@ public static class ApiKeyHasher
     private const int ScryptP = 1;
     private const int ScryptKeyLength = 32;
 
-    /// <summary>Generates a fresh API key (raw, not yet hashed).</summary>
+    /// <summary>
+    /// Generates a fresh un-prefixed (legacy-shape) API key, raw and not yet
+    /// hashed.
+    ///
+    /// <para>2026-08-18 — the base64url alphabet includes <c>_</c>, so a random
+    /// body can start <c>u_</c>, <c>t_</c> or <c>pl_</c>, and
+    /// <see cref="ApiKeyPrefixParser"/> then reads that as a Story-28-7 SCOPE
+    /// MARKER. The key routes to the prefixed lookup instead of the legacy one
+    /// (and a <c>t_</c> collision decodes a garbage tenant segment), so it 401s
+    /// for its whole life. Roughly 1 key in 4000 — far too often for a
+    /// credential that cannot be made to work — so a colliding body is
+    /// re-rolled. Entropy is unaffected: rejection sampling over a CSPRNG.</para>
+    /// </summary>
     public static string NewKey()
     {
-        var random = RandomNumberGenerator.GetBytes(KeyBytes);
-        return KeyPrefix + Base64Url.Encode(random);
+        while (true)
+        {
+            var candidate = KeyPrefix + Base64Url.Encode(RandomNumberGenerator.GetBytes(KeyBytes));
+            if (!ApiKeyPrefixParser.StartsWithScopeMarker(candidate)) return candidate;
+        }
     }
 
     /// <summary>

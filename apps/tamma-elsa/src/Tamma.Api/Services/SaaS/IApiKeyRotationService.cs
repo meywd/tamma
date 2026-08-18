@@ -9,7 +9,10 @@ namespace Tamma.Api.Services.SaaS;
 /// successful rotation response. Callers must surface it to the end-user on
 /// this response and never log or persist it.
 /// </param>
-/// <param name="KeyPrefix">First 16 characters of the plaintext key, safe for UI/audit.</param>
+/// <param name="KeyPrefix">The stored lookup prefix — <c>ApiKeyHasher.Prefix</c>,
+/// i.e. the first 12 characters of the plaintext key. Safe for UI/audit, and it
+/// is the value the auth handler matches candidates on, so it must not be a
+/// different length here.</param>
 /// <param name="KeyId">Identifier of the newly-persisted <c>api_keys</c> row.</param>
 /// <param name="ErrorReason">Short machine-readable reason when <see cref="Success"/> is false.</param>
 public sealed record KeyRotationResult(

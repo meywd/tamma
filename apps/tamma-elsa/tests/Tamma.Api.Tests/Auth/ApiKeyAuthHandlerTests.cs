@@ -426,6 +426,83 @@ public class ApiKeyAuthHandlerTests
         result.Failure!.Message.Should().Be("Invalid API key");
     }
 
+    // ── Installation-scope keys, post-Argon2-rehash (2026-08-18) ─────
+    //
+    // An installation key is minted un-prefixed, so it authenticates on the
+    // LEGACY path. Its FIRST successful request rehashes the row to per-key-
+    // salted Argon2, after which no hash-equality lookup can ever find it
+    // again and the only route left is ResolveByVerify's KeyPrefix-equality
+    // scan. The issuance sites stored a 16-char slice while that scan compares
+    // ApiKeyHasher.Prefix (12), so every installation key worked exactly once
+    // and then 401'd forever. These two tests are the before/after.
+
+    private void SeedArgon2PrefixScan(ApiKey installationRow)
+    {
+        _apiKeyRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>()))
+            .ReturnsAsync((ApiKey?)null);
+        _apiKeyRepo.Setup(r => r.ListByScopeAsync("service"))
+            .ReturnsAsync(new List<ApiKey>());
+        _apiKeyRepo.Setup(r => r.ListByScopeAsync("user"))
+            .ReturnsAsync(new List<ApiKey>());
+        _apiKeyRepo.Setup(r => r.ListByScopeAsync("installation"))
+            .ReturnsAsync(new List<ApiKey> { installationRow });
+    }
+
+    private static ApiKey BuildInstallationRow(string rawKey, string storedPrefix) => new()
+    {
+        Id = Guid.NewGuid(),
+        Scope = "installation",
+        OwnerId = "12345",
+        KeyHash = ApiKeyHasher.HashArgon2(rawKey),
+        KeyPrefix = storedPrefix,
+        Label = "installation-key",
+        Permissions = Array.Empty<string>(),
+        TenantId = Guid.NewGuid(),
+        CreatedAt = DateTime.UtcNow,
+    };
+
+    [Test]
+    public async Task InstallationKey_WithCanonicalStoredPrefix_StillAuthenticatesAfterRehash()
+    {
+        var rawKey = ApiKeyHasher.NewKey();
+        SeedArgon2PrefixScan(BuildInstallationRow(rawKey, ApiKeyHasher.Prefix(rawKey)));
+
+        var (result, _) = await RunAsync($"Bearer {rawKey}", allowLegacy: true);
+
+        result.Succeeded.Should().BeTrue(
+            "the stored KeyPrefix is exactly what ResolveByVerify computes from the raw key");
+    }
+
+    [Test]
+    public async Task InstallationKey_WithSixteenCharStoredPrefix_CanNeverAuthenticate()
+    {
+        // The shipped issuance shape until 2026-08-18. Kept as the regression
+        // pin: if the stored prefix ever drifts from ApiKeyHasher.Prefix again,
+        // the test above goes red and this one explains why.
+        var rawKey = ApiKeyHasher.NewKey();
+        SeedArgon2PrefixScan(BuildInstallationRow(rawKey, rawKey[..16]));
+
+        var (result, _) = await RunAsync($"Bearer {rawKey}", allowLegacy: true);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Message.Should().Be("Invalid API key");
+    }
+
+    [Test]
+    public void NewKey_NeverCollidesWithAScopeMarker()
+    {
+        // base64url includes '_', so an un-guarded random body can start "u_",
+        // "t_" or "pl_"; the parser then reads it as a Story-28-7 scope marker
+        // and the key routes to the prefixed path it has no row for.
+        for (var i = 0; i < 20_000; i++)
+        {
+            ApiKeyPrefixParser.TryParse(ApiKeyHasher.NewKey(), out var parsed)
+                .Should().BeTrue();
+            parsed!.Scope.Should().Be(ApiKeyScope.Legacy,
+                "an un-prefixed key must always parse as legacy, never as a scoped key");
+        }
+    }
+
     // ── Service-scope X-Tenant-Id (inherited path) ───────────────────
 
     [Test]
