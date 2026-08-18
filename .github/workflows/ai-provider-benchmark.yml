@@ -79,26 +79,28 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # The three dispatch inputs come through env, not through the script
+          # text. Interpolating them into the command string and then running it
+          # through `eval` meant a value like `x; curl … | sh` executed on a
+          # runner holding four provider API keys.
+          PROVIDERS: ${{ github.event.inputs.providers || 'gemini' }}
+          ITERATIONS: ${{ github.event.inputs.iterations || '1' }}
+          SCENARIOS: ${{ github.event.inputs.scenarios || 'all' }}
         run: |
-          # Determine providers and iterations
-          PROVIDERS="${{ github.event.inputs.providers || 'gemini' }}"
-          ITERATIONS="${{ github.event.inputs.iterations || '1' }}"
-          SCENARIOS="${{ github.event.inputs.scenarios || 'all' }}"
-
           echo "Running benchmark with:"
           echo "  Providers: $PROVIDERS"
           echo "  Iterations: $ITERATIONS"
           echo "  Scenarios: $SCENARIOS"
 
-          # Build command
-          CMD="tsx run-benchmark.ts --providers $PROVIDERS --iterations $ITERATIONS"
-
+          # Build the argument list positionally so no value is ever re-parsed
+          # as shell; this replaces the old CMD string plus `eval`.
+          set -- --providers "$PROVIDERS" --iterations "$ITERATIONS"
           if [ "$SCENARIOS" != "all" ]; then
-            CMD="$CMD --scenarios $SCENARIOS"
+            set -- "$@" --scenarios "$SCENARIOS"
           fi
 
-          echo "Command: $CMD"
-          eval $CMD
+          echo "Command: tsx run-benchmark.ts $*"
+          tsx run-benchmark.ts "$@"
 
       - name: Upload JSON results
         if: always()
@@ -119,24 +121,24 @@ jobs:
       - name: Display summary
         if: always()
         run: |
-          echo "### 📊 Benchmark Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          # Newest report, chosen without parsing `ls` output.
+          REPORT=$(find .dev/spikes/results -maxdepth 1 -name 'benchmark-report-*.md' \
+            -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
 
-          # Find the latest report
-          REPORT=$(ls -t .dev/spikes/results/benchmark-report-*.md 2>/dev/null | head -1)
-
-          if [ -f "$REPORT" ]; then
-            echo "Benchmark completed successfully!" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-
-            # Extract executive summary section
-            sed -n '/## Executive Summary/,/## Overall Rankings/p' "$REPORT" | head -n -1 >> $GITHUB_STEP_SUMMARY
-
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "📥 Full results available in workflow artifacts" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ No benchmark report generated. Check logs for errors." >> $GITHUB_STEP_SUMMARY
-          fi
+          {
+            echo "### 📊 Benchmark Results"
+            echo ""
+            if [ -n "$REPORT" ] && [ -f "$REPORT" ]; then
+              echo "Benchmark completed successfully!"
+              echo ""
+              # Extract executive summary section
+              sed -n '/## Executive Summary/,/## Overall Rankings/p' "$REPORT" | head -n -1
+              echo ""
+              echo "📥 Full results available in workflow artifacts"
+            else
+              echo "⚠️ No benchmark report generated. Check logs for errors."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment on PR
         if: github.event_name == 'pull_request'

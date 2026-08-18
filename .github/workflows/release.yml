@@ -177,7 +177,7 @@ jobs:
       - name: Create combined checksums file
         run: |
           cd artifacts
-          cat *.sha256 > checksums.txt
+          cat ./*.sha256 > checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

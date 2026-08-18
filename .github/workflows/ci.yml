@@ -281,7 +281,8 @@ jobs:
               # independent, no extra tooling) so intermittent failures are
               # diagnosable straight from the CI log.
               echo "---- FAILED TESTS IN $n (from .trx) ----"
-              trx=$(ls -t "tests/$n/TestResults"/*.trx 2>/dev/null | head -1)
+              trx=$(find "tests/$n/TestResults" -maxdepth 1 -name '*.trx' -printf '%T@ %p\n' \
+                2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
               if [ -n "$trx" ]; then
                 tr '<' '\n' < "$trx" \
                   | grep 'UnitTestResult ' \
