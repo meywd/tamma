@@ -156,11 +156,16 @@ public sealed class EngineFullStackFixture : IAsyncDisposable
 
             // Production, DELIBERATELY: it is what the deployed engine runs.
             // (2026-08-18 — the reason this line USED to be load-bearing is
-            // gone: HourlyAnalyticsRollupScheduler no longer consumes the
-            // scoped IWorkflowDispatcher from its constructor, so Development's
-            // ValidateOnBuild no longer refuses that registration. Production
-            // stays because the suite exists to exercise the deployed shape,
-            // not to prove Development boots.)
+            // gone: no hosted service consumes a scoped Elsa service from its
+            // constructor any more, so Development's ValidateOnBuild no longer
+            // refuses those registrations. Note this was briefly untrue on the
+            // same day: the claim was written for HourlyAnalyticsRollupScheduler
+            // alone, and AdlLoopWatchdogService reintroduced the same captive
+            // dispatcher hours later. It is now held by a sweep over every
+            // hosted service rather than by one class's good behaviour —
+            // HostedServiceCaptiveDependencySweepTests. Production stays because
+            // the suite exists to exercise the deployed shape, not to prove
+            // Development boots.)
             //
             // Documents:ReEntryDisabled is deliberately NOT set: the engine now
             // defaults to HttpLifecycleReEntryService (latest-accepted read over

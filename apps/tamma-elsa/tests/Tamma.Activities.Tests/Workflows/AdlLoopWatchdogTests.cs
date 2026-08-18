@@ -204,11 +204,14 @@ public class AdlLoopWatchdogTests
             var services = new ServiceCollection();
             services.AddSingleton(store.Object);
             services.AddSingleton(definitions.Object);
+            // The dispatcher is resolved from the per-tick scope, not injected — see
+            // AdlLoopWatchdogService's ctor doc for why holding it would be a captive
+            // scoped dependency.
+            services.AddSingleton<IWorkflowDispatcher>(Dispatcher);
             var provider = services.BuildServiceProvider();
 
             _service = new AdlLoopWatchdogService(
                 provider.GetRequiredService<IServiceScopeFactory>(),
-                Dispatcher,
                 Microsoft.Extensions.Options.Options.Create(Options),
                 Time,
                 NullLogger<AdlLoopWatchdogService>.Instance,

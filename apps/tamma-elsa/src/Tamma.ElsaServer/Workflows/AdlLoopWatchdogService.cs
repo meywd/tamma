@@ -97,7 +97,6 @@ public sealed class AdlLoopWatchdogService : BackgroundService
     public const string DefinitionId = "adl-orchestrator";
 
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IWorkflowDispatcher _dispatcher;
     private readonly IOptions<AdlLoopWatchdogOptions> _options;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<AdlLoopWatchdogService> _logger;
@@ -107,9 +106,18 @@ public sealed class AdlLoopWatchdogService : BackgroundService
 
     private DateTimeOffset _lastAliveUtc;
 
+    /// <param name="scopeFactory">
+    /// The ONLY way this class reaches engine services. <see cref="IWorkflowDispatcher"/>
+    /// is deliberately NOT a constructor parameter: Elsa registers it SCOPED, this class
+    /// is a singleton <c>BackgroundService</c>, and injecting it makes it a captive
+    /// dependency — Development's <c>ValidateScopes</c> refuses to build the host at all,
+    /// and Production silently promotes one dispatcher, and the DB session behind it, to
+    /// process lifetime. <c>HourlyAnalyticsRollupScheduler</c> had exactly this defect and
+    /// had it removed on 2026-08-18; the watchdog was written with the same mistake in a
+    /// parallel worktree on the same day. It is resolved per tick from the scope below.
+    /// </param>
     public AdlLoopWatchdogService(
         IServiceScopeFactory scopeFactory,
-        IWorkflowDispatcher dispatcher,
         IOptions<AdlLoopWatchdogOptions> options,
         TimeProvider timeProvider,
         ILogger<AdlLoopWatchdogService> logger,
@@ -118,12 +126,10 @@ public sealed class AdlLoopWatchdogService : BackgroundService
         IAdlStopSwitch? stopSwitch = null)
     {
         ArgumentNullException.ThrowIfNull(scopeFactory);
-        ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         _scopeFactory = scopeFactory;
-        _dispatcher = dispatcher;
         _options = options;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -262,7 +268,9 @@ public sealed class AdlLoopWatchdogService : BackgroundService
                 Input = new Dictionary<string, object> { ["configJson"] = configJson! },
             };
 
-            await _dispatcher.DispatchAsync(request, new DispatchWorkflowOptions(), ct).ConfigureAwait(false);
+            // Resolved from the per-tick scope, never held: see the ctor doc.
+            var dispatcher = scope.ServiceProvider.GetRequiredService<IWorkflowDispatcher>();
+            await dispatcher.DispatchAsync(request, new DispatchWorkflowOptions(), ct).ConfigureAwait(false);
 
             // One-shot per stall: treat the re-arm as liveness so a loop that cannot start
             // is not re-dispatched every poll interval.
