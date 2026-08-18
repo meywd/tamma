@@ -208,6 +208,18 @@ public sealed class AdlLoopWatchdogService : BackgroundService
         var down = now - _lastAliveUtc;
         if (down < opts.StallThreshold) return;
 
+        // A loop a human deliberately stopped is not a stall. Reporting it as one every
+        // threshold window would train operators to ignore ADL.LOOP.STALLED, which is the
+        // one event that has to mean something.
+        var stopReason = _stopSwitch.GetStopReason();
+        if (stopReason is not null)
+        {
+            _lastAliveUtc = now;
+            _logger.LogInformation(
+                "adl.loop.down_by_operator reason={Reason} — not reported as a stall.", stopReason);
+            return;
+        }
+
         // ── Stalled ────────────────────────────────────────────────────────────
         var downMinutes = (int)down.TotalMinutes;
         _logger.LogCritical(
@@ -286,10 +298,9 @@ public sealed class AdlLoopWatchdogService : BackgroundService
     {
         configJson = null;
 
+        // The stop switch is checked earlier, before the stall is even declared — an
+        // operator-stopped loop never reaches here.
         if (!opts.ReArm) return "re-arm disabled (Adl:Watchdog:ReArm=false)";
-
-        var stop = _stopSwitch.GetStopReason();
-        if (stop is not null) return stop;
 
         configJson = _configCache?.Last
                      ?? (string.IsNullOrWhiteSpace(opts.ConfigJson) ? null : opts.ConfigJson)

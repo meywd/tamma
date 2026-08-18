@@ -109,7 +109,9 @@ public class AdlLoopWatchdogTests
         await h.TickAsync();
 
         h.Dispatcher.Dispatched.Should().BeEmpty(
-            "restarting a loop a human deliberately stopped would defeat the brake");
+            "restarting a loop a human deliberately stopped would defeat the brake — and it is "
+            + "not reported as a stall either, or ADL.LOOP.STALLED would fire every threshold "
+            + "window for an intentional stop and stop meaning anything");
     }
 
     [Test]
