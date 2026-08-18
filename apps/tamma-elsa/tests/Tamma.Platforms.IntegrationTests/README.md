@@ -238,7 +238,15 @@ so the next run does not rediscover it:
    docker tag  mirror.gcr.io/library/postgres:17-alpine postgres:17-alpine
    docker pull mirror.gcr.io/gitea/gitea:1.21
    docker tag  mirror.gcr.io/gitea/gitea:1.21 gitea/gitea:1.21
+   docker pull mirror.gcr.io/library/redis:7-alpine
+   docker tag  mirror.gcr.io/library/redis:7-alpine redis:7-alpine
    ```
+
+   The redis line is worth doing before you read a `Tamma.Api.Tests` result:
+   without it, `RedisDistributedRateLimitBackendTests` fails its `OneTimeSetUp`
+   with `DockerImageNotFoundException` and reports SIX failures that have
+   nothing to do with your change. That "known baseline" has been quoted in
+   several verification notes; it is an unpulled image, not a real red.
 
 3. **The docker daemon stops on its own.** `docker info || ((sudo -n dockerd
    >/tmp/dockerd.log 2>&1 &); sleep 15)` before any run.
