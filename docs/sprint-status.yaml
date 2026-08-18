@@ -40,8 +40,31 @@
 #       ungoverned-endpoint ratchet 210 -> 208.
 #   If these want story numbers retro-fitted, they belong to epic 43 (governance) and epic 40 (loop resumability).
 #
-# last_reconciled_against_code: 2026-07-24 — scope: epic-39, epic-40, epic-41, epic-42 (evidence = deliverables present in
-#   apps/tamma-elsa/src + their tests present in apps/tamma-elsa/tests). All other epic blocks carry their own older markers.
+# updated: 2026-08-18 (epic 32/34/35/36/37/38 reconciliation against the tree — TWENTY-EIGHT stories flipped
+#   `drafted` -> `done`: 32-4, 32-5, 32-6, 32-15, 32-16, 32-17, 32-18, 32-23; 34-2, 34-3, 34-4, 34-5, 34-6, 34-9,
+#   34-11; 35-2, 35-4, 35-5; 36-2, 36-3, 36-4; 37-2, 37-3, 37-10; 38-1, 38-2, 38-3, 38-4. Method, per story: locate
+#   the named deliverable in apps/tamma-elsa/src (a service class is not enough for an "API" story — the route had to
+#   be found mapped in Program.cs, and a "dashboard" story had to have the page as well as the endpoint) AND its test
+#   suites in apps/tamma-elsa/tests. The evidence is inline on each line so the next reader can re-check it in one
+#   grep rather than trusting this header.
+#
+#   NOT flipped, and each one was looked at: 32-20 (no IQuestionRouter and no request_input tool anywhere — zero
+#   hits), 35-6 / 35-7 / 35-8 (only entity columns and a webhook-handler mention; no quota enforcement, no billing
+#   portal, no dunning), 36-6 (no analytics page in packages/dashboard-user), 36-7 (the margin seam in
+#   Tamma.ElsaServer/Program.cs is still NullAnalyticsPricingConfig — the code names 36-7 as the story that would
+#   replace it), 36-8 (a comment in TenantAnalyticsDtos naming the future exporter, nothing else). A story-number
+#   mention in a comment was never accepted as evidence; four of these six are mentioned in code and still unbuilt.
+#
+#   CAVEAT recorded on 36-2's line: the dimensional projection is built and tested, but no host can run it on a
+#   schedule — the Elsa engine composes no ITenantDbContextFactory, so the fan-out faulted every hour. As of
+#   2026-08-18 HourlyAnalyticsRollupScheduler refuses to start and logs why, instead of dispatching doomed work.
+#
+#   ALSO STALE, NOT MINE TO EDIT: every story flipped here still reads `Status: drafted` in its own
+#   docs/stories/epic-NN/story-NN-M/*.md header. This file is now ahead of those.)
+#
+# last_reconciled_against_code: 2026-08-18 — scope: epic-32, epic-34, epic-35, epic-36, epic-37, epic-38 (this pass);
+#   2026-07-24 for epic-39/40/41/42 (evidence = deliverables present in apps/tamma-elsa/src + their tests present in
+#   apps/tamma-elsa/tests). All other epic blocks carry their own older markers.
 # project: Tamma
 # project_key: Tamma
 # tracking_system: file-system
@@ -490,9 +513,9 @@ development_status:
   32-1-agent-entity-model-and-versioned-saved-config: done # Agent Entity Model & Versioned Saved Config (public/private) [P0]
   32-2-agent-registry-resolution-and-rbac-api: done # Agent Registry, Resolution & RBAC API [P0]
   32-3-per-tenant-provider-credential-resolution: done # Per-Tenant Provider Credential Resolution (BYOK → platform) [P0]
-  32-4-saas-provider-auth-gating-api-key-only: drafted # SaaS Provider Gate — now the gate STAGE of the call-LLM endpoint (REFRAMED 2026-06-21) [P0]
-  32-5-managed-agent-execution-layer: drafted         # Call-LLM Endpoint + Managed Execution (POST /api/v1/llm/call; lynchpin) (REFRAMED 2026-06-21) [P0]
-  32-6-agent-action-trail-in-tenant-store: drafted    # Agent Action Trail (DCB events tagged agent_id) in Tenant Store [P0]
+  32-4-saas-provider-auth-gating-api-key-only: done    # SaaS Provider Gate — now the gate STAGE of the call-LLM endpoint (REFRAMED 2026-06-21) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Security/{SaaSProviderGate,ITenantProviderEntitlement,EntityProviderAuthLookup,StaticProviderAuthLookup,ProviderGatingMetrics}.cs + Program.cs registration + Api.Tests/Security/{SaaSProviderGateTests,ProviderGateDiTests,EntityProviderAuthLookupTests,StaticProviderAuthLookupTests}
+  32-5-managed-agent-execution-layer: done            # Call-LLM Endpoint + Managed Execution (POST /api/v1/llm/call; lynchpin) (REFRAMED 2026-06-21) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Program.cs:3471 maps POST /api/v1/llm/call -> LlmCallEndpoints.CallLlm; Api/Services/Agents/ManagedAgent.cs; Api.Tests/{Endpoints/LlmCallEndpointsTests,Agents/ManagedAgentTests,Agents/LlmCallContractTests,Agents/CallLlmInlineCredentialTests}
+  32-6-agent-action-trail-in-tenant-store: done       # Agent Action Trail (DCB events tagged agent_id) in Tenant Store [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Agents/{AgentTrailEmitter,AgentTrailTags,AgentTrailContext,AgentTrailEventTypes}.cs + Api.Tests/Agents/{AgentTrailEmitterTests,AgentTrailEndpointsTests,AgentTrailRepositoryTests}
   32-7-multi-agent-design-review-panels-in-elsa: drafted # Multi-Agent Design/Review Panels in Elsa (strategy-driven) [P1]
   32-8-outcome-capture-and-bug-taxonomy-at-review-gate: drafted # Outcome Capture & Bug Taxonomy at Review/Gate [P1]
   32-9-cost-basis-plus-margin-metering-and-byok-pricing-model: drafted # Cost-Basis-Plus-Margin Metering & BYOK Pricing Model (re-targets Epic 20) [P1]
@@ -502,38 +525,38 @@ development_status:
   32-13-agent-management-and-benchmark-dashboards: drafted # Agent Management & Benchmark Dashboards (admin public + tenant private) [P2]
   32-14-a-b-experiment-framework-for-agents: drafted  # A/B Experiment Framework for Agents (Phase 2: cohorts, significance, rollout/rollback) [P2]
   # --- Architecture-pivot stories (added 2026-06-21; see docs/superpowers/specs/2026-06-20-epic-32-revised-agent-architecture.md) ---
-  32-15-persona-reframe-and-seeding: drafted          # Persona Reframe & Seeding (named cross-role personas; amends 32-1) [P0]
-  32-16-per-tenant-agent-enablement: drafted          # Per-Tenant Agent/Persona Enablement (TenantAgentEnablement) [P0]
-  32-17-custom-agent-prompts: drafted                 # Custom-Agent Prompts (ConfigJson.prompts; custom prompts ⇔ custom agent) [P0]
-  32-18-registry-enablement-gate-and-prompt-source: drafted # Registry Enablement Gate & Epic-27 Prompt Source (amends 32-2) [P0]
+  32-15-persona-reframe-and-seeding: done             # Persona Reframe & Seeding (named cross-role personas; amends 32-1) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Agents/{PersonaPromptResolver,DefaultPersonaOptions,AgentRegistryService}.cs + Activities/TenantLifecycle/SeedTenantDefaultsActivity.cs + Api.Tests/Agents/{PersonaPromptResolverTests,AgentEntitySeederTests,AgentResolverChainTests}
+  32-16-per-tenant-agent-enablement: done             # Per-Tenant Agent/Persona Enablement (TenantAgentEnablement) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Agents/{TenantAgentEnablementService,AgentEnablementEventTypes}.cs + Dtos/Agents/AgentEnablementDtos.cs + Api.Tests/Agents/{AgentEnablementEndpointsTests,TenantAgentEnablementIsolationTests,TenantAgentEnablementConstraintTests,TenantEnablementSeederTests}
+  32-17-custom-agent-prompts: done                    # Custom-Agent Prompts (ConfigJson.prompts; custom prompts ⇔ custom agent) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Agents/{CustomAgentPromptResolver,AgentPromptSet,AgentPromptSource,AgentConfigValidator,ResolvedAgentConfig}.cs + Api.Tests/Agents/{CustomAgentPromptResolverTests,AgentConfigValidatorPromptsTests,AgentPromptSetTests}
+  32-18-registry-enablement-gate-and-prompt-source: done    # Registry Enablement Gate & Epic-27 Prompt Source (amends 32-2) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Agents/{AgentRegistryService,AgentResolverService,AgentEventTypes}.cs + Endpoints/AgentEndpoints.cs + Api.Tests/Agents/{AgentEnablementGateTests,AgentEnablementGateEndpointsTests,AgentEndpointsTests}
   32-19-agent-style-voice-variants: drafted           # Agent Style/Voice Variants (optional overlay; split from 32-12) [P2]
   32-20-interactive-question-back: drafted            # Interactive Question-Back (request_input tool + IQuestionRouter) [P1]
   32-21-mcp-and-plugin-tool-sourcing: drafted         # MCP & Plugin Tool Sourcing (C#) [P1]
   32-22-prompt-and-response-cache: drafted            # Prompt & Response Cache (server-side) [P2]
-  32-23-streaming-run-tap: drafted                    # Streaming Run Tap (SSE for dashboard/CLI) [P1]
+  32-23-streaming-run-tap: done                       # Streaming Run Tap (SSE for dashboard/CLI) [P1] | DONE 2026-08-18 (checked in code, not from a changelog): GET /api/v1/llm/runs/{correlationId}/stream (Program.cs:3488) + Api/Services/Streaming/{LlmRunStreamBus,RunStreamFrame,RunStreamFrameScrubber,BusToolLoopEventSink}.cs + Api.Tests/Streaming/{LlmRunStreamBusTests,BusToolLoopEventSinkTests,BufferedNonRegressionTests} + Endpoints/LlmRunStreamEndpointsTests
   32-24-csharp-harness-cli-adapter: drafted           # C# Harness/CLI Agent Adapter (single-user local, DEFERRED) [P3]
   epic-32-retrospective: optional
 
   epic-34: contexted   # NEW Pricing, Plans & Entitlements (added 2026-06-17; all stories drafted)
   34-1-plan-and-price-book-catalog-data-model: done # Plan & Price-Book Catalog Data Model [P0]
-  34-2-plan-catalog-admin-api-and-custom-enterprise-plans: drafted # Plan Catalog Admin API & Custom Enterprise Plans [P0]
-  34-3-byok-vs-platform-provided-pricing-mode: drafted # BYOK vs Platform-Provided Pricing Mode (per-provider, secret-cabinet wired) [P0]
-  34-4-per-tenant-plan-assignment-and-lifecycle: drafted # Per-Tenant Plan Assignment & Lifecycle [P0]
-  34-5-cost-price-markup-engine: drafted              # Cost->Price Markup Engine (platform-provided usage) [P0]
-  34-6-entitlement-and-quota-resolution-service: drafted # Entitlement & Quota Resolution Service [P0]
+  34-2-plan-catalog-admin-api-and-custom-enterprise-plans: done    # Plan Catalog Admin API & Custom Enterprise Plans [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Pricing/{PlanCatalogService,PlanVersionEditor,CustomPlanSlug,PlanCatalogEventTypes}.cs + Extensions/PricingServiceCollectionExtensions.cs + Api.Tests/Pricing/{AdminPlanCatalogEndpointsTests,PlanCatalogEndpointsTests,PublicPricingPlansEndpointsTests}
+  34-3-byok-vs-platform-provided-pricing-mode: done    # BYOK vs Platform-Provided Pricing Mode (per-provider, secret-cabinet wired) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Pricing/{ITenantProviderBillingService,IProviderByokSecretCabinet,PricingEventTypes}.cs + Core/Enums/MetricBillingMode.cs + Api.Tests/Pricing/{PricingByokEndpointsTests,PricingByokRbacTests,PricingByokEnableConflictTests,TenantProviderBillingResolverTests}
+  34-4-per-tenant-plan-assignment-and-lifecycle: done    # Per-Tenant Plan Assignment & Lifecycle [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Pricing/PlanAssignmentService.cs + Core/Enums/{PlanAssignmentStatus,PlanChangeDirection}.cs + plan.activate_scheduled platform-task handler + Api.Tests/Pricing/{PlanAssignmentServiceTests,PlanAssignmentEndpointsTests,PlanAssignmentMigrationTests}
+  34-5-cost-price-markup-engine: done                 # Cost->Price Markup Engine (platform-provided usage) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Pricing/{UsageLine,IMarginPolicyResolver,ITenantProviderPricingModeResolver,BillingCustomerPricingModeResolver}.cs + Core/Enums/PricingMode.cs + Api.Tests/Pricing/{UsagePricingEngineTests,MarginPolicyResolverTests,MarginPolicySeederTests,PricingEstimateEndpointTests}
+  34-6-entitlement-and-quota-resolution-service: done    # Entitlement & Quota Resolution Service [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Pricing/{EntitlementSnapshotCache,IEntitlementUsageReader,IActivePlanAssignmentSource,EntitlementEventTypes}.cs + Services/Pricing/EntitlementCacheInvalidationListener.cs + Api.Tests/Pricing/{EntitlementEndpointsTests,EntitlementSnapshotCacheTests,ControlPlaneEntitlementUsageReaderTests,EntitlementCacheInvalidationListenerTests}
   34-7-trials-credits-and-promo-codes: drafted        # Trials, Credits & Promo Codes [P1]
   34-8-pricing-audit-events-and-reproducibility: drafted # Pricing Audit, Events & Reproducibility [P1]
-  34-9-pricing-and-plan-management-dashboards: drafted # Pricing & Plan Management Dashboards [P1]
+  34-9-pricing-and-plan-management-dashboards: done    # Pricing & Plan Management Dashboards [P1] | DONE 2026-08-18 (checked in code, not from a changelog): BOTH halves. Server: Endpoints/Admin/AdminPricingDashboardEndpoints.cs (GET /api/admin/pricing/overview, mapped Program.cs:2211) + Api.Tests/Pricing/AdminPricingDashboardEndpointsTests. UI: packages/dashboard/src/pages/admin/pricing/{PricingTab,PricingOverviewPanel,MarginPolicyPanel,PlanVersionEditor,CustomPlanPanel}.tsx + its __tests__
   34-10-epic-20-decommission-and-pricing-contract-migration: drafted # Epic 20 Decommission & Pricing Contract Migration [P0]
-  34-11-provider-cost-price-book: drafted             # Provider Cost Price-Book (Provider + ProviderModelPrice cost entities behind IProviderPricingService; before 34-5) (added 2026-06-21) [P0]
+  34-11-provider-cost-price-book: done                # Provider Cost Price-Book (Provider + ProviderModelPrice cost entities behind IProviderPricingService; before 34-5) (added 2026-06-21) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Providers/{DbProviderPricingService,ProviderCostResolver,ProviderRateLookup,ProviderPricingEventTypes}.cs + Extensions/ProviderPricingServiceCollectionExtensions.cs + Api.Tests/Providers/{DbProviderPricingServiceTests,ProviderPricingSeederTests,ProviderPricingParityTests}
   epic-34-retrospective: optional
 
   epic-35: contexted   # NEW Billing & Payments (C#) — supersedes Epic 20 (added 2026-06-17; all stories drafted)
   35-1-stripe-integration-foundation-billing-plan-catalog-and-custo: done # Stripe Integration Foundation, Billing Plan Catalog & Customer Mapping (C#) [P0]
-  35-2-byok-vs-platform-provided-billing-mode-and-per-tenant-provid: drafted # BYOK vs Platform-Provided Billing Mode & Per-Tenant Provider Key Cabinet Integration [P0]
+  35-2-byok-vs-platform-provided-billing-mode-and-per-tenant-provid: done    # BYOK vs Platform-Provided Billing Mode & Per-Tenant Provider Key Cabinet Integration [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Billing/{BillingModeTagger,NullBillingModeTagger,IBillingModeTagger,BillingModeEvents}.cs + Extensions/BillingModeServiceCollectionExtensions.cs wired at Program.cs:1344 (mode-aware Null seam in single-user) + Api.Tests/Billing/BillingModeTaggerTests + SaaS/LlmProxyServiceTests
   35-3-byok-aware-usage-metering-and-stripe-meter-event-reporting: drafted # BYOK-Aware Usage Metering & Stripe Meter Event Reporting [P0]
-  35-4-subscription-lifecycle-create-upgrade-downgrade-cancel-trial: drafted # Subscription Lifecycle — Create, Upgrade/Downgrade, Cancel, Trial & Proration [P0]
-  35-5-stripe-webhook-ingestion-idempotency-and-billing-event-proje: drafted # Stripe Webhook Ingestion, Idempotency & Billing Event Projection [P0]
+  35-4-subscription-lifecycle-create-upgrade-downgrade-cancel-trial: done    # Subscription Lifecycle — Create, Upgrade/Downgrade, Cancel, Trial & Proration [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Billing/{SubscriptionService,SubscriptionMirrorUpdater,SubscriptionMirrorWebhookHandler}.cs + Endpoints/Billing/SubscriptionEndpoints.cs (checkout / change-plan / cancel / seats) + Api.Tests/Billing/{SubscriptionServiceCheckoutTests,SubscriptionMirrorUpdaterTests,SubscriptionMirrorWebhookHandlerTests,NullBillingSubscriptionTests}
+  35-5-stripe-webhook-ingestion-idempotency-and-billing-event-proje: done    # Stripe Webhook Ingestion, Idempotency & Billing Event Projection [P0] | DONE 2026-08-18 (checked in code, not from a changelog): POST /api/v1/billing/stripe/webhook + admin replay routes (Program.cs:3426-3433) + Api/Services/Billing/{StripeWebhookProcessor,IStripeEventVerifier,IStripeSigningSecretSource,BillingWebhookDcbEvents,BillingWebhookFollowupTaskHandler}.cs + Extensions/BillingWebhookServiceCollectionExtensions.cs + Api.Tests/Billing/{StripeWebhookProcessorTests,StripeWebhookEndpointTests,BillingWebhookRoutesTests}
   35-6-plan-quota-and-usage-limit-enforcement: drafted # Plan Quota & Usage-Limit Enforcement (BYOK-Aware) [P0]
   35-7-payment-methods-and-self-service-stripe-billing-portal: drafted # Payment Methods & Self-Service Stripe Billing Portal [P1]
   35-8-invoicing-failed-payment-dunning-and-recovery: drafted # Invoicing, Failed-Payment Dunning & Recovery [P0]
@@ -545,9 +568,9 @@ development_status:
 
   epic-36: contexted   # NEW Analytics & Reporting Platform (added 2026-06-17; all stories drafted)
   36-1-dimensional-analytics-projection-schema-and-store: done # Dimensional Analytics Projection Schema & Store [P0]
-  36-2-dcb-to-analytics-projection-pipeline: drafted  # DCB-to-Analytics Projection Pipeline (Dimensional Rollup) [P0]
-  36-3-tenant-usage-analytics-api: drafted            # Tenant Usage Analytics API [P0]
-  36-4-cost-and-spend-analytics-api: drafted          # Cost & Spend Analytics API (BYOK vs Platform) [P0]
+  36-2-dcb-to-analytics-projection-pipeline: done     # DCB-to-Analytics Projection Pipeline (Dimensional Rollup) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Activities/Analytics/{ComputeTenantDimensionalRollupActivity,FanOutTenantDimensionalRollupsActivity,CompactDailyAnalyticsActivity,PurgeStaleUsageAnalyticsActivity,DimensionalProjectionMetrics,IAnalyticsPricingConfig}.cs, all wired into HourlyAnalyticsRollupWorkflow + Activities.Tests/Analytics/* + Api.Tests/Analytics/{DimensionalRollupIsolationTests,AnalyticsUsageModelTests}. CAVEAT: the projection is built and tested but NO host can run it on a schedule yet - the engine composes no ITenantDbContextFactory, so HourlyAnalyticsRollupScheduler now refuses to start and says so (2026-08-18); 36-7's margin seam is still the Null impl
+  36-3-tenant-usage-analytics-api: done               # Tenant Usage Analytics API [P0] | DONE 2026-08-18 (checked in code, not from a changelog): GET /api/orgs/{tenantId}/analytics/usage and /usage/breakdown (Program.cs:2603-2605) + Api/Services/Analytics/{TenantAnalyticsService,TenantAnalyticsDtos}.cs + Endpoints/TenantAnalyticsEndpoints.cs + Api.Tests/Analytics/{TenantAnalyticsServiceTests,TenantAnalyticsEndpointsTests,TenantAnalyticsIntegrationTests}
+  36-4-cost-and-spend-analytics-api: done             # Cost & Spend Analytics API (BYOK vs Platform) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): GET /api/orgs/{tenantId}/analytics/cost (Program.cs:2613) + Api/Services/Analytics/{CostAnalyticsService,CostAnalyticsDtos,CostAnalyticsEvents}.cs + Api.Tests/Analytics/{CostAnalyticsServiceTests,CostAnalyticsEndpointTests,CostAnalyticsIsolationTests}
   36-5-agent-and-tenant-performance-rollups-api: drafted # Agent & Tenant Performance Rollups API (consume Epic 32) [P1]
   36-6-tenant-analytics-dashboard-ui: drafted         # Tenant Analytics Dashboard UI [P1]
   36-7-pricing-cost-basis-and-platform-margin-model: drafted # Pricing / Cost-Basis & Platform Margin Model [P0]
@@ -559,24 +582,24 @@ development_status:
 
   epic-37: contexted   # NEW Audit, Compliance & Data Governance (added 2026-06-17; all stories drafted)
   37-1-sensitive-action-audit-taxonomy-and-curated-audit-record-pro: done # Sensitive-Action Audit Taxonomy & Curated Audit-Record Projection [P0]
-  37-2-tamper-evident-hash-chain-over-audit-records: drafted # Tamper-Evident Hash-Chain over Audit Records [P0]
-  37-3-audit-query-search-and-filter-api: drafted     # Audit Query, Search & Filter API [P0]
+  37-2-tamper-evident-hash-chain-over-audit-records: done    # Tamper-Evident Hash-Chain over Audit Records [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Core/Audit/{AuditChainHasher,AuditChainVerifier,AuditRecordCanonicalizer,AuditChainScope,ChainVerificationResult}.cs + Api/Services/Audit/AuditChainCheckpointScheduler.cs + GET /api/v1/admin/audit/verify + POST /audit/checkpoint (Program.cs:2416-2418) + tenant-scoped verify (OrgEndpoints) + Api.Tests/Audit/{AuditChainRepositoryChainingTests,AuditChainPostgresVerifyTests,AuditChainMigrationTests,AuditRecordModelTests}
+  37-3-audit-query-search-and-filter-api: done        # Audit Query, Search & Filter API [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Api/Services/Audit/{AuditQueryService,AuditQueryFilter,AuditQueryEventTypes}.cs + Dtos/Audit/* + GET /api/orgs/{tenantId}/audit (OrgEndpoints.ListTenantAudit, Program.cs:2531) + GET /api/v1/admin/audit + Api.Tests/{Audit/AuditQueryServiceTests,Audit/AuditQueryFilterTests,Orgs/TenantAuditEndpointTests}
   37-4-signed-audit-export-with-integrity-manifest: drafted # Signed Audit Export (JSON/CSV) with Integrity Manifest [P1]
   37-5-audit-retention-policies-and-tamper-aware-pruning: drafted # Audit Retention Policies & Tamper-Aware Pruning [P1]
   37-6-legal-hold: drafted                            # Legal Hold [P1]
   37-7-gdpr-dsar-data-subject-access-export: drafted  # GDPR DSAR — Data Subject Access Export [P1]
   37-8-gdpr-right-to-erasure-with-crypto-shredding-and-audit-preser: drafted # GDPR Right-to-Erasure with Crypto-Shredding & Audit Preservation [P1]
   37-9-consent-and-data-processing-logging: drafted   # Consent & Data-Processing Logging [P2]
-  37-10-sensitive-action-audit-emission-coverage: drafted # Sensitive-Action Audit Emission Coverage (BYOK, Billing/Plan, Auth/Login, Agent Actions) [P0]
+  37-10-sensitive-action-audit-emission-coverage: done    # Sensitive-Action Audit Emission Coverage (BYOK, Billing/Plan, Auth/Login, Agent Actions) [P0] | DONE 2026-08-18 (checked in code, not from a changelog): Core/Audit/SensitiveActionCatalog.cs + Api/Services/Audit/{SensitiveActionEmitter,SensitiveAction,ApiKeyAuditHeartbeat}.cs + Extensions/AuditEmissionServiceCollectionExtensions.cs + Api.Tests/Audit/{SensitiveActionEmissionCoverageTests,SensitiveActionEmitterTests,ApiKeyAuditHeartbeatTests}
   37-11-soc2-aligned-control-mapping-and-evidence-pack: drafted # SOC2-Aligned Control Mapping & Evidence Pack [P2]
   37-12-admin-and-tenant-audit-dashboard-ui: drafted  # Admin & Tenant Audit Dashboard UI [P1]
   epic-37-retrospective: optional
 
   epic-38: contexted   # NEW Step → Internal-API Mediation (non-LLM) — Epic-32 follow-up (added 2026-06-21; all stories drafted)
-  38-1-git-platform-step-mediation: drafted           # Git-Platform Step Mediation (Class A) [P1]
-  38-2-agent-dispatch-step-mediation: drafted         # Agent-Dispatch Step Mediation (Class C) [P1]
-  38-3-slack-notifications-step-mediation: drafted    # Slack/Notifications Step Mediation (Class D) + Billing enforce-by-design [P2]
-  38-4-build-time-guardrail-analyzer: drafted         # Build-Time Guardrail Analyzer (rule-1 enforcement) [P1]
+  38-1-git-platform-step-mediation: done              # Git-Platform Step Mediation (Class A) [P1] | DONE 2026-08-18 (checked in code, not from a changelog): engine-side ADL git activities (CreateBranch/CreatePullRequest/MergePullRequest/UpdateIssueStatus/AnalyzeReview) route through TammaApiClient only; Api side is Services/Git/{GitMediationService,GitRepoAuthorizer,GitTokenResolver} + Endpoints; Api.Tests/Git/{GitMediationServiceTests,GitEndpointsTests,GitRepoAuthorizerTests,GitTokenResolverTests}
+  38-2-agent-dispatch-step-mediation: done            # Agent-Dispatch Step Mediation (Class C) [P1] | DONE 2026-08-18 (checked in code, not from a changelog): Activities/AgentDispatch/* dispatch through TammaApiClient + Api-side agent-dispatch endpoints and aggregator + Api.Tests/AgentDispatch/{AgentDispatchMediationServiceTests,AgentDispatchEndpointsTests,ActionsResultAggregatorTests}
+  38-3-slack-notifications-step-mediation: done       # Slack/Notifications Step Mediation (Class D) + Billing enforce-by-design [P2] | DONE 2026-08-18 (checked in code, not from a changelog): Activities/Integration/SlackActivity.cs is a thin client over TammaApiClient (Models/SlackNotificationModels.cs) + Api/Services/Notifications/{OutboxSlackSender,NotificationSlackEventTypes} + Endpoints/NotificationEndpoints.cs + Extensions/NotificationServiceCollectionExtensions.cs + Api.Tests/Notifications/{NotificationEndpointsTests,OutboxSlackSenderTests} + Activities.Tests/Integration/SlackActivityThinClientTests
+  38-4-build-time-guardrail-analyzer: done            # Build-Time Guardrail Analyzer (rule-1 enforcement) [P1] | DONE 2026-08-18 (checked in code, not from a changelog): Tamma.Activities.Guardrails/{EngineExternalCallAnalyzer,GuardrailDiagnostics,Allowlist}.cs, referenced as an OutputItemType=Analyzer ProjectReference by Tamma.Activities.csproj AND Tamma.ElsaServer.csproj so TAMMA001 fails the solution build + Tamma.Activities.Guardrails.Tests/EngineExternalCallAnalyzerTests + Activities.Tests/Guardrails/ActivitiesGuardrailTests
   epic-38-retrospective: optional
 
   # ══════════════════════════════════════════════════════════════════════════════════════════════
