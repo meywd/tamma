@@ -137,8 +137,9 @@ public class AdlModeThreadingTests
     [Test]
     public void ResolveMode_SingleUserConfig_ProducesDev()
     {
-        // No SaaS signals → single-user → dev (deploys without a human gate unless
-        // an operator forces it via Deployment:RequireProdApproval).
+        // No SaaS signals → single-user → dev. (Since 2026-08-18 mode no longer
+        // decides the prod gate — the autonomy dial does — so "dev" is an audit
+        // label here, not a bypass.)
         var cfg = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>()).Build();
 
@@ -155,10 +156,13 @@ public class AdlModeThreadingTests
         // it is the state a store-rehydrated DispatchCycleActivity is actually in
         // inside the deployed engine ([JsonConstructor] leaves _configuration null).
         // So the deployment most likely to hit this arm was a SaaS one, and it got
-        // the gate switched off. Unknown now means gate ON.
+        // the gate switched off. Unknown now means business. (2026-08-18 follow-on:
+        // the prod gate itself now routes on the autonomy dial rather than mode, and
+        // its own unreadable arm fails closed — this resolver's fail-safe remains for
+        // every other mode-sensitive consumer and for the audit trail.)
         DispatchCycleActivity.ResolveMode(null, configuration: null)
             .Should().Be(DeploymentMode.Business,
-                "an unreadable configuration must not be read as 'no SaaS signal' — gate ON");
+                "an unreadable configuration must not be read as 'no SaaS signal'");
 
         // An explicit "saas" input engages the gate regardless of config.
         DispatchCycleActivity.ResolveMode("saas", configuration: null)

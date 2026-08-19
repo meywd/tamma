@@ -17,22 +17,23 @@ namespace Tamma.Activities.ADL;
 /// Dispatches a SingleIssueCycle workflow (fire & forget) with event emission.
 /// Wraps Elsa's DispatchWorkflow to add audit trail.
 ///
-/// <para><b>Deployment-mode threading (IMPORTANT fix, 2026-06-22).</b> The
-/// downstream <c>deployment-pipeline</c> gates its production deploy on a human
-/// approval bookmark when <c>mode == "business"</c> (or an explicit
-/// <c>requireProdApproval</c>). Nothing upstream used to set <c>mode</c>, so prod
-/// auto-deployed with no gate (violating "zero deployments without approval in
-/// Business Mode"). This activity now derives the real operating mode from
-/// configuration — mirroring <c>Tamma.Api.Services.PromptStore.TammaModeProvider</c>'s
-/// detection (the engine layer cannot reference <c>Tamma.Api</c> without a
-/// dependency cycle, so the shared, pure <see cref="DeploymentMode.Resolve"/> in
-/// Tamma.Core re-derives the SAME decision from the SAME config signals) — and
-/// forwards <c>mode</c> + <c>tenantId</c> + <c>requireProdApproval</c> to
-/// <c>single-issue-cycle</c>, which threads them into the pipeline.</para>
+/// <para><b>Deployment-mode threading (2026-06-22, re-scoped 2026-08-18).</b>
+/// This activity derives the real operating mode from configuration — mirroring
+/// <c>Tamma.Api.Services.PromptStore.TammaModeProvider</c>'s detection (the engine
+/// layer cannot reference <c>Tamma.Api</c> without a dependency cycle, so the
+/// shared, pure <see cref="DeploymentMode.Resolve"/> in Tamma.Core re-derives the
+/// SAME decision from the SAME config signals) — and forwards <c>mode</c> +
+/// <c>tenantId</c> + <c>requireProdApproval</c> to <c>single-issue-cycle</c>,
+/// which threads them into the pipeline. NOTE the re-scope: as of the owner
+/// directive of 2026-08-18 the pipeline's production-approval decision routes on
+/// the AUTONOMY GATE's answer for <c>effect:deploy.prod</c>, not on mode — mode
+/// is audit/event context there, and <c>requireProdApproval</c> is the explicit
+/// operator override that still forces the wait. The mode threading remains
+/// load-bearing for audit rows and for every other mode-sensitive consumer.</para>
 ///
-/// <para><b>Fail-safe:</b> an absent/unknown mode resolves to <c>business</c>
-/// (REQUIRE approval), never a silent prod auto-deploy. An operator can force the
-/// gate even in single-user mode via <c>Deployment:RequireProdApproval=true</c>.</para>
+/// <para><b>Fail-safe:</b> an absent/unknown mode still resolves to
+/// <c>business</c>, and the gate's own unreadable-answer arm fails closed to the
+/// human wait — so no configuration state yields a silent prod auto-deploy.</para>
 /// </summary>
 [Activity(
     "Tamma.ADL",

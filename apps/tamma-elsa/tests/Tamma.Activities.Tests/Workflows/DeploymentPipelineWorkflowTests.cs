@@ -214,7 +214,7 @@ public class DeploymentPipelineWorkflowTests
     }
 
     [Test]
-    public void ApprovalNeeded_GatesProd_DevModeBypassesToProd()
+    public void ApprovalNeeded_GatesProd_OnTheAutonomyGateOutcome()
     {
         // After UAT success the pipeline decides whether prod needs approval.
         // 43-9 AC11 inserted the governance gate BETWEEN the two, so this is now a

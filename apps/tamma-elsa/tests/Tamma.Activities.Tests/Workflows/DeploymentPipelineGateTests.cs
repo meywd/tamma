@@ -191,7 +191,8 @@ public class DeploymentPipelineGateTests
     /// deliberately NOT a re-derived copy of the predicate — a copy is what let a
     /// shipped test assert the opposite of its own name and stay green.</para>
     /// </summary>
-    private static bool ApprovalNeeded(string mode, bool requireProdApproval, string gateOutcome)
+    private static bool ApprovalNeeded(
+        string mode, bool requireProdApproval, string gateOutcome, bool enforced = true)
     {
         var builder = WorkflowTestHelper.BuildWorkflow(new DeploymentPipelineWorkflow());
         var flowchart = WorkflowTestHelper.GetFlowchart(builder);
@@ -199,12 +200,17 @@ public class DeploymentPipelineGateTests
             .Single(a => a.Id == "ProdApprovalNeeded");
 
         var variables = builder.Object.Variables;
+        // Mode is still DECLARED and SET here although the predicate no longer
+        // reads it (owner directive 2026-08-18: the dial decides, mode is
+        // audit/event context) — keeping it lets the mode-independence sweep
+        // prove that claim against the real delegate instead of assuming it.
         var modeVar = (Variable<string>)variables.Single(v => v.Name == "Mode");
         var flagVar = (Variable<bool>)variables.Single(v => v.Name == "RequireProdApproval");
         var gateVar = (Variable<string>)variables.Single(v => v.Name == "ProdGateOutcome");
+        var enforcedVar = (Variable<bool>)variables.Single(v => v.Name == "ProdGateEnforced");
 
         var register = new MemoryRegister();
-        register.Declare(new MemoryBlockReference[] { modeVar, flagVar, gateVar });
+        register.Declare(new MemoryBlockReference[] { modeVar, flagVar, gateVar, enforcedVar });
 
         using var services = new ServiceCollection().BuildServiceProvider();
         var context = new ExpressionExecutionContext(services, register);
@@ -212,6 +218,7 @@ public class DeploymentPipelineGateTests
         modeVar.Set(context, mode);
         flagVar.Set(context, requireProdApproval);
         gateVar.Set(context, gateOutcome);
+        enforcedVar.Set(context, enforced);
 
         var condition = decision.Condition.Expression?.Value
             as Func<ExpressionExecutionContext, ValueTask<object>>;
@@ -228,73 +235,131 @@ public class DeploymentPipelineGateTests
     // ====================================================================
 
     [Test]
-    public void EnforceMode_NeverWeakensBusinessModeGate()
+    public void TheDialDecides_ModeNoLongerForcesTheWait()
     {
-        // The failure this forbids: a governance epic that REMOVES an existing
-        // gate. Business mode waits today unconditionally; it must keep waiting no
-        // matter what the gate says, including when the gate says "automated".
-        ApprovalNeeded("business", requireProdApproval: false,
-            gateOutcome: GovernanceEvaluateResponse.OutcomeAutomated).Should().BeTrue();
-        ApprovalNeeded("business", requireProdApproval: false,
-            gateOutcome: "").Should().BeTrue();
-        ApprovalNeeded("business", requireProdApproval: false,
-            gateOutcome: CheckActionGateActivity.OutcomeUnavailable).Should().BeTrue();
+        // Owner directive 2026-08-18: "check the automation level, then go to
+        // orchestrator or human." Until then `mode == business` forced the wait
+        // unconditionally, which made the dial irrelevant in exactly the
+        // deployments the dial exists to govern. Now a gate that POSITIVELY
+        // grants automation routes production to the orchestrator in every mode —
+        // and the sweep below proves the predicate never reads mode at all.
+        foreach (var mode in new[] { "dev", "business", "" })
+        {
+            ApprovalNeeded(mode, requireProdApproval: false,
+                gateOutcome: GovernanceEvaluateResponse.OutcomeAutomated).Should().BeFalse(
+                $"mode={mode}: an automated resolution IS the grant — the dial decided");
 
-        ApprovalNeeded("dev", requireProdApproval: true,
-            gateOutcome: GovernanceEvaluateResponse.OutcomeAutomated).Should().BeTrue(
-            "the explicit requireProdApproval flag is the second pre-existing term and is equally "
-            + "untouched");
+            ApprovalNeeded(mode, requireProdApproval: false,
+                gateOutcome: GovernanceEvaluateResponse.OutcomeRequiresHuman).Should().BeTrue(
+                $"mode={mode}: below the dial goes to a human, whatever the mode");
+        }
     }
 
     [Test]
-    public void GateRequiresHuman_AddsAWaitWhereThereWasNone()
+    public void RequireProdApproval_IsAnOverride_thatForcesTheWaitPastAnAutomatingDial()
     {
-        // The whole point of the story, at the one seam with a real human wait:
-        // dev mode, no explicit flag — today this deploys straight through — and a
-        // tenant admin who set effect:deploy.prod to human-only now gets a
-        // wait.
+        // The config flag survives the re-base as the operator's override: it can
+        // only ADD a wait. A dial that automates does not silence it.
+        ApprovalNeeded("dev", requireProdApproval: true,
+            gateOutcome: GovernanceEvaluateResponse.OutcomeAutomated).Should().BeTrue();
+        ApprovalNeeded("business", requireProdApproval: true,
+            gateOutcome: GovernanceEvaluateResponse.OutcomeAutomated).Should().BeTrue();
+    }
+
+    [Test]
+    public void ObserveOnly_IsHonoured_theAdminsReportDontBlockPassesProduction()
+    {
+        // Enforced=false is an admin explicitly watching a tightening before it
+        // bites. The DECISION must honour it, not only the edge selection — the
+        // predicate reads the raw outcome variable, and before ProdGateEnforced
+        // was bound it would have blocked on the requires-human wire the admin
+        // asked to only observe.
+        ApprovalNeeded("business", requireProdApproval: false,
+            gateOutcome: GovernanceEvaluateResponse.OutcomeRequiresHuman, enforced: false)
+            .Should().BeFalse("observe-only reports, it does not block");
+
+        // But observe-only never rescues an UNREADABLE gate: unavailable carries
+        // Enforced=false from the activity's error arm, and an error is not an
+        // admin's decision.
+        ApprovalNeeded("business", requireProdApproval: false,
+            gateOutcome: CheckActionGateActivity.OutcomeUnavailable, enforced: false)
+            .Should().BeTrue("fail closed: an error posture must not read as observe-only");
+    }
+
+    [Test]
+    public void GateAutomated_Proceeds_GateRequiresHuman_Waits()
+    {
+        // The two live routes of the 2026-08-18 semantics, at the seam with the
+        // real human wait: the dial's grant deploys, the dial's refusal waits.
         ApprovalNeeded("dev", requireProdApproval: false,
             gateOutcome: GovernanceEvaluateResponse.OutcomeAutomated).Should().BeFalse(
-            "THE ANTI-NO-OP HALF: with the gate allowing, dev mode must still deploy straight "
-            + "through, or 'the gate adds a wait' would be satisfiable by a term that is always "
-            + "true");
+            "THE ANTI-NO-OP HALF: with the gate granting, production must deploy under the "
+            + "orchestrator, or 'the dial decides' would be satisfiable by a predicate that is "
+            + "always true");
 
         ApprovalNeeded("dev", requireProdApproval: false,
             gateOutcome: GovernanceEvaluateResponse.OutcomeRequiresHuman).Should().BeTrue();
     }
 
     [Test]
-    public void ShippedDefaults_DoNotAlterControlFlow_atSeamE()
+    public void ShippedDefaults_RouteProductionToAHuman()
     {
-        // AC2 for this seam. effect:deploy.prod ships at level 90,
-        // so with no policy rows the gate answers `automated` and every routing
-        // decision is byte-identical to before this story.
+        // effect:deploy.prod ships at zone level 90 and the dial defaults to 70,
+        // with enforcement ON when no policy row has an opinion (epic D1). So at
+        // shipped defaults the evaluator answers an enforced `requires-human`,
+        // and the predicate routes to the wait — in every mode. Automating
+        // production is a deliberate act: raise the dial to 90+, lower the
+        // action's level, or set observe-only. It is never the out-of-the-box
+        // state.
         foreach (var mode in new[] { "dev", "business", "" })
         {
-            foreach (var flag in new[] { true, false })
-            {
-                ApprovalNeeded(mode, flag, GovernanceEvaluateResponse.OutcomeAutomated)
-                    .Should().Be(ApprovalNeededBeforeThisStory(mode, flag),
-                        $"mode={mode}, requireProdApproval={flag}: a shipped-default gate must "
-                        + "change nothing");
-            }
+            ApprovalNeeded(mode, requireProdApproval: false,
+                gateOutcome: GovernanceEvaluateResponse.OutcomeRequiresHuman, enforced: true)
+                .Should().BeTrue($"mode={mode}: shipped defaults must not auto-deploy production");
         }
-
-        static bool ApprovalNeededBeforeThisStory(string mode, bool flag) =>
-            string.Equals(mode?.Trim(), "business", StringComparison.OrdinalIgnoreCase) || flag;
     }
 
     [Test]
-    public void AnUnavailableGate_isTreatedAsNoOpinion_notAsABlock()
+    public void ThePredicate_NeverReadsMode()
     {
-        // EngineGateCall_FailsOpenOnTransportError, expressed at the predicate.
-        // Fail-open here is safe ONLY because the term is OR'd: a null contributes
-        // nothing and the pre-existing predicate is untouched, which is exactly
-        // today's behaviour. A future adoption that REPLACED a predicate would make
-        // this posture wrong.
+        // The claim "mode is audit/event context now, not a gate term", proven
+        // against the real delegate: for every outcome/flag/enforced combination,
+        // every mode answers identically.
+        foreach (var flag in new[] { true, false })
+        foreach (var enforced in new[] { true, false })
+        foreach (var outcome in new[]
+        {
+            GovernanceEvaluateResponse.OutcomeAutomated,
+            GovernanceEvaluateResponse.OutcomeRequiresHuman,
+            GovernanceEvaluateResponse.OutcomeDenied,
+            CheckActionGateActivity.OutcomeUnavailable,
+            "",
+        })
+        {
+            var dev = ApprovalNeeded("dev", flag, outcome, enforced);
+            ApprovalNeeded("business", flag, outcome, enforced).Should().Be(dev,
+                $"outcome={outcome}, flag={flag}, enforced={enforced}");
+            ApprovalNeeded("", flag, outcome, enforced).Should().Be(dev,
+                $"outcome={outcome}, flag={flag}, enforced={enforced}");
+        }
+    }
+
+    [Test]
+    public void AnUnavailableGate_FailsClosed_ontoTheHumanWait()
+    {
+        // INVERTED on 2026-08-18, deliberately — the prior pin here said the exact
+        // opposite ("treated as no opinion, not as a block") and even predicted
+        // this moment: "a future adoption that REPLACED a predicate would make
+        // this posture wrong." That adoption has happened. While mode==business
+        // was the unconditional backstop, an unreadable gate could contribute
+        // nothing and production was still protected; with the dial as the
+        // DECIDER there is nothing behind it, so an unreadable answer must land
+        // on the human wait. Absence of evidence that automation was granted is
+        // not a grant (the finding-36 rule).
         ApprovalNeeded("dev", requireProdApproval: false,
-            gateOutcome: CheckActionGateActivity.OutcomeUnavailable).Should().BeFalse();
-        ApprovalNeeded("dev", requireProdApproval: false, gateOutcome: "").Should().BeFalse();
+            gateOutcome: CheckActionGateActivity.OutcomeUnavailable).Should().BeTrue();
+        ApprovalNeeded("dev", requireProdApproval: false, gateOutcome: "").Should().BeTrue(
+            "the unwritten empty string is indistinguishable from a gate that never ran");
     }
 
     // ====================================================================

@@ -196,8 +196,10 @@ public class CheckActionGateActivity : Activity
         {
             _logger?.LogWarning(
                 "Action-gate evaluation UNAVAILABLE for {ActionKey} (correlation {CorrelationId}); "
-                + "taking the Automated edge so the pre-existing approval predicate is unchanged. "
-                + "This is fail-open on an ERROR, not on a decision.",
+                + "outcome variable set to 'unavailable'. The edge taken is Automated, but what that "
+                + "MEANS is the adopting decision's choice — the prod-approval predicate treats "
+                + "'unavailable' as a human wait (fail closed, 2026-08-18), since an unreadable gate "
+                + "is not a grant.",
                 LogSanitizer.Clean(actionKey), LogSanitizer.Clean(correlationId));
 
             Outcome.Set(context, OutcomeUnavailable);
