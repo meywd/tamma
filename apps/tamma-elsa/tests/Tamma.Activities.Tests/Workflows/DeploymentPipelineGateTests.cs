@@ -439,6 +439,51 @@ public class DeploymentPipelineGateTests
     }
 
     // ====================================================================
+    // The full chain (owner directive 2026-08-18): the check is a STEP in the
+    // deployment workflow, and both of its live routes land on the SAME
+    // deployment step, which calls the orchestrator through llm-call.
+    // ====================================================================
+
+    [Test]
+    public void BothRoutes_ConvergeOnTheOneDeployStep_whichCallsTheOrchestratorViaLlmCall()
+    {
+        // Automated: gate step → decision False → PROD STARTED → the deploy step.
+        HasEdge("ProdApprovalNeeded", "False", "EmitProdStarted").Should().BeTrue(
+            "the dial's grant must route into the production stage, not around it");
+
+        // Human: decision True → wait → Approve → PROD APPROVED → the SAME entry.
+        HasEdge("ProdApprovalNeeded", "True", "WaitProdApproval").Should().BeTrue();
+        HasEdge("WaitProdApproval", "Approve", "EmitProdApproved").Should().BeTrue();
+        HasEdge("EmitProdApproved", null, "EmitProdStarted").Should().BeTrue(
+            "an approved deploy and an automated deploy must be the same deploy — one step, "
+            + "one audit shape, no second code path");
+
+        // The deployment step itself: exactly one, entered only via PROD STARTED,
+        // and it is a dispatch of the mediated llm-call workflow — the engine
+        // calls the orchestrator (POST /api/v1/llm/call, tools enabled), never a
+        // provider directly.
+        HasEdge("EmitProdStarted", null, "ProdDeploy").Should().BeTrue();
+
+        _flowchart.Connections
+            .Where(c => c.Target.Activity.Id == "ProdDeploy")
+            .Select(c => c.Source.Activity.Id)
+            .Should().BeEquivalentTo(new[] { "EmitProdStarted" },
+                "every route into the production deploy funnels through the one STARTED emit — "
+                + "there is no path that reaches the deploy step around the gate");
+
+        var deploy = _flowchart.Activities.OfType<Elsa.Workflows.Runtime.Activities.DispatchWorkflow>()
+            .Single(d => d.Id == "ProdDeploy");
+        var definitionId = typeof(Elsa.Workflows.Runtime.Activities.DispatchWorkflow)
+            .GetProperty("WorkflowDefinitionId")?.GetValue(deploy);
+        var expression = definitionId?.GetType().GetProperty("Expression")?.GetValue(definitionId)
+            as Elsa.Expressions.Models.Expression;
+        expression?.Value?.ToString().Should().Be("llm-call",
+            "the deployment step IS an orchestrator call — the mediated llm-call workflow with "
+            + "the devops deploy action — so the whole chain is: check step (autonomy dial, the "
+            + "shared action engine) → deploy step → orchestrator");
+    }
+
+    // ====================================================================
     // The wait it routes into is the EXISTING one
     // ====================================================================
 
