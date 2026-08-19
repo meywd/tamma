@@ -72,8 +72,18 @@ public class ApiKeyRepository(ControlPlaneDbContext db) : IApiKeyRepository
     public async Task RevokeAllByOwnerAsync(string ownerId)
     {
         var now = DateTime.UtcNow;
+        // Sweep everything that can still AUTHENTICATE, not just never-revoked
+        // rows — which means grace-window keys too (RevokedAt stamped in the
+        // FUTURE by RotateAsync's 24h rolling cutover). This filtered
+        // `RevokedAt == null` until 2026-08-19, which was harmless while a
+        // future-RevokedAt key was invisible to the auth candidate scans anyway;
+        // the moment ListValidByScopeAsync made the grace window real, this
+        // sweep had to match it, or an admin deleting a user (AdminEndpoints
+        // SoftDelete + this call) left the user's rotating key authenticating
+        // for up to 24 more hours. Owner-wide revocation is the emergency stop:
+        // it grants no grace.
         var keys = await db.ApiKeys
-            .Where(k => k.OwnerId == ownerId && k.RevokedAt == null)
+            .Where(k => k.OwnerId == ownerId && (k.RevokedAt == null || k.RevokedAt > now))
             .ToListAsync();
         foreach (var key in keys)
             key.RevokedAt = now;

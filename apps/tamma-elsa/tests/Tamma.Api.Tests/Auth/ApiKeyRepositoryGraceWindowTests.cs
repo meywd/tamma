@@ -79,6 +79,28 @@ public class ApiKeyRepositoryGraceWindowTests
     }
 
     [Test]
+    public async Task RevokeAllByOwner_KillsGraceWindowKeysToo()
+    {
+        // Owner-wide revocation is the emergency stop (admin user deletion calls
+        // it right after SoftDelete). It must sweep every key that can still
+        // authenticate — including one inside its 24h rotation grace window,
+        // which ListValidByScopeAsync deliberately keeps alive. Until 2026-08-19
+        // the sweep filtered RevokedAt == null, so the rotating key survived the
+        // owner's deletion and kept authenticating until its stamp expired.
+        var live = await SeedAsync("live", revokedAt: null);
+        var rotating = await SeedAsync("rotating", revokedAt: DateTime.UtcNow.AddHours(24));
+        var owner = live.OwnerId;
+        rotating.OwnerId = owner;
+        await _cp.SaveChangesAsync();
+
+        await _repo.RevokeAllByOwnerAsync(owner);
+
+        var valid = await _repo.ListValidByScopeAsync("installation");
+        valid.Select(k => k.Label).Should().NotContain(new[] { "live", "rotating" },
+            "after owner-wide revocation nothing of theirs may authenticate — no grace");
+    }
+
+    [Test]
     public async Task ListByScope_StillExcludesEveryRevokedKey()
     {
         // Deliberately unchanged: this method also backs the admin key listing, and
