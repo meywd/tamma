@@ -42,6 +42,13 @@ public static class PlanApprovalEvents
     public const string DecisionEditRequested = "PLAN_APPROVAL.DECISION.EDIT_REQUESTED";
 
     /// <summary>
+    /// The durable approval SLA expired with no human decision. LOUD (error-status) —
+    /// distinguished from a real rejection so "nobody looked" and "a human said no" are
+    /// not the same row in the audit trail.
+    /// </summary>
+    public const string DecisionTimedOut = "PLAN_APPROVAL.DECISION.TIMED_OUT";
+
+    /// <summary>
     /// Map a resolved <see cref="ApprovalDecision"/> onto its <c>PLAN_APPROVAL.DECISION.*</c>
     /// event type. Approve → APPROVED, Edit → EDIT_REQUESTED; anything else (Reject / Test /
     /// unknown) → REJECTED (fail-closed: an ambiguous decision must never proceed with the
@@ -61,7 +68,7 @@ public static class PlanApprovalEvents
     /// Requested / approved / edit-requested are normal (success-status) rows.
     /// </summary>
     public static string StatusForEvent(string type)
-        => type == DecisionRejected ? "error" : "success";
+        => type is DecisionRejected or DecisionTimedOut ? "error" : "success";
 
     /// <summary>
     /// Parse a tenant id from the loose string form threaded through the workflow inputs.

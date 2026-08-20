@@ -64,15 +64,4 @@ public class InviteRepository(ControlPlaneDbContext db) : IInviteRepository
         invite.ExpiresAt = newExpiresAt;
         await db.SaveChangesAsync();
     }
-
-    [Obsolete("Use DeleteScopedAsync for per-tenant invariant. Kept for transitional callers.")]
-    public async Task DeleteAsync(Guid id)
-    {
-        var invite = await db.UserInvites.FindAsync(id);
-        if (invite is not null)
-        {
-            db.UserInvites.Remove(invite);
-            await db.SaveChangesAsync();
-        }
-    }
 }

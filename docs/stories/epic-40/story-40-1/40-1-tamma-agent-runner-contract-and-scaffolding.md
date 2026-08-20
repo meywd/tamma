@@ -1,6 +1,7 @@
 # Story 40-1: The `tamma-agent.yml` Runner Contract & Repo Scaffolding (+ single-user CLI parity)
 
-Status: drafted
+Status: in-progress — AC1-AC6, AC8, AC9, AC10 delivered 2026-08-18; AC7's
+server-side half remains (see [Delivery record](#delivery-record-2026-08-18)).
 
 ## MANDATORY: Before You Code
 
@@ -64,16 +65,21 @@ The C# side is fully built and pins the runner's output contract:
   Two further mentions are **prose only, not behaviour** and must not be counted:
   `Tamma.Platforms.Abstractions/Models/WorkflowDispatchRequest.cs:11` and
   `AgentDispatchRequests.cs:24`.
-- **Presence check vs. fail-loud policy — two different owners.** *Corrected (this story
-  previously wrote "the mediation `CheckWorkflowFileAsync`", implying the mediation
-  service declares it):* the check is declared on `IGitHubActionsClient.cs:33` and
-  implemented by `Tamma.Api/Services/GitHub/OctokitGitHubActionsClient.cs:63` (null seam:
-  `Tamma.Activities/AgentDispatch/NullGitHubActionsClient.cs:16`).
-  `AgentDispatchMediationService` only **calls** it (`AgentDispatchMediationService.cs:101`).
-  What the mediation service *does* own is the fail-loud policy and the user-facing
-  string: `WorkflowNotFound` + *"Add the Tamma agent workflow template to
-  .github/workflows/"* at `AgentDispatchMediationService.cs:107-112`. AC7 edits that
-  string, not a method on the client.
+- **Presence check vs. fail-loud policy — two different owners.** *Corrected AGAIN
+  2026-08-18 (the previous correction is itself stale): `IGitHubActionsClient`,
+  `OctokitGitHubActionsClient`, `NullGitHubActionsClient` and `CheckWorkflowFileAsync`
+  **no longer exist** — Epic 31 retired the GitHub-only seam.* The presence check is now
+  a platform-abstraction read the mediation service makes inline:
+  `driver.Client.GetFileContentAsync(new GetFileContentRequest(owner, name,
+  $".github/workflows/{workflowFile}", body.Ref))`, and **only a positive `NotFound`**
+  blocks (`AgentDispatchMediationService.cs:170-181`); GitLab is exempted (pipeline-per-ref,
+  not dispatch-by-file). The mediation service still owns the fail-loud policy and the
+  user-facing string: `WorkflowNotFound` + *"Add the Tamma agent workflow template to
+  .github/workflows/"* at `AgentDispatchMediationService.cs:176-179`. AC7 edits that
+  string. **Consequence for AC7's install path:** the abstraction has a file **read** verb
+  and no file **write** verb, so committing the template into a user repo needs a new
+  `IGitPlatformClient` verb + per-driver implementations — not the
+  "`IGitHubActionsClient` extension" the plan's step 5 assumes.
 - **Result artifact** — `ActionsResultAggregator`
   (`apps/tamma-elsa/src/Tamma.Api/Services/AgentDispatch/ActionsResultAggregator.cs:39`)
   downloads the artifact named **`tamma-result`**, opens the entry ending **`result.json`**,
@@ -236,9 +242,69 @@ issue" call.
 
 6-8 days
 
+## Delivery record (2026-08-18)
+
+**Shipped.** The runner exists; a hosted dispatch no longer dies on the workflow-file
+pre-check the moment the customer installs it.
+
+| Path | What |
+|---|---|
+| `apps/tamma-elsa/runner/github-actions/tamma-agent.yml` | Canonical runner: `workflow_dispatch`-only, the seven inputs byte-matched to `BuildDispatchInputs`, `tamma-runner-version` marker, least-privilege job permissions, configurable `runs-on`/timeouts via repo variables, `always()` collect+upload |
+| `.../scripts/run-claude-code.sh` | Provider script: install + headless run, tokens/version capture, loud on a missing `ANTHROPIC_API_KEY` |
+| `.../scripts/collect-results.sh` | Result assembler; self-checks its emitted key set at runtime; jq-less runners still get a schema-complete artifact |
+| `.../result.schema.json`, `.../result.example.json` | The result contract + golden fixture |
+| `.../install-runner.sh` | Self-serve install with the D5 state machine (`absent`/`current`/`drifted`/`customized`, `--check`/`--upgrade`/`--force`) |
+| `.../README.md` | AC9 setup doc: secrets, variables, self-hosted runners, security posture, single-user note, 19-1 cross-link |
+| `.github/workflows/tamma-agent.yml`, `.github/tamma/scripts/*` | Tamma's own install of the template (Tamma develops Tamma — this repo is customer #1, and the byte-identity pin makes it the cheapest drift detector) |
+| `tests/Tamma.Activities.Tests/AgentDispatch/RunnerContractTests.cs` | AC1 + AC3 pins (11 tests) |
+| `src/Tamma.Activities/AgentDispatch/LocalExecutor.cs` (+ tests) | AC8 |
+
+**Deviations from the plan, with reasons.**
+
+- **D8 not taken.** Collapsing the six filename literals into one shared constant spans
+  six files across two projects; the implementing lane owned neither. AC1's explicitly
+  stated alternative is what runs: `ShippedWorkflowBasename_IsTheDefault_AtAllSixSites`
+  pins all six against the shipped file's basename, plus
+  `NoSeventhSite_HardcodesTheRunnerFilename` — a sweep of `src/**/*.cs` asserting the only
+  files naming the runner are those six plus two documented prose mentions. D8 remains a
+  good cleanup; the pin no longer depends on it.
+- **The runner scripts install to `.github/tamma/scripts/`, and the install is a versioned
+  SET.** The workflow refuses to run against scripts whose `tamma-runner-version` differs
+  from its own, so a half-upgraded install fails loud at step 2 instead of running a
+  mismatched contract.
+- **`claude-code` CLI version defaults to `latest`, not an exact pin.** The plan asked for
+  an exact version; pinning to a version nobody verified guarantees breakage on day one.
+  The repo variable `TAMMA_CLAUDE_CODE_VERSION` pins it, and the README recommends doing so.
+- **AC7 half-delivered.** `install-runner.sh` provides the install/drift/upgrade semantics
+  self-serve. The server-side `RunnerScaffoldService` + tenant-admin endpoints and the
+  `AgentDispatchMediationService` message edit did not land: they live in `Tamma.Api`,
+  outside the implementing lane's file scope, and — see the Architectural Context
+  correction above — they now also need a **file-write verb on `IGitPlatformClient`**,
+  which does not exist. That is the real remaining cost of AC7, and it is larger than
+  "add a service": one new abstraction verb + a driver implementation per platform.
+- **D6 (in-process C# runner) not taken; AC8 met by fixing resolution.** AC8 asks that the
+  local path run on default configuration. The defect was that `CliEntryPoint` defaulted to
+  a repo-relative path while the child runs in a per-session temp dir, so `node` resolved it
+  against the temp dir. `LocalExecutorOptions.ResolveCliEntryPoint` now returns an absolute
+  path always: an absolute configured value verbatim, a relative one probed against the
+  app's base directory and the working directory plus their ancestors, and — when nothing is
+  built yet — still absolute so the failure names a real location. Replacing the working,
+  tested Node command with a new C# runner is a *different* story; nothing about the local
+  path's failure required it. The packaging half (shipping a built `dist/` with the app
+  image) is still open and is what stands between "resolves" and "runs unattended".
+
+**Not verified end-to-end.** No real dispatch of the shipped workflow against a live repo
+was possible from the implementing sandbox. Static verification: `actionlint` (which
+shellchecks the embedded `run:` blocks) reports 0 findings on the workflow, `shellcheck`
+reports 0 on all three scripts, `collect-results.sh` was exercised on a scratch git repo for
+the success, agent-failure and no-`jq` paths, and `install-runner.sh` was exercised through
+all four states. The plan's optional runner self-test CI job (dispatch with
+`agent_provider=mock`) is still the missing live proof — 40-7 is its natural home.
+
 ## Change Log
 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-23 | 1.0.0   | Initial story creation | Claude |
 | 2026-07-24 | 1.1.0   | Code-verified revision: `tamma-agent.yml` default count 3 → 6 (+2 prose-only) and AC1 byte-match widened to all six; `CheckWorkflowFileAsync` re-attributed to `IGitHubActionsClient`/`OctokitGitHubActionsClient` with the fail-loud message located at `AgentDispatchMediationService.cs:107-112`; AC8 rewritten — `execute-agent` exists, the defect is entry-point resolution/packaging; 40-1 AC8 recorded as feeding 40-2 AC8 | Claude |
+| 2026-08-18 | 2.0.0   | Implementation pass: runner + scripts + schema + fixture + installer + docs + contract tests + AC8 shipped (Delivery record). Architectural Context re-corrected — `IGitHubActionsClient`/`OctokitGitHubActionsClient`/`CheckWorkflowFileAsync` no longer exist (Epic 31 retired the seam); the presence check is an inline `driver.Client.GetFileContentAsync` probe, and the abstraction has no file-WRITE verb, which is the real remaining cost of AC7 | Claude |

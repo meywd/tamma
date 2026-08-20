@@ -129,17 +129,28 @@ jobs:
 
       - name: Summary
         if: always()
+        # The three URLs and the job status arrive through env rather than being
+        # pasted into the script text: a workflow_dispatch input interpolated
+        # straight into a shell command is an injection seam, and env values are
+        # never re-parsed as shell.
+        env:
+          APP_URL: ${{ inputs.app_url || 'https://admin.tamma.dev' }}
+          API_URL: ${{ inputs.api_url || 'https://api.tamma.dev' }}
+          ELSA_URL: ${{ inputs.elsa_url || 'https://elsa.tamma.dev' }}
+          JOB_STATUS: ${{ job.status }}
         run: |
-          echo "## E2E Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | URL |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
-          echo "| Dashboard | ${{ inputs.app_url || 'https://admin.tamma.dev' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| API | ${{ inputs.api_url || 'https://api.tamma.dev' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ELSA Studio | ${{ inputs.elsa_url || 'https://elsa.tamma.dev' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "All E2E tests passed." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "Some E2E tests failed. Check the uploaded artifacts for screenshots and traces." >> $GITHUB_STEP_SUMMARY
-          fi
+          {
+            echo "## E2E Test Results"
+            echo ""
+            echo "| Service | URL |"
+            echo "|---------|-----|"
+            echo "| Dashboard | $APP_URL |"
+            echo "| API | $API_URL |"
+            echo "| ELSA Studio | $ELSA_URL |"
+            echo ""
+            if [ "$JOB_STATUS" = "success" ]; then
+              echo "All E2E tests passed."
+            else
+              echo "Some E2E tests failed. Check the uploaded artifacts for screenshots and traces."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

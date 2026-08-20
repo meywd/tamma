@@ -65,6 +65,22 @@ public class InitAdlConfigActivity : TammaActivity
     [Output(Description = "Full parsed config JSON (for downstream use)")]
     public Output<string> ResolvedConfigJson { get; set; } = default!;
 
+    /// <summary>
+    /// <c>limits.emergencyStop</c> from the config. Shipped in
+    /// <see cref="Models.OperationalLimits"/> from the start and never read by anything,
+    /// so the per-instance stop was inert; the orchestrator now feeds it to
+    /// <see cref="CheckLimitsActivity"/>.
+    /// </summary>
+    [Output(Description = "Resolved emergency-stop flag (limits.emergencyStop)")]
+    public Output<bool> ResolvedEmergencyStop { get; set; } = default!;
+
+    /// <summary>
+    /// <c>limits.dailyBudgetUsd</c> — the loop's spend ceiling for the budget period. Same
+    /// story as the flag above: declared, defaulted to $50, never enforced.
+    /// </summary>
+    [Output(Description = "Resolved spend ceiling in USD (limits.dailyBudgetUsd)")]
+    public Output<decimal> ResolvedMaxSpendUsd { get; set; } = default!;
+
     [JsonConstructor]
     public InitAdlConfigActivity() { }
 
@@ -132,6 +148,9 @@ public class InitAdlConfigActivity : TammaActivity
         ResolvedCooldownSeconds.Set(context, config.CooldownSeconds);
         ResolvedMaxIssuesPerRun.Set(context, config.MaxIssuesPerRun);
         ResolvedConfigJson.Set(context, JsonSerializer.Serialize(config));
+        var limits = config.Limits;
+        ResolvedEmergencyStop.Set(context, limits is not null && limits.EmergencyStop);
+        ResolvedMaxSpendUsd.Set(context, limits?.DailyBudgetUsd ?? 0m);
 
         // Store resolved config for event data
         context.TransientProperties["resolvedConfig"] = config;

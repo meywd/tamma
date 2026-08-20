@@ -46,33 +46,60 @@ public sealed class PlatformTaskWorkerOptions
     /// <c>PlatformTaskWorker:RunOnStartup = true</c> in the host
     /// configuration once handlers are wired.
     ///
-    /// <para><b>⚠ Do NOT enable in production yet</b> (tenancy-residuals
-    /// assessment, 2026-06): handlers being wired is necessary but NOT
-    /// sufficient. <c>ReserveNextAsync</c> claims the oldest
-    /// <c>pending</c> row of <b>any</b> type whose <c>VisibleAt</c> has
-    /// elapsed, and <c>platform_queued_tasks</c> is shared with producers
-    /// whose rows still have no handler registered here:
-    /// <list type="bullet">
-    ///   <item><description>Orphan-webhook fallback rows
-    ///     (<c>InstallationRouterService</c>) and v1 Cranl
-    ///     <c>provisioning.tenant</c>[.deprovision] rows — no handler is
-    ///     registered, so a poll parks them and (after the retry ceiling)
-    ///     dead-letters them.</description></item>
+    /// <para><b>⚠ Still OFF on purpose. Re-verified 2026-08-18</b> — the
+    /// original 2026-06 hazard list has been checked line by line against the
+    /// tree, because most of it is now stale and the stale parts are the ones
+    /// that read scariest.</para>
+    ///
+    /// <para><b>CLOSED since 2026-06.</b> Every type any producer in this repo
+    /// enqueues now has an <see cref="IPlatformTaskHandler"/> registered in the
+    /// same composition that enables its producer:
+    /// <c>RETIRE_SECRET_VERSION</c> (plus a first-class
+    /// <c>VisibleAt = runAfter</c> column, so a not-due retire is never
+    /// claimed), <c>tenant.move</c>, <c>plan.activate_scheduled</c>,
+    /// <c>provisioning.tenant.v2</c>, <c>billing.customer.create</c>,
+    /// <c>billing.webhook.followup</c>, and the v1 Cranl
+    /// <c>provisioning.tenant</c>[.deprovision] pair (registered by
+    /// <c>AddTenantProviderCranl</c>, which only runs when Cranl is the
+    /// configured backend — the only thing that produces those rows). The
+    /// orphan-webhook fallback rows the old note listed no longer exist:
+    /// <c>InstallationRouterService</c> enqueues nothing.</para>
+    ///
+    /// <para><b>STILL OPEN — the two reasons this stays false.</b></para>
+    /// <list type="number">
+    ///   <item><description><b>Cross-sweeper retry-budget erosion.</b>
+    ///   <c>ReserveNextAsync(workerId, ct)</c> is still TYPE-BLIND, and
+    ///   <c>RetireScheduler.SweepDueRetireTasksAsync</c> — driven by the
+    ///   always-on <c>RetireSweepHostedService</c> — drains the whole queue
+    ///   every sweep, releasing each row that is not a retire with
+    ///   <c>FailAsync(..., maxRetries: int.MaxValue)</c>. That never
+    ///   dead-letters by itself, but it INCREMENTS <c>RetryCount</c>. Switch
+    ///   this worker on and its own <c>MaxRetries = 5</c> is measured against
+    ///   a counter another sweeper has been inflating, so a <c>tenant.move</c>
+    ///   that waited a few sweeps dead-letters on its first real failure. The
+    ///   two loops also race for the same rows.</description></item>
+    ///   <item><description><b>The V2 Cranl saga self-deadlocks on one worker
+    ///   process.</b> <c>ProvisionTenantV2Workflow</c> block-polls (~30 min)
+    ///   for an inner <c>provisioning.tenant</c> row it enqueues on THIS
+    ///   queue, and this worker runs one task at a time per process. On a
+    ///   single-process deployment the saga holds the only slot, the inner
+    ///   task is never reserved, and the provision times out to
+    ///   <c>Failed</c> — turning "provisioning never starts" into
+    ///   "provisioning fails after half an hour", which is worse. See the
+    ///   Known-constraint note in CLAUDE.md.</description></item>
     /// </list>
-    /// <b>Note (29-6 review fix):</b> the <c>RETIRE_SECRET_VERSION</c>
-    /// hazard that previously made this dangerous is RESOLVED — those rows
-    /// now carry a first-class <c>VisibleAt = runAfter</c> reservation
-    /// column (<c>ReserveNextAsync</c> won't claim a not-yet-due row) AND a
-    /// registered <see cref="Tamma.Api.Services.Secrets.Rotation.RetireSecretVersionTaskHandler"/>,
-    /// so a not-due retire is never dead-lettered before its grace window.
-    /// The retire tail is drained by the dedicated, always-on
-    /// <c>RetireSweepHostedService</c> regardless of this flag, so leaving
-    /// the generic worker off does NOT strand retires.
-    /// <para>Prerequisite for flipping THIS on: type-aware reservation (the
-    /// worker reserves only types present in its
-    /// <c>IPlatformTaskHandlerRegistry</c>) or handlers for every remaining
-    /// producer type. See
+    ///
+    /// <para>So the prerequisite named in 2026-06 is unchanged and unmet:
+    /// TYPE-AWARE RESERVATION — <c>ReserveNextAsync(workerId, types[], ct)</c>
+    /// so this worker claims only types in its
+    /// <c>IPlatformTaskHandlerRegistry</c> and the rotation sweeper claims only
+    /// <c>RETIRE_SECRET_VERSION</c>. That one change closes hazard 1 outright
+    /// and makes hazard 2 a Cranl-only concurrency requirement. Full workings:
     /// <c>.dev/findings/platform-task-worker-runonstartup-hazard.md</c>.</para>
+    ///
+    /// <para>Nothing is stranded meanwhile: the retire tail has its own
+    /// always-on <c>RetireSweepHostedService</c>, and queued <c>tenant.move</c>
+    /// rows wait harmlessly in <c>pending</c>.</para>
     /// </summary>
     public bool RunOnStartup { get; set; } = false;
 }

@@ -525,9 +525,11 @@ public static partial class ActionCatalog
         // (DeploymentPipelineWorkflow.cs:113) — no dev or staging stage exists — so
         // effect:deploy.dev and effect:deploy.staging are RESERVED rows (real
         // catalog rows at their zone levels, no performer) until a pipeline stage
-        // exists. deploy.prod ships behaviour-identically to the retired
-        // promote-prod: Seam E gates it at the prod-approval decision (the existing
-        // business-mode human gate is UNTOUCHED; 43-9 joins it by OR). Grading:
+        // exists. deploy.prod is gated at the prod-approval decision, where —
+        // since the 2026-08-18 owner directive — the autonomy gate's answer for
+        // this key DECIDES the routing (automated → orchestrator deploys; below
+        // the dial → human wait; denied → refusal; 43-9's original additive-OR
+        // wiring, with mode as the backstop, is superseded). Grading:
         // deploy.prod → Destructive/irreversible (promote-prod's grading, carried);
         // the non-prod environments → Command/reversible:true (a non-prod
         // environment is redeployable — a judgement call).
@@ -539,9 +541,9 @@ public static partial class ActionCatalog
             "Tamma.ElsaServer.Workflows.DeploymentPipelineWorkflow — UAT stage transition", min: 80),
         Effect(ExternalEffect.DeployStaging, ActionGroup.DeployControl, ActionRisk.Command, "Deploy to staging", "Deploy to the staging environment. RESERVED (Story 43-12): zone level 85, no staging stage exists in DeploymentPipelineWorkflow (QA->UAT->Prod only) — nothing performs it.",
             "RESERVED (Story 43-12) — no performer in the tree: the staging stage does not exist in DeploymentPipelineWorkflow", min: 85),
-        // deploy.prod ships behaviour-identically to the retired promote-prod: Seam E
-        // gates it at the prod-approval decision; the existing business-mode human
-        // gate is UNTOUCHED and 43-9 joins it by OR.
+        // deploy.prod carries promote-prod's grading verbatim. Its level IS the
+        // production gate since 2026-08-18: dial >= 90 deploys under the
+        // orchestrator, below waits for a human (mode no longer forces the wait).
         Effect(ExternalEffect.DeployProd, ActionGroup.DeployControl, ActionRisk.Destructive, "Promote to production", "Production promotion stage transition (the deploy itself runs inside the LLM tool loop — see the deploy-control group description).",
             "Tamma.ElsaServer.Workflows.DeploymentPipelineWorkflow — production stage transition", reversible: false, min: 90),
         Effect(ExternalEffect.DeployRollback, ActionGroup.DeployControl, ActionRisk.Destructive, "Roll back production", "Production rollback branch (same LLM-tool-loop limitation as promote).",
@@ -675,6 +677,18 @@ public static partial class ActionCatalog
         // Enabled=false (AC9), so cataloguing it changes nothing at runtime.
         Automation(BackgroundActor.TenantScheduledTriggerService, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Tenant scheduled-trigger service", "Fires tenant-scoped scheduled workflow dispatches at most once per (tenant, trigger, window).",
             "Tamma.ElsaServer.Workflows.TenantScheduledTriggerService"),
+        // 2026-08-18 — new members, autonomous-loop liveness. Mutating at Min for the
+        // same reason as TenantScheduledTriggerService: the watchdog only DISPATCHES
+        // adl-orchestrator, whose own work is separately governed by that workflow's
+        // catalog members, and it re-arms with the config the loop was already running.
+        Automation(BackgroundActor.AdlLoopWatchdogService, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "ADL loop watchdog", "Detects a stopped autonomous loop and re-arms adl-orchestrator with its live config.",
+            "Tamma.ElsaServer.Workflows.AdlLoopWatchdogService"),
+        // Destructive + irreversible: it CANCELS workflow instances. Only ever instances
+        // a host crash already stranded mid-execution (Running/Executing, no bookmark,
+        // stale past the window) — but a cancel cannot be undone, so it is catalogued
+        // honestly rather than as a sweeper.
+        Automation(BackgroundActor.OrphanedCycleRecoveryService, ActionGroup.PlatformAutomation, ActionRisk.Destructive, "Orphaned cycle recovery", "Terminates cycle instances a crash left mid-execution so they stop holding an ADL concurrency slot.",
+            "Tamma.ElsaServer.Workflows.OrphanedCycleRecoveryService", reversible: false),
         Automation(BackgroundActor.PoolWarmupService, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Pool warmup", "Warms tenant connection pools.",
             "Tamma.Api.Services.PoolWarmupService"),
         Automation(BackgroundActor.WorkflowSyncService, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Workflow sync", "Synchronizes workflow definitions.",

@@ -70,33 +70,36 @@ public class RevertRefactoringActivity : CodeActivity
 
         try
         {
-            var callbackUrl = _configuration?["Engine:CallbackUrl"];
-            var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
+            // Ctor-or-GetService: a store-rehydrated instance has a null
+            // _configuration, so reading the callback URL off it always missed in
+            // the deployed engine (findings 27/28 family).
+            var configuration = _configuration ?? context.GetService<IConfiguration>();
+            var callbackUrl = configuration?["Engine:CallbackUrl"];
 
-            if (useMock)
-            {
-                // Simulate revert
-                _logger?.LogInformation(
-                    "TDD REFACTOR revert: [Mock] Reverted {FileCount} files for session {SessionId}",
-                    filesToRevert.Count, sessionId);
-            }
-            else if (!string.IsNullOrEmpty(callbackUrl))
+            if (!string.IsNullOrWhiteSpace(callbackUrl))
             {
                 // Call engine to perform git checkout on the changed files
                 await CallEngineRevert(callbackUrl, repositoryUrl, branchName, filesToRevert);
+
+                _logger?.LogInformation(
+                    "TDD REFACTOR revert: Reverted refactoring for session {SessionId}. "
+                    + "Pre-refactoring implementation restored. This is not a failure — "
+                    + "refactoring was optional.",
+                    sessionId);
             }
             else
             {
-                // Log that revert would happen in production
-                _logger?.LogInformation(
-                    "TDD REFACTOR revert: Would revert files via git checkout: {Files}",
-                    string.Join(", ", filesToRevert));
+                // NOT a revert. This used to fall through to a "Successfully
+                // reverted … Pre-refactoring implementation restored" line, which
+                // told an operator the working tree had been restored when nothing
+                // had run. The refactoring stays applied and the caller proceeds
+                // (revert is best-effort by design) — so say exactly that.
+                _logger?.LogWarning(
+                    "TDD REFACTOR revert: NO revert seam (Engine:CallbackUrl unset), so the "
+                    + "broken refactoring is STILL APPLIED for session {SessionId}. Files that "
+                    + "would have been reverted: {Files}",
+                    sessionId, string.Join(", ", filesToRevert));
             }
-
-            _logger?.LogInformation(
-                "TDD REFACTOR revert: Successfully reverted refactoring for session {SessionId}. " +
-                "Pre-refactoring implementation restored. This is not a failure — refactoring was optional.",
-                sessionId);
         }
         catch (Exception ex)
         {

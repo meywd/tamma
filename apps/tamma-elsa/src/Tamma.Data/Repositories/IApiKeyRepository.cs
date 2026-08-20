@@ -8,6 +8,14 @@ public interface IApiKeyRepository
     Task<ApiKey?> GetByIdAsync(Guid id);
     Task<ApiKey?> GetByHashAsync(string keyHash);
     Task<List<ApiKey>> ListByScopeAsync(string scope);
+
+    /// <summary>
+    /// Keys in the scope that are valid right now, INCLUDING keys inside their rotation
+    /// grace window (<c>RevokedAt</c> set but still in the future). Used by the
+    /// authentication candidate scan; see the implementation for why the plain
+    /// scope listing cannot serve that path.
+    /// </summary>
+    Task<List<ApiKey>> ListValidByScopeAsync(string scope);
     Task<List<ApiKey>> ListByOwnerAsync(string ownerId);
     Task RevokeAsync(Guid id);
 

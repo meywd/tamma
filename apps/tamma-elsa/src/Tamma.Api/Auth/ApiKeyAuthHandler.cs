@@ -340,16 +340,16 @@ public class ApiKeyAuthHandler(
         // number of active rows per prefix is effectively 1.
         if (apiKey is null)
         {
-            var candidates = await apiKeyRepo.ListByScopeAsync("service");
+            var candidates = await apiKeyRepo.ListValidByScopeAsync("service");
             apiKey = ResolveByVerify(candidates, rawKey, keyPrefix);
             if (apiKey is null)
             {
-                var userCandidates = await apiKeyRepo.ListByScopeAsync("user");
+                var userCandidates = await apiKeyRepo.ListValidByScopeAsync("user");
                 apiKey = ResolveByVerify(userCandidates, rawKey, keyPrefix);
             }
             if (apiKey is null)
             {
-                var instCandidates = await apiKeyRepo.ListByScopeAsync("installation");
+                var instCandidates = await apiKeyRepo.ListValidByScopeAsync("installation");
                 apiKey = ResolveByVerify(instCandidates, rawKey, keyPrefix);
             }
         }
@@ -555,24 +555,70 @@ public class ApiKeyAuthHandler(
                     Logger.LogWarning("Auth failure: malformed user-scope OwnerId keyId={KeyId}", apiKey.Id);
                     return AuthenticateResult.Fail("Invalid API key scope");
                 }
-                var role = "member";
                 var userRepo = scope.ServiceProvider.GetRequiredService<IUserRepository>();
                 var user = await userRepo.GetByIdAsync(userId);
-                if (user is not null) role = user.Role;
+                if (user is null)
+                {
+                    // Same rule the installation branch got on 2026-08-19: a key
+                    // whose OWNER row is gone does not authenticate. GetByIdAsync
+                    // runs under the soft-delete query filter, so a deleted user's
+                    // key landed here with user == null — and this branch used to
+                    // tolerate that, falling through with the default role
+                    // "member" and building a VALID ticket for a deleted account
+                    // (reachable for any key that escaped RevokeAllByOwnerAsync,
+                    // e.g. one created concurrently with the deletion).
+                    Logger.LogWarning(
+                        "Auth failure: user not found (or soft-deleted) for key keyId={KeyId}", apiKey.Id);
+                    return AuthenticateResult.Fail("Invalid API key scope");
+                }
                 typedPrincipal = new UserAuthPrincipal(
-                    apiKey.Id, userId, role, effectiveTenantId ?? Guid.Empty);
+                    apiKey.Id, userId, user.Role, effectiveTenantId ?? Guid.Empty);
                 break;
             }
             case "installation":
             {
-                if (!long.TryParse(apiKey.OwnerId, out var installationId))
+                // OwnerId for an installation key is the installation ENTITY id (a Guid).
+                // Both issuance sites write it that way — InstallationRouterService's
+                // `OwnerId = install.Id.ToString()` and ApiKeyRotationService's
+                // `installationEntityId.ToString()` — and ListByOwnerAsync is queried with
+                // the same Guid. This branch used to accept ONLY `long.TryParse`, i.e. the
+                // GitHub installation id, which is a DIFFERENT column (install.InstallationId).
+                // So every installation key failed here after a successful lookup: 401
+                // "Invalid API key scope" with a "malformed installation OwnerId" warning,
+                // on the very first request. Fixing the key prefix (2026-08-18) was
+                // necessary but not sufficient — the key never got past ticket building.
+                //
+                // Guid first (what is written today); the long form is still accepted so a
+                // row written by any older path keeps working.
+                var instRepo = scope.ServiceProvider.GetRequiredService<IInstallationRepository>();
+                GitHubInstallation? inst;
+                if (Guid.TryParse(apiKey.OwnerId, out var installationEntityId))
+                {
+                    inst = await instRepo.GetByEntityIdAsync(installationEntityId);
+                }
+                else if (long.TryParse(apiKey.OwnerId, out var githubInstallationId))
+                {
+                    inst = await instRepo.GetByInstallationIdAsync(githubInstallationId);
+                }
+                else
                 {
                     Logger.LogWarning("Auth failure: malformed installation OwnerId keyId={KeyId}", apiKey.Id);
                     return AuthenticateResult.Fail("Invalid API key scope");
                 }
-                var instRepo = scope.ServiceProvider.GetRequiredService<IInstallationRepository>();
-                var inst = await instRepo.GetByInstallationIdAsync(installationId);
-                if (inst?.SuspendedAt is not null)
+
+                if (inst is null)
+                {
+                    Logger.LogWarning(
+                        "Auth failure: installation not found for key keyId={KeyId}", apiKey.Id);
+                    return AuthenticateResult.Fail("Invalid API key scope");
+                }
+
+                var installationId = inst.InstallationId;
+
+                // Note the not-found deny above is also a tightening: this branch used to
+                // read `inst?.SuspendedAt`, so a key whose installation row no longer
+                // existed skipped the suspension check and still built a valid ticket.
+                if (inst.SuspendedAt is not null)
                 {
                     Logger.LogWarning(
                         "Auth failure: installation suspended installationId={InstallationId} keyId={KeyId}",

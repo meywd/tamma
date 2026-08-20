@@ -194,6 +194,32 @@ Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorE
     .TryAddSingleton<TimeProvider>(builder.Services, _ => TimeProvider.System);
 builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupScheduler>();
 
+// ── Autonomous-loop liveness (lane: "the loop must be trustworthy") ──────────
+// adl-orchestrator restarts itself and NOTHING else dispatches it, so a lost
+// restart ends the loop permanently. The stop switch is the operator's brake on
+// new dispatch; the watchdog is the out-of-band observer that makes a stopped
+// loop loud (durable ADL.LOOP.STALLED) and, by default, re-arms it; the orphan
+// sweep frees cycles a crash left mid-execution (they otherwise hold a
+// MaxConcurrent slot forever, which stalls the loop just as effectively).
+builder.Services.AddSingleton<Tamma.Activities.ADL.AdlLoopConfigCache>();
+Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
+    .TryAddSingleton<Tamma.Activities.ADL.IAdlStopSwitch>(
+        builder.Services,
+        sp => new Tamma.Activities.ADL.ConfigAdlStopSwitch(
+            sp.GetService<Microsoft.Extensions.Configuration.IConfiguration>()));
+builder.Services.AddOptions<Tamma.ElsaServer.Workflows.AdlLoopWatchdogOptions>()
+    .Configure(opts =>
+        builder.Configuration
+            .GetSection(Tamma.ElsaServer.Workflows.AdlLoopWatchdogOptions.SectionName)
+            .Bind(opts));
+builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.AdlLoopWatchdogService>();
+builder.Services.AddOptions<Tamma.ElsaServer.Workflows.OrphanedCycleRecoveryOptions>()
+    .Configure(opts =>
+        builder.Configuration
+            .GetSection(Tamma.ElsaServer.Workflows.OrphanedCycleRecoveryOptions.SectionName)
+            .Bind(opts));
+builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.OrphanedCycleRecoveryService>();
+
 // Story 36-2 — dimensional analytics projection seams. The margin/pricing
 // config is the Story 36-7 seam; until 36-7 lands the Null impl yields a zero
 // margin (billed == cost) + WARN so the rollup stays green. The metrics

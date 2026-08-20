@@ -5,11 +5,16 @@ using Elsa.Workflows.Runtime;
 using Elsa.Workflows.Runtime.Requests;
 using Elsa.Workflows.Runtime.Responses;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using NUnit.Framework;
+using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.ElsaServer.Workflows;
 
 namespace Tamma.Activities.Tests.Analytics;
@@ -90,6 +95,9 @@ public class HourlyAnalyticsRollupSchedulerTests
         // 2026-08-13 — the scheduler now resolves the PUBLISHED definition
         // VERSION id per fire (PublishedWorkflowDispatch); give it a scope
         // factory whose IWorkflowDefinitionService answers a published row.
+        // 2026-08-18 — the DISPATCHER is resolved from that same per-tick
+        // scope too (it is scoped in Elsa; a singleton hosted service must
+        // not capture it), so it is registered here rather than injected.
         var definitionService = new Mock<IWorkflowDefinitionService>();
         definitionService
             .Setup(d => d.FindWorkflowDefinitionAsync(
@@ -98,11 +106,11 @@ public class HourlyAnalyticsRollupSchedulerTests
                 new WorkflowDefinition { Id = $"{id}:v1", DefinitionId = id });
         var services = new ServiceCollection();
         services.AddScoped(_ => definitionService.Object);
+        services.AddScoped(_ => dispatcher.Object);
         var scopeFactory = services.BuildServiceProvider()
             .GetRequiredService<IServiceScopeFactory>();
 
         var scheduler = new HourlyAnalyticsRollupScheduler(
-            dispatcher.Object,
             scopeFactory,
             opts,
             time,
@@ -208,6 +216,128 @@ public class HourlyAnalyticsRollupSchedulerTests
 
         leader.Attempts.Should().HaveCount(1,
             "after observing 'another pod is leader', the scheduler should not re-race the lock for the same hour");
+    }
+
+    /// <summary>
+    /// 2026-08-18 — the singleton hosted service must not take any SCOPED
+    /// service in its constructor. Elsa registers <c>IWorkflowDispatcher</c>
+    /// scoped; taking it directly made Development (ValidateScopes) refuse to
+    /// build the host and made Production hold one dispatcher — and the DB
+    /// session behind it — for the life of the process. Building the provider
+    /// with scope validation on is the exact check that failed.
+    /// </summary>
+    [Test]
+    public void Scheduler_ResolvesUnderScopeValidation_NoCaptiveDependency()
+    {
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new Mock<IWorkflowDispatcher>().Object);
+        services.AddScoped(_ => new Mock<IWorkflowDefinitionService>().Object);
+        services.AddSingleton<TimeProvider>(new FakeTimeProvider(DateTimeOffset.UnixEpoch));
+        services.AddSingleton(Options.Create(new HourlyAnalyticsRollupSchedulerOptions()));
+        services.AddSingleton<ILogger<HourlyAnalyticsRollupScheduler>>(
+            NullLogger<HourlyAnalyticsRollupScheduler>.Instance);
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton<IRollupSchedulerLeaderLock>(
+            new FakeLeaderLock(_ => new GrantingLease()));
+        services.AddSingleton<HourlyAnalyticsRollupScheduler>();
+
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateScopes = true,
+            ValidateOnBuild = true,
+        });
+
+        provider.Invoking(p => p.GetRequiredService<HourlyAnalyticsRollupScheduler>())
+            .Should().NotThrow(
+                "a singleton BackgroundService may only hold IServiceScopeFactory, never a scoped service");
+    }
+
+    [Test]
+    public void TryValidateDataSeams_False_WhenEngineCompositionHasNoTenantDataPlane()
+    {
+        var (_, _, scheduler) = Build(
+            new DateTimeOffset(2026, 04, 26, 12, 06, 00, TimeSpan.Zero),
+            _ => new GrantingLease());
+
+        scheduler.TryValidateDataSeams(out var missing, out var degraded).Should().BeFalse(
+            "the engine host registers neither AddTammaData nor the CP context factory");
+
+        // REQUIRED vs DEGRADED (2026-08-18, second pass). Only the control-plane factory
+        // is required: without it not even ComputePlatformRollupActivity — the FIRST step
+        // in the graph — can run. The tenant seam is degraded-only.
+        missing.Should().Contain("IDbContextFactory<ControlPlaneDbContext>");
+        missing.Should().NotContain("ITenantDbContextFactory",
+            "a missing tenant data plane must not stop the platform-wide rollup");
+        degraded.Should().Contain("ITenantDbContextFactory");
+    }
+
+    [Test]
+    public void TryValidateDataSeams_True_ButDegraded_WhenOnlyTheTenantSeamIsAbsent()
+    {
+        // The engine's real shape once a control-plane connection is configured. The first
+        // version of this preflight refused to start here, which killed the platform-wide
+        // rollup that had been writing a platform_analytics_hourly row every hour.
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new Mock<IWorkflowDefinitionService>().Object);
+        services.AddScoped(_ => new Mock<IWorkflowDispatcher>().Object);
+        services.AddScoped(_ => new Mock<IDbContextFactory<Tamma.Data.ControlPlaneDbContext>>().Object);
+        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+
+        var scheduler = new HourlyAnalyticsRollupScheduler(
+            scopeFactory,
+            Options.Create(new HourlyAnalyticsRollupSchedulerOptions()),
+            new FakeTimeProvider(DateTimeOffset.UnixEpoch),
+            NullLogger<HourlyAnalyticsRollupScheduler>.Instance,
+            configuration: null,
+            leaderLock: new FakeLeaderLock(_ => new GrantingLease()));
+
+        scheduler.TryValidateDataSeams(out var missing, out var degraded).Should().BeTrue(
+            "the control-plane factory is present, so the platform-wide rollup can run");
+        missing.Should().BeEmpty();
+        degraded.Should().Contain("ITenantDbContextFactory",
+            "the caller still has to say, loudly and once, that per-tenant rollups are off");
+    }
+
+    [Test]
+    public async Task StartAsync_DispatchesNothing_WhenDataSeamsAreMissing()
+    {
+        // The rollup's fan-out resolves its data seams with GetRequiredService,
+        // so dispatching without them faults the activity every hour and the
+        // incident strategy buries it. The scheduler must refuse to start
+        // instead of scheduling doomed work.
+        var (dispatcher, leader, scheduler) = Build(
+            new DateTimeOffset(2026, 04, 26, 12, 06, 00, TimeSpan.Zero),
+            _ => new GrantingLease());
+
+        await scheduler.StartAsync(CancellationToken.None);
+        await scheduler.StopAsync(CancellationToken.None);
+
+        leader.Attempts.Should().BeEmpty("the loop must never start");
+        dispatcher.Verify(d => d.DispatchAsync(
+            It.IsAny<DispatchWorkflowDefinitionRequest>(),
+            It.IsAny<DispatchWorkflowOptions>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public void TryValidateDataSeams_True_WhenBothSeamsAreComposed()
+    {
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new Mock<IWorkflowDefinitionService>().Object);
+        services.AddScoped(_ => new Mock<IWorkflowDispatcher>().Object);
+        services.AddScoped(_ => new Mock<ITenantDbContextFactory>().Object);
+        services.AddScoped(_ => new Mock<IDbContextFactory<ControlPlaneDbContext>>().Object);
+
+        var scheduler = new HourlyAnalyticsRollupScheduler(
+            services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new HourlyAnalyticsRollupSchedulerOptions()),
+            new FakeTimeProvider(DateTimeOffset.UnixEpoch),
+            NullLogger<HourlyAnalyticsRollupScheduler>.Instance,
+            configuration: null,
+            leaderLock: new FakeLeaderLock(_ => new GrantingLease()));
+
+        scheduler.TryValidateDataSeams(out var missing).Should().BeTrue();
+        missing.Should().BeEmpty();
     }
 }
 

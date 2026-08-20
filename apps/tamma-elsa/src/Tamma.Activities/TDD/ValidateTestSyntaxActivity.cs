@@ -301,7 +301,7 @@ public class ValidateTestSyntaxActivity : CodeActivity<TestSyntaxValidationResul
                 return;
             }
 
-            ParseTscErrors(lastResult.StdOut, lastResult.StdErr, errors, files);
+            ParseTscErrors(lastResult.StdOut, lastResult.StdErr, errors, files, logger);
             return;
         }
 
@@ -410,17 +410,33 @@ public class ValidateTestSyntaxActivity : CodeActivity<TestSyntaxValidationResul
     /// <summary>
     /// Parse <c>tsc</c> diagnostic output. Format:
     /// <c>path/to/file.ts(line,col): error TSxxxx: message</c>
+    ///
+    /// <para><b>2026-08-18 — only TS1xxx counts as a syntax error.</b> This
+    /// activity is a SYNTAX check, but it runs <c>tsc --noEmit</c> over a temp
+    /// directory holding one bare test file: no <c>node_modules</c>, no
+    /// <c>tsconfig.json</c>, no ambient test-framework types. So every ordinary
+    /// TypeScript test came back non-zero with SEMANTIC diagnostics —
+    /// <c>TS2307: Cannot find module 'vitest'</c>, <c>TS2304: Cannot find name
+    /// 'describe'</c> — and the RED phase failed the tests for importing their
+    /// own runner. tsc has no "parse only" flag, so the filter lives here:
+    /// TypeScript's syntactic diagnostics are the TS1xxx block, and TS2xxx and
+    /// up are type/resolution complaints this check is not entitled to make.
+    /// Non-syntactic diagnostics are still PARSED (so a non-zero exit with
+    /// readable output is never mistaken for unreadable output) and then
+    /// dropped.</para>
     /// </summary>
     private static void ParseTscErrors(
         string stdOut,
         string stdErr,
         List<TestSyntaxError> errors,
-        IReadOnlyList<string> files)
+        IReadOnlyList<string> files,
+        ILogger? logger = null)
     {
         var combined = (stdOut ?? string.Empty) + "\n" + (stdErr ?? string.Empty);
         var lines = combined.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-        var any = false;
+        var parsedAny = false;
+        var suppressed = 0;
         foreach (var raw in lines)
         {
             var line = raw.TrimEnd('\r');
@@ -433,6 +449,13 @@ public class ValidateTestSyntaxActivity : CodeActivity<TestSyntaxValidationResul
             var file = line[..openParen].Trim();
             var positionPart = line.Substring(openParen + 1, closeParen - openParen - 1);
             var message = line[(colon + 1)..].Trim();
+            parsedAny = true;
+
+            if (!IsSyntacticTscDiagnostic(message))
+            {
+                suppressed++;
+                continue;
+            }
 
             int? lineNum = null, colNum = null;
             var pos = positionPart.Split(',');
@@ -447,12 +470,22 @@ public class ValidateTestSyntaxActivity : CodeActivity<TestSyntaxValidationResul
                 Column = colNum,
                 Message = string.IsNullOrEmpty(message) ? line : message
             });
-            any = true;
         }
 
-        // Tool exit code != 0 but we couldn't parse anything — don't lose the
-        // signal; emit a generic error so IsValid flips to false.
-        if (!any)
+        if (suppressed > 0)
+        {
+            logger?.LogInformation(
+                "ValidateTestSyntax: ignored {Count} non-syntactic tsc diagnostic(s) — generated "
+                + "tests are checked with no node_modules and no tsconfig, so unresolved imports "
+                + "and missing test globals are expected, not syntax errors",
+                suppressed);
+        }
+
+        // Tool exit code != 0 but we couldn't parse a single diagnostic —
+        // don't lose the signal; emit a generic error so IsValid flips to
+        // false. A run whose diagnostics were ALL semantic is NOT that case:
+        // the output read fine and said nothing about syntax.
+        if (!parsedAny)
         {
             errors.Add(new TestSyntaxError
             {
@@ -461,6 +494,26 @@ public class ValidateTestSyntaxActivity : CodeActivity<TestSyntaxValidationResul
                 Message = string.IsNullOrWhiteSpace(stdErr) ? "tsc reported a non-zero exit code" : stdErr.Trim()
             });
         }
+    }
+
+    /// <summary>
+    /// True when a tsc diagnostic carries a <c>TS1xxx</c> code — TypeScript's
+    /// syntactic (parser) error block. <c>TS2xxx</c> and up are semantic:
+    /// unresolved modules, unknown names, type mismatches. A message with no
+    /// recognisable <c>TSxxxx</c> code counts as syntactic, so an unfamiliar
+    /// diagnostic shape fails loudly instead of being silently dropped.
+    /// </summary>
+    private static bool IsSyntacticTscDiagnostic(string message)
+    {
+        var idx = message.IndexOf("TS", StringComparison.Ordinal);
+        if (idx < 0) return true;
+
+        var digits = message[(idx + 2)..];
+        var end = 0;
+        while (end < digits.Length && char.IsAsciiDigit(digits[end])) end++;
+        if (end == 0) return true;
+
+        return digits[0] == '1';
     }
 
     /// <summary>

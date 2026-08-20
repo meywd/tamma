@@ -70,6 +70,9 @@ public class MachineryInventoryTests
         "automation:reveal-token-sweeper",
         "automation:task-queue-processor",
         "automation:tenant-scheduled-trigger-service",
+        // 2026-08-18 — the autonomous-loop watchdog + the orphaned-cycle sweeper.
+        "automation:adl-loop-watchdog-service",
+        "automation:orphaned-cycle-recovery-service",
         "automation:tenant-status-invalidation-listener",
         "automation:workflow-seeder",
         "automation:workflow-sync-service",
@@ -137,7 +140,7 @@ public class MachineryInventoryTests
             .ToHashSet(StringComparer.Ordinal);
         var fixture = MachineryInventory.ToHashSet(StringComparer.Ordinal);
 
-        MachineryInventory.Should().HaveCount(47, "6 + 33 + 8 = 47 (43-11's count check, amended by Epic 31 P2: +2 automation; Epic 31 P3 2026-08-08: +1 automation, the DG-5 CI completion poller; Epic 31 P4 M3 2026-08-08: +1 effect — git.webhook.register live as provisioning machinery per its 43-12 note — and +1 automation, the startup registration pass)");
+        MachineryInventory.Should().HaveCount(49, "6 + 35 + 8 = 49 (43-11's count check, amended by Epic 31 P2: +2 automation; Epic 31 P3 2026-08-08: +1 automation, the DG-5 CI completion poller; Epic 31 P4 M3 2026-08-08: +1 effect — git.webhook.register live as provisioning machinery per its 43-12 note — and +1 automation, the startup registration pass; 2026-08-18: +2 automation — the autonomous-loop watchdog and the orphaned-cycle sweeper)");
         MachineryInventory.Should().OnlyHaveUniqueItems();
 
         flagged.Except(fixture).Should().BeEmpty(

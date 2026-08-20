@@ -1,16 +1,18 @@
 # 2026-08-13 — engine defects surfaced by the engine-driven E2E
 
-> Scope note: items 2 and 7 are OPEN composition gaps; everything else is a
-> REAL runtime defect the E2E surfaced in the autonomous loop itself — every
-> one shipped latent because no test had ever driven the loop through a real
-> engine process end-to-end. All non-open items are FIXED in the same change
-> that added the E2E.
+> Scope note: items 2 and 7 were the two OPEN composition gaps; everything else
+> is a REAL runtime defect the E2E surfaced in the autonomous loop itself —
+> every one shipped latent because no test had ever driven the loop through a
+> real engine process end-to-end. All non-open items are FIXED in the same
+> change that added the E2E. **2026-08-18:** item 2 is fixed and item 7 is
+> closed as a loud startup refusal (its wiring half stays open as an
+> enhancement) — see each item.
 
 **Status:** open follow-ups. Found while booting the REAL `Tamma.ElsaServer`
 binary under `ASPNETCORE_ENVIRONMENT=Development` for the engine-driven
 autonomous E2E (`EngineFullStackFixture`) — Development turns on
 `ValidateOnBuild`/`ValidateScopes`, which the deployed engine (Production)
-never runs, so both defects ship latent today.
+never runs, so both defects shipped latent.
 
 ## 1. `LifecycleReEntryService` is unresolvable in every engine composition — FIXED (HTTP seam)
 
@@ -41,17 +43,23 @@ an internal read does not belong on the effect plane).
 `Documents:ReEntryDisabled=true` still swaps in the Null seam. Pinned by
 `HttpLifecycleReEntryServiceTests`.
 
-## 2. `HourlyAnalyticsRollupScheduler` is a captive-dependency violation
+## 2. `HourlyAnalyticsRollupScheduler` is a captive-dependency violation — FIXED (2026-08-18)
 
-The singleton hosted service takes the **scoped** Elsa `IWorkflowDispatcher`
+The singleton hosted service took the **scoped** Elsa `IWorkflowDispatcher`
 (made scoped by Elsa's own registration) in its constructor. Development scope
-validation refuses to build the host; Production silently promotes the
-dispatcher (captive dependency). The scheduler should resolve the dispatcher
-per-tick from an `IServiceScopeFactory` scope (the
-`TenantScheduledTriggerService` pattern in the same directory).
+validation refused to build the host; Production silently promoted the
+dispatcher (captive dependency).
 
-*E2E stance:* the fixture runs the engine as Production (matching deployment),
-documented at the env-var site in `EngineFullStackFixture`.
+**Fixed:** the dispatcher is gone from the constructor and is resolved from the
+same per-tick `IServiceScopeFactory` scope that already resolved the (scoped)
+`IWorkflowDefinitionService` — the `TenantScheduledTriggerService` pattern in
+the same directory. Pinned by
+`HourlyAnalyticsRollupSchedulerTests.Scheduler_ResolvesUnderScopeValidation_NoCaptiveDependency`,
+which builds the provider with `ValidateScopes`/`ValidateOnBuild` on — the exact
+check that used to fail.
+
+*E2E stance:* the fixture still runs the engine as Production, now because that
+is the deployed shape rather than because Development refuses to boot.
 
 ## 3. `Output.Set(context, null)` binds to the Variable overload and NREs
 
@@ -115,13 +123,36 @@ throws `"<name> is required."` — faulting every CYCLE.STARTED/COMPLETED emit
 wherever an optional input defaulted to a literal null is read via `.Get`
 after a store round-trip.
 
-## 7. Engine rollup fan-out needs `ITenantDbContextFactory` (open)
+## 7. Engine rollup fan-out needs `ITenantDbContextFactory` — MADE LOUD, NOT WIRED (2026-08-18)
 
 `hourly-analytics-rollup`'s fan-out activity resolves
 `Tamma.Data.Abstractions.ITenantDbContextFactory`, which no engine
 composition registers (same family as item 1) — the rollup workflow now
 DISPATCHES correctly (item 4) but faults at fan-out in an engine-only
-deployment. Open, same fix direction as item 1.
+deployment.
+
+**Why item 1's fix direction does NOT transfer.** Item 1 could be re-pointed at
+an HTTP read. This one cannot: registering `ITenantDbContextFactory` needs
+`ITenantConnectionResolver`, which needs an `IConnectionStringDecryptor`, and the
+only production decryptor (`AesGcmConnectionStringDecryptor` + `KekProvider`)
+lives in `Tamma.Api` — a project `Tamma.ElsaServer` does not reference. Wiring
+the engine with the `Passthrough` decryptor instead would read AES-GCM envelope
+bytes as UTF-8 cleartext and hand the pool a garbage connection string. Moving
+the decryptor down into `Tamma.Data` is a real change with its own review, not a
+scheduler fix.
+
+**Landed instead:** `HourlyAnalyticsRollupScheduler.TryValidateDataSeams` runs
+ONCE at startup and refuses to start the loop when either seam
+(`ITenantDbContextFactory`, `IDbContextFactory<ControlPlaneDbContext>`) is
+absent, logging `analytics.rollup.disabled_missing_data_seam` at ERROR with the
+missing names and what to compose. An hourly buried activity fault becomes one
+actionable startup line, and no doomed workflow is dispatched. The moment a host
+composes both seams the scheduler starts with no code change. Pinned by
+`TryValidateDataSeams_False_WhenEngineCompositionHasNoTenantDataPlane`,
+`TryValidateDataSeams_True_WhenBothSeamsAreComposed`, and
+`StartAsync_DispatchesNothing_WhenDataSeamsAreMissing`.
+
+Still open as an ENHANCEMENT: actually giving the engine a tenant data plane.
 
 ## 8. A bare `Activity` does NOT auto-complete — 24 emit activities hung their workflow forever
 
@@ -405,7 +436,7 @@ and the loop fell through to its debug-retry leg — which "worked", masking the
 fact that the REAL implementer (the agent that commits actual code to the
 branch) never ran once. Fixed with the ctor-or-GetService idiom (run 38).
 
-## 28. The TDD fallback leg's `CommitChangesActivity` fabricates commit SHAs — `COMMIT.CREATED.SUCCESS` for commits that never happened
+## 28. The TDD fallback leg's `CommitChangesActivity` fabricates commit SHAs — `COMMIT.CREATED.SUCCESS` for commits that never happened — FABRICATION FIXED; the missing commit seam stays OPEN
 
 Two independent lies compose on the fallback path:
 (a) the rehydrated activity's `_configuration` is null, so
@@ -416,10 +447,41 @@ its `SimulateCommit` branch — emitting `COMMIT.CREATED.SUCCESS` with a
 (b) even with DI intact, the "real" path POSTs `action=git_commit` to
 `POST /api/engine/execute-task` — which is an LLM-proxy bridge that does not
 implement git operations at all. The activity cannot create a real commit by
-EITHER path. OPEN: the fallback TDD leg needs a real commit seam (the
-mediated contents API, or dispatching the agent executor); until then its
-green terminal must not be read as "code landed". The E2E's real-commit proof
-rides the agent-executor path (item 27), not this one.
+EITHER path. The E2E's real-commit proof rides the agent-executor path
+(item 27), not this one.
+
+**Fixed (2026-08-18) — the lies, not the gap.** `SimulateCommit` is deleted, so
+no `COMMIT.CREATED.SUCCESS` can carry an invented SHA any more. The activity
+takes the ctor-or-GetService fallback for `IConfiguration` (the null field was
+what made the fabricating branch the DEFAULT branch in a deployed engine), and
+every path that did not produce a commit now emits the loud
+`COMMIT.CREATED.FAILED` **and throws a typed `TammaError`** — `TDD.COMMIT.
+NO_FILES` / `NO_SEAM` / `NO_SHA` / `BRIDGE_FAILED`. Half of (b) is closed too:
+the bridge answer is accepted only when it carries something that IS a commit
+id (`TryReadCommitSha`), where the old code took HTTP 200 as proof and copied
+`commitSha` even when absent — i.e. `""`. `tdd-cycle` sets no incident
+strategy, so it runs on Elsa's default fault strategy and the throw faults the
+cycle. Pinned by `CommitHonestyTests`.
+
+**Still OPEN — the fallback TDD leg has no commit seam at all, and one was NOT
+built here.** Routing it through the Epic 31 mediation plane needs two things
+that do not exist: (1) a contents-write verb on `IGitPlatformClient` — it can
+read a file and create/delete a branch, but there is no create-commit /
+put-contents member on the interface, its three drivers, or the null seam;
+(2) file CONTENTS — `CommitChangesActivity` receives `TestFiles` /
+`ImplementationFiles` as PATHS only, so it could not populate such a call even
+if the verb existed. Adding both is a cross-cutting change to the platform
+abstraction, its drivers, and the mediated effect surface. Until it lands, the
+leg fails loudly instead of lying; its terminal is no longer green either way.
+
+**Adjacent, NOT fixed (needs the `tdd-cycle` graph, not the activity):**
+`TddWorkflow` wires `commitChanges → updateCodeIndex → setCompletedOutputs`,
+and `setCompletedOutputs` sets `success = true` unconditionally — it never
+reads `CommitResult.Success`. So before this change, even the pre-existing loud
+failure edges (empty change set, callback failure) still reported a successful
+TDD cycle. The typed throw closes the hole in practice (a faulted cycle never
+reaches that terminal), but the graph should route a commit failure to
+`setFailedOutputs` explicitly rather than depend on the activity throwing.
 
 ## 29. The self-merge race: the merged-PR webhook fires BEFORE `WaitForPRMerged` registers — the once-only delivery was lost
 
@@ -526,3 +588,142 @@ cold GitHub runner exceeded it, `RequireOrSkip` threw under
 OneTimeSetUp on an infrastructure hiccup (PR #512, 2026-08-14). **Fixed:**
 where docker is required (CI) the probe retries within a 60s budget; on a
 laptop it keeps the single fast probe so test discovery never stalls.
+
+## 36. The item-27/28 null-`_configuration` family also switched the PRODUCTION-DEPLOY APPROVAL GATE off — in exactly the deployments that need it — FIXED
+
+Same root as items 27/28, but the consequence is governance rather than audit.
+Both terms that engage `deployment-pipeline`'s `ProdApprovalNeeded` gate are
+computed in `DispatchCycleActivity.RunAsync` from its ctor-injected
+`IConfiguration`:
+
+- `mode` ← `ResolveMode` → `DeploymentMode.Resolve(Tamma:Mode,
+  hasTenantSharedSecret, hasControlPlaneConnection)`;
+- `requireProdApproval` ← `Deployment:RequireProdApproval`.
+
+`DispatchCycleActivity` already had the ctor-or-GetService fallback for
+`IWorkflowDispatcher` — but **not** for `_configuration`. On the rehydrated
+path (`[JsonConstructor]`, i.e. every execution in a deployed engine) that
+field is null, so both SaaS signals read as ABSENT, which `DeploymentMode.
+Resolve` treats as "no SaaS signal" → `dev` → gate OFF, and
+`Deployment:RequireProdApproval` fell to its `?? false`. A Business/SaaS
+deployment therefore threaded `mode="dev"` and promoted to production with no
+human — the exact inverse of the fail-safe the call site documents ("an
+absent/unknown mode resolves to business (REQUIRE approval)"). Nothing in the
+pipeline graph was wrong: the F1 work on `prodApprovalNeeded` / the
+`CheckActionGateActivity` edges is correct and stays as-is. The gate simply
+never saw a reason to fire.
+
+A shipped unit test pinned the defect under a self-contradicting name —
+`ResolveMode_NoConfigAtAll_FailsSafeToDev_ButExplicitSaaSWins` asserted
+`.Be(Dev)`, and "fails safe to dev" is the arm that deploys to production
+unattended. Same shape as the 2026-08-01 F1 note about a test asserting the
+opposite of its own name.
+
+**Fixed (2026-08-18):** `_configuration ?? context.GetService<IConfiguration>()`
+at both read sites, and `ResolveMode` now returns `business` when configuration
+is null — an unreadable configuration is the ABSENCE of evidence, not evidence
+of a single-user deployment. An explicit `single-user` input is still honoured.
+Pinned by `AdlModeThreadingTests.ResolveMode_NoConfigAtAll_FailsSafeToBusiness_
+GateOn` and `…_RehydratedInstance_DoesNotSilentlyDisableTheProdGate`.
+
+## 37. `tdd-cycle` reported `success: true` no matter what the commit step said — and the retry orchestrator gates on exactly that field — FIXED
+
+`TddWorkflow` (`DefinitionId = "tdd-cycle"`) ends at a `SetCompletedOutputs`
+sequence whose first step is
+`SetOutput { OutputName = "success", OutputValue = true }` — a literal, never a
+read of `commitResultVar.Success`. The graph wired `CommitChanges` straight into
+`UpdateCodeIndex` → that terminal, so nothing stood between a failed commit and
+a reported-successful TDD cycle.
+
+This was not cosmetic. `tdd-with-debug-retry` — the orchestrator that owns the
+bounded debug-retry loop — dispatches `tdd-cycle` with `WaitForCompletion` and
+then gates on `result["success"]` in its `TddSuccess` FlowDecision. Because the
+sub-workflow always answered `true`, that gate was permanently satisfied: a
+commit failure could never route into the debug leg, and the retry bound the
+`TddWithDebugRetryWorkflowTests` suite carefully pins was unreachable through
+this path. Item 28's fix (a typed throw on every non-commit path) closes it in
+practice, since a faulted cycle never reaches a terminal at all — but reporting
+success must not depend on an activity remembering to throw.
+
+Contributing cause worth naming on its own: **`TddWorkflow` had no test file.**
+`TddWithDebugRetryWorkflowTests` exists and is thorough, and its thoroughness is
+what made the gap invisible — the orchestrator's guarantees were pinned, the
+sub-workflow's were not, and the orchestrator's guarantees depended on the
+sub-workflow's.
+
+**Fixed (2026-08-18):** a `CommitSucceededCheck` FlowDecision on
+`commitResultVar?.Success == true` now sits between `CommitChanges` and
+`UpdateCodeIndex`; `False` routes to a dedicated `SetCommitFailedOutputs` sink
+(`success=false`, `finishReason="commit-failed"`, the commit's own error text —
+the GREEN-phase sink hardcodes a debug-iteration message and would mislabel it)
+and on to `FinishFailed`. Null takes the `False` edge too. Pinned by the new
+`TddWorkflowCommitHonestyTests`, which asserts the success terminal is reachable
+through exactly one route: the gate's `True` port.
+
+## 38. The engine's in-workflow budget gate is per-call, not a ceiling — the activity that COULD accumulate is wired to nothing — DOCUMENTED, no code change
+
+`LlmCallWorkflow.SetupBudget` re-seeds `BudgetStateJson` from the caller's
+`params.budgetCapUsd` with `SpentUsd = 0` on every call, so its `CheckBudget`
+`If` node can only stop one call from overrunning its own cap. It never
+accumulates. The ADL loop passes no `budgetCapUsd` at all, which makes the gate
+inert there.
+
+Separately, `CheckBudgetActivity` — which *does* prefer the API's cumulative
+period spend over the local bucket, and which gained an `Adl:BudgetOwnerId`
+fallback on 2026-08-18 — **is not on any coded workflow graph.** It is registered
+in the Elsa activity registry (so it is selectable in Studio) and it has its own
+test file, but no `.cs` workflow constructs it. The fix that was applied to it
+therefore changes nothing at runtime today.
+
+**No code change, deliberately.** The cumulative ceiling is already owned, and
+enforced fail-closed, on the server: `CallLlmInlineActivity` is a thin client
+over `POST /api/v1/llm/call`, and `ManagedAgent.RunAsync` consults
+`RunningSpendBudgetGuard` before the provider call. That guard reads the period
+spend the API tracks and denies with `BUDGET_EXCEEDED`. Adding a second
+cumulative check inside the engine would put an HTTP round-trip on every provider
+attempt in the hot path and create two ceilings that can disagree. What was
+actually wrong was the *implication* — so `SetupBudget` and the `CheckBudget`
+node now state their scope exactly and name where the real ceiling lives.
+
+Open, for an owner: either wire `CheckBudgetActivity` onto the graph it was
+written for or delete it. A registered, tested, unreachable activity is the kind
+of thing a later reader trusts.
+
+## 39. A missing-seam preflight disabled the half of the analytics rollup that was working — FIXED
+
+Item 2's fix added a startup preflight to `HourlyAnalyticsRollupScheduler`: if
+`ITenantDbContextFactory` or `IDbContextFactory<ControlPlaneDbContext>` is absent,
+refuse to start rather than dispatch work that faults every hour. The reasoning was
+right and the effect was wrong.
+
+`ITenantDbContextFactory` ships only from `AddTammaData`, which `Tamma.ElsaServer`
+never calls — and the engine is the ONLY host that registers this scheduler. So the
+condition is permanently true on the only host that runs it, and the preflight did not
+make a doomed rollup loud; it turned the whole rollup off.
+
+What that cost: `hourly-analytics-rollup` runs `ComputePlatformRollupActivity` FIRST,
+and that step needs only `IDbContextFactory<ControlPlaneDbContext>` plus
+`IPlatformEventPublisher`, both of which the engine registers whenever a control-plane
+connection is configured. The engine's own log shows the sequence — `analytics.rollup.
+dispatched`, then `ANALYTICS.ROLLUP.PLATFORM.COMPLETED | success`, and only then
+`ANALYTICS.ROLLUP.FANOUT.FAILED`. The platform-wide `platform_analytics_hourly` row the
+ops dashboard reads was being written every hour, and the preflight stopped it.
+
+**Fixed (2026-08-18, second pass):**
+- the preflight now separates REQUIRED (the control-plane factory — without it not even
+  the first step runs) from DEGRADED (the tenant factory). Only a missing required seam
+  refuses to start; a missing tenant seam warns once and starts;
+- `FanOutTenantRollupsActivity` and `FanOutTenantDimensionalRollupsActivity` resolve the
+  tenant factory with `GetService` instead of `GetRequiredService`, and when it is absent
+  they log `…tenant_fanout_skipped` and complete with zero counts instead of throwing —
+  so the buried hourly fault that started all this is gone without taking the working
+  step with it.
+
+Pinned by `TryValidateDataSeams_True_ButDegraded_WhenOnlyTheTenantSeamIsAbsent`.
+
+**The general lesson, since this is the second time in one day:** a guard added to stop
+work that always fails must be scoped to the failing step. `ComputePlatformRollupActivity`
+and the tenant fan-out are separate steps with separate dependencies; gating both on the
+union of their seams turned a partial outage into a total one, and the "fix" would have
+read as working — one loud line at startup, then silence — for as long as nobody checked
+whether the hourly row was still appearing.

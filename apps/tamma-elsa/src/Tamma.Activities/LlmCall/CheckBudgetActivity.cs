@@ -5,6 +5,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
 using Tamma.Data.Abstractions;
@@ -68,6 +69,17 @@ public class CheckBudgetActivity : Activity
             var apiClient = context.GetService<TammaApiClient>();
             var budgetOwnerId = context.GetVariable<string>("AccountId")
                             ?? context.GetVariable<string>("TenantId");
+
+            // Single-user fallback: no tenant is ever stamped on the workflow there, so
+            // this whole API branch was skipped and the running loop's model calls had NO
+            // ceiling at all — only the per-workflow BudgetStateJson bucket below, which
+            // starts empty on every LLM call. Adl:BudgetOwnerId names the bucket to meter
+            // against so a single-user deployment gets the same hard cap a tenant gets.
+            if (string.IsNullOrWhiteSpace(budgetOwnerId))
+            {
+                budgetOwnerId = context.GetService<IConfiguration>()
+                    ?.GetValue<string?>(Tamma.Activities.ADL.AdlSpendCeiling.BudgetOwnerKey);
+            }
             if (apiClient is not null && !string.IsNullOrWhiteSpace(budgetOwnerId))
             {
                 try

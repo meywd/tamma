@@ -100,12 +100,20 @@ public class ApiKeyRotationServiceTests
         result.KeyPrefix.Should().NotBeNullOrWhiteSpace();
         result.KeyId.Should().NotBeNull();
 
+        // 2026-08-18 — the stored prefix must be the value the auth handler
+        // computes (ApiKeyHasher.Prefix, 12 chars). ResolveByVerify matches
+        // candidates on KeyPrefix EQUALITY, and that scan is the only lookup
+        // left after the row's first successful auth rehashes it to Argon2;
+        // the 16-char slice this used to store made the rotated key work
+        // exactly once.
+        result.KeyPrefix.Should().Be(Tamma.Api.Auth.ApiKeyHasher.Prefix(result.PlaintextKey!));
+
         _apiKeyRepo.Verify(r => r.CreateAsync(It.Is<ApiKey>(
             k => k.Scope == "installation" &&
                  k.OwnerId == installationEntityId.ToString() &&
                  k.TenantId == tenantId &&
-                 !string.IsNullOrWhiteSpace(k.KeyHash) &&
-                 !string.IsNullOrWhiteSpace(k.KeyPrefix))),
+                 k.KeyHash == Tamma.Api.Auth.ApiKeyHasher.Hash(result.PlaintextKey!) &&
+                 k.KeyPrefix == Tamma.Api.Auth.ApiKeyHasher.Prefix(result.PlaintextKey!))),
             Times.Once);
 
         _eventRepo.Verify(r => r.AppendAsync(It.Is<DomainEvent>(

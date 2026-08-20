@@ -160,6 +160,96 @@ public class LocalExecutorTests
         text.Should().Contain("\"agent_provider\": \"claude-code\"");
     }
 
+    // ── Story 40-1 AC8 — the entry point must resolve from a temp workdir ──
+    // The child runs with WorkingDirectory = a per-session temp dir, so the
+    // repo-relative default would be resolved against THAT and never found.
+    // These pin the resolution, not the packaging: the CLI bundle still has to
+    // be built (`pnpm --filter @tamma/cli build`) for a real local run.
+
+    [Test]
+    public async Task ExecuteAsync_SpawnsAnAbsoluteEntryPoint_OnDefaultConfiguration()
+    {
+        ProcessRunRequest? captured = null;
+        var runner = new FakeProcessRunner
+        {
+            OnRun = (req, _) => { captured = req; return new ProcessRunResult(0, "", "", false, 1); }
+        };
+        // Default CliEntryPoint, default (temp) working directory — the shape a
+        // self-hosted install runs with when AgentExecutorFactory resolves `local`.
+        var executor = new LocalExecutor(runner, new LocalExecutorOptions());
+
+        await executor.ExecuteAsync(MakeRequest());
+
+        captured.Should().NotBeNull();
+        var entryPoint = captured!.Arguments[0];
+        Path.IsPathRooted(entryPoint).Should().BeTrue(
+            "node resolves a relative entry point against the child's working directory, "
+            + $"which is the per-session temp dir '{captured.WorkingDirectory}'");
+        Path.GetDirectoryName(entryPoint).Should().NotBe(captured.WorkingDirectory,
+            "the CLI does not live in the per-session scratch dir");
+    }
+
+    [Test]
+    public void ResolveCliEntryPoint_HonoursAnAbsoluteConfiguredPath()
+    {
+        var configured = Path.Combine(Path.GetTempPath(), "somewhere", "tamma-cli.js");
+        var resolved = LocalExecutorOptions.ResolveCliEntryPoint(
+            configured, "/opt/tamma/bin", "/opt/tamma", _ => false);
+
+        resolved.Should().Be(Path.GetFullPath(configured),
+            "an operator who configures an absolute path gets exactly that path");
+    }
+
+    [Test]
+    public void ResolveCliEntryPoint_AnchorsARelativePath_AtTheFirstAncestorThatHasIt()
+    {
+        // The engine's bin dir sits several levels below the repo root, where the
+        // default `packages/cli/dist/index.js` actually lives.
+        var repoRoot = Path.GetFullPath("/repo");
+        var expected = Path.Combine(repoRoot, "packages", "cli", "dist", "index.js");
+
+        var resolved = LocalExecutorOptions.ResolveCliEntryPoint(
+            LocalExecutorOptions.DefaultCliEntryPoint,
+            Path.Combine(repoRoot, "apps", "tamma-elsa", "src", "Tamma.Api", "bin", "Debug", "net8.0"),
+            Path.Combine(repoRoot, "apps", "tamma-elsa"),
+            path => path == expected);
+
+        resolved.Should().Be(expected);
+    }
+
+    [Test]
+    public void ResolveCliEntryPoint_StillReturnsAnAbsolutePath_WhenNothingIsBuilt()
+    {
+        var baseDir = Path.GetFullPath("/opt/tamma/bin");
+        var resolved = LocalExecutorOptions.ResolveCliEntryPoint(
+            LocalExecutorOptions.DefaultCliEntryPoint, baseDir, "/opt/tamma", _ => false);
+
+        Path.IsPathRooted(resolved).Should().BeTrue(
+            "a not-yet-built CLI must fail against a NAMED location, not a temp-relative one");
+        resolved.Should().StartWith(baseDir);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_MissingResultFile_NamesTheEntryPointAndTheBuildStep()
+    {
+        // The old message blamed an unimplemented CLI command. The command exists
+        // (packages/cli/src/commands/execute-agent.ts); the real failure is that
+        // its bundle is not built or not where the config points.
+        var runner = new FakeProcessRunner
+        {
+            OnRun = (_, _) => new ProcessRunResult(0, "ran fine", "", TimedOut: false, DurationSeconds: 2)
+        };
+        var opts = new LocalExecutorOptions { WorkingDirectory = _workDir, CleanupAfterRun = false };
+        var executor = new LocalExecutor(runner, opts);
+
+        var result = await executor.ExecuteAsync(MakeRequest());
+
+        result.ErrorMessage.Should().Contain("Agent:Local:CliEntryPoint");
+        result.ErrorMessage.Should().Contain("pnpm --filter @tamma/cli build");
+        result.ErrorMessage.Should().NotContain("may not be implemented",
+            "the execute-agent command is implemented and unit-tested");
+    }
+
     private sealed class FakeProcessRunner : IProcessRunner
     {
         public Func<ProcessRunRequest, CancellationToken, ProcessRunResult> OnRun { get; set; } =

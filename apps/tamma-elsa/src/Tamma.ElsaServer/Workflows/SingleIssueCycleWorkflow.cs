@@ -63,9 +63,9 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot").Persisted();
         var baseBranch = builder.WithVariable<string>("BaseBranch", "main").Persisted();
         var tenantId = builder.WithVariable<string>("TenantId", "").Persisted();
-        // Deployment mode (dev | business) — drives the deployment pipeline's
-        // production approval gate (Business Mode requires human approval before
-        // prod). Read from input; defaults to dev when absent.
+        // Deployment mode (dev | business) — audit/event context threaded to the
+        // pipeline. (Since 2026-08-18 the production approval gate routes on the
+        // autonomy dial, not mode.) Read from input; defaults to dev when absent.
         var mode = builder.WithVariable<string>("Mode", "").Persisted();
         // Operator force-flag for the prod approval gate (Deployment:RequireProdApproval).
         // Threaded from DispatchCycleActivity so an operator can force the gate even
@@ -804,10 +804,11 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["mergeSha"] = mergeSha.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
-                // Thread mode + tenant so the pipeline's production approval gate
-                // is mode-aware (Business Mode → human approval) and its DCB
-                // events / bookmarks are tenant-scoped. requireProdApproval lets an
-                // operator force the gate even in dev mode.
+                // Thread mode + tenant so the pipeline's DCB events carry the
+                // operating mode and its bookmarks are tenant-scoped. (The prod
+                // approval gate routes on the autonomy dial since 2026-08-18, not
+                // mode.) requireProdApproval lets an operator force the human
+                // wait regardless of the dial.
                 ["mode"] = mode.Get(ctx),
                 ["tenantId"] = tenantId.Get(ctx),
                 ["requireProdApproval"] = requireProdApproval.Get(ctx),

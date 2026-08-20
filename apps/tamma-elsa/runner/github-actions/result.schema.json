@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tamma.dev/schemas/agent-result-1.0.0.json",
+  "title": "Tamma agent result artifact",
+  "description": "The .tamma/result.json a Tamma runner uploads as the `tamma-result` artifact. Decoded by AgentResultArtifactParser.ParseResultJson and merged by ActionsResultAggregator. The key set is pinned three ways — this schema, collect-results.sh's TAMMA_RESULT_KEYS, and the AgentResultArtifact record — by RunnerContractTests; changing one without the others fails Tamma's build.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "success",
+    "task",
+    "issue_number",
+    "branch_name",
+    "tamma_session_id",
+    "files_changed",
+    "pr_number",
+    "commit_sha",
+    "error_message",
+    "agent_log_summary",
+    "tokens_used",
+    "duration_seconds",
+    "agent_provider",
+    "agent_version"
+  ],
+  "properties": {
+    "success": {
+      "type": "boolean",
+      "description": "The agent's own verdict. Authoritative: the collector trusts this over the workflow run conclusion."
+    },
+    "task": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "Echo of the `task` input (implement, fix, debug, review, test)."
+    },
+    "issue_number": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Echo of the `issue_number` input."
+    },
+    "branch_name": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "Echo of the `branch_name` input — the branch the run pushed to."
+    },
+    "tamma_session_id": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "Echo of the `tamma_session_id` input. Correlates the run with Tamma's audit trail."
+    },
+    "files_changed": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": { "type": "string", "maxLength": 2048 },
+      "description": "Repository-relative paths this run changed. Capped at MaxFilesChangedCount; the collector falls back to a git diff when empty."
+    },
+    "pr_number": {
+      "type": ["integer", "null"],
+      "description": "Null in the per-task call — the Tamma cycle opens the PR before the task loop, and the collector looks it up from git."
+    },
+    "commit_sha": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "HEAD after the run. Empty when nothing was committed."
+    },
+    "error_message": {
+      "type": ["string", "null"],
+      "maxLength": 2048,
+      "description": "Why the run failed. Null on success. Must never carry secrets or source."
+    },
+    "agent_log_summary": {
+      "type": ["string", "null"],
+      "maxLength": 32768,
+      "description": "Tail of the agent log. Truncated to MaxAgentLogSummaryChars server-side."
+    },
+    "tokens_used": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000000,
+      "description": "Total agent tokens. 0 when the provider does not report usage."
+    },
+    "duration_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Wall-clock seconds from workspace prepare to collect."
+    },
+    "agent_provider": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "Echo of the `agent_provider` input (claude-code, mock, ...)."
+    },
+    "agent_version": {
+      "type": ["string", "null"],
+      "maxLength": 2048,
+      "description": "Version string of the agent CLI that ran. Null when unknown."
+    }
+  }
+}

@@ -98,6 +98,93 @@ public class ValidateTestSyntaxActivityTests
         result.Errors[1].Message.Should().Contain("Expression expected");
     }
 
+    /// <summary>
+    /// 2026-08-18 — the check writes the generated test into a bare temp
+    /// directory: no node_modules, no tsconfig, no ambient test globals. So
+    /// tsc exits non-zero on EVERY ordinary test with semantic diagnostics
+    /// only, and this activity used to translate all of them into syntax
+    /// errors — the RED phase rejected each test for importing its runner.
+    /// A syntax check must not fail on unresolved imports.
+    /// </summary>
+    [Test]
+    public async Task OrdinaryVitestFile_WithOnlySemanticDiagnostics_IsValid()
+    {
+        var fakeStdout =
+            "tests/example.test.ts(1,30): error TS2307: Cannot find module 'vitest' or its corresponding type declarations.\n"
+            + "tests/example.test.ts(3,1): error TS2304: Cannot find name 'describe'.\n"
+            + "tests/example.test.ts(4,3): error TS2304: Cannot find name 'it'.\n"
+            + "tests/example.test.ts(5,5): error TS2304: Cannot find name 'expect'.\n";
+
+        var runner = new FakeProcessRunner
+        {
+            OnRun = req => new ProcessRunResult(
+                ExitCode: 2, StdOut: fakeStdout, StdErr: "", TimedOut: false, DurationSeconds: 1),
+        };
+
+        var gen = MakeGen(
+            "import { describe, it, expect } from 'vitest';\n\n"
+            + "describe('add', () => {\n  it('sums', () => {\n    expect(1 + 1).toBe(2);\n  });\n});\n",
+            "tests/example.test.ts");
+
+        var result = await ValidateTestSyntaxActivity.ValidateAsync(gen, 30, runner);
+
+        result.IsValid.Should().BeTrue(
+            "unresolved modules and missing globals are type/resolution complaints, not syntax errors");
+        result.Errors.Should().BeEmpty();
+        result.SkippedLanguages.Should().NotContain("typescript",
+            "tsc ran fine — it just had nothing to say about syntax");
+    }
+
+    [Test]
+    public async Task MixedDiagnostics_KeepsOnlyTheSyntaxError()
+    {
+        var fakeStdout =
+            "tests/broken.test.ts(1,30): error TS2307: Cannot find module 'vitest' or its corresponding type declarations.\n"
+            + "tests/broken.test.ts(4,18): error TS1005: ')' expected.\n"
+            + "tests/broken.test.ts(4,3): error TS2304: Cannot find name 'it'.\n";
+
+        var runner = new FakeProcessRunner
+        {
+            OnRun = req => new ProcessRunResult(
+                ExitCode: 2, StdOut: fakeStdout, StdErr: "", TimedOut: false, DurationSeconds: 1),
+        };
+
+        var gen = MakeGen("import { it } from 'vitest';\nit('x' => {});\n", "tests/broken.test.ts");
+
+        var result = await ValidateTestSyntaxActivity.ValidateAsync(gen, 30, runner);
+
+        result.IsValid.Should().BeFalse("a real TS1xxx parse error is still a syntax error");
+        result.Errors.Should().HaveCount(1);
+        result.Errors[0].Line.Should().Be(4);
+        result.Errors[0].Column.Should().Be(18);
+        result.Errors[0].Message.Should().Contain("TS1005");
+    }
+
+    [Test]
+    public async Task NonZeroExitWithUnparseableOutput_StillFails()
+    {
+        // The suppression must not swallow a genuine tool failure: if nothing
+        // in the output parses as a diagnostic at all, we cannot claim the
+        // syntax is fine.
+        var runner = new FakeProcessRunner
+        {
+            OnRun = req => new ProcessRunResult(
+                ExitCode: 2,
+                StdOut: "",
+                StdErr: "error TS5023: Unknown compiler option '--noEmitt'.",
+                TimedOut: false,
+                DurationSeconds: 1),
+        };
+
+        var gen = MakeGen("const x: number = 1;\n", "tests/example.test.ts");
+
+        var result = await ValidateTestSyntaxActivity.ValidateAsync(gen, 30, runner);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().HaveCount(1);
+        result.Errors[0].Message.Should().Contain("TS5023");
+    }
+
     [Test]
     public async Task ValidPython_ExitCodeZero_IsValid()
     {

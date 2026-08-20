@@ -12,11 +12,10 @@ namespace Tamma.Activities.AgentDispatch;
 ///
 /// <para><b>JSON shell-out protocol:</b> the executor writes a request
 /// file and invokes the Tamma CLI (Node.js) with
-/// <c>--request &lt;path&gt; --output &lt;path&gt;</c>. The CLI
-/// command (to be implemented in <c>packages/cli</c> as a follow-up
-/// story) reads the request, runs the agent, and writes an
-/// <see cref="AgentResultArtifact"/>-shaped JSON file to the output
-/// path. Schema:</para>
+/// <c>--request &lt;path&gt; --output &lt;path&gt;</c>. The CLI command
+/// (<c>packages/cli/src/commands/execute-agent.ts</c>) reads the request,
+/// runs the agent, and writes an <see cref="AgentResultArtifact"/>-shaped
+/// JSON file to the output path. Schema:</para>
 ///
 /// <para>Request file (<c>.tamma/exec-request-{sessionId}.json</c>):</para>
 /// <code>
@@ -37,10 +36,15 @@ namespace Tamma.Activities.AgentDispatch;
 /// <para>Result file (<c>.tamma/exec-result-{sessionId}.json</c>):
 /// identical shape to <see cref="AgentResultArtifact"/>.</para>
 ///
-/// <para><b>Follow-up:</b> <c>packages/cli/src/commands/execute-agent.ts</c>
-/// must implement the other side of this protocol. Until then the
-/// executor will fail with exit-code != 0 and the failure path returns
-/// a diagnostic <see cref="AgentExecutionResult"/>.</para>
+/// <para><b>Packaging:</b> the CLI command exists and implements this
+/// protocol, but its bundle does not ship with the .NET app — the entry
+/// point must exist on disk (<c>pnpm --filter @tamma/cli build</c>) for a
+/// local run to succeed. Because the child process runs in a per-session
+/// temp <see cref="ProcessRunRequest.WorkingDirectory"/>, a relative
+/// <see cref="LocalExecutorOptions.CliEntryPoint"/> would resolve against
+/// that temp dir and never be found; it is therefore resolved to an
+/// absolute path before the spawn (see
+/// <see cref="LocalExecutorOptions.ResolveCliEntryPoint()"/>).</para>
 /// </summary>
 public sealed class LocalExecutor : IAgentExecutor
 {
@@ -70,13 +74,17 @@ public sealed class LocalExecutor : IAgentExecutor
         var requestPath = Path.Combine(workDir, $"exec-request-{SafeId(request.SessionId)}.json");
         var resultPath = Path.Combine(workDir, $"exec-result-{SafeId(request.SessionId)}.json");
 
+        // Absolute, always: workDir is a per-session temp dir, so `node` would
+        // resolve a relative entry point against THAT and never find the CLI.
+        var entryPoint = _options.ResolveCliEntryPoint();
+
         try
         {
             await File.WriteAllTextAsync(requestPath, SerializeRequest(request), cancellationToken);
 
             var cliArgs = new List<string>
             {
-                _options.CliEntryPoint,
+                entryPoint,
                 "execute-agent",
                 "--request",
                 requestPath,
@@ -85,8 +93,8 @@ public sealed class LocalExecutor : IAgentExecutor
             };
 
             _logger?.LogInformation(
-                "LocalExecutor spawning {Exe} {Args} (session={SessionId})",
-                _options.NodeExecutable, string.Join(' ', cliArgs), request.SessionId);
+                "LocalExecutor spawning {Exe} {Args} in {WorkDir} (session={SessionId})",
+                _options.NodeExecutable, string.Join(' ', cliArgs), workDir, request.SessionId);
 
             var runResult = await _processRunner.RunAsync(new ProcessRunRequest(
                 FileName: _options.NodeExecutable,
@@ -136,7 +144,10 @@ public sealed class LocalExecutor : IAgentExecutor
                     TokensUsed: 0,
                     DurationSeconds: runResult.DurationSeconds,
                     ErrorMessage:
-                        "Local agent CLI did not produce a result file (packages/cli execute-agent command may not be implemented yet)",
+                        $"Local agent CLI did not produce a result file at '{resultPath}'. "
+                        + $"Resolved entry point: '{entryPoint}' — build it with "
+                        + "`pnpm --filter @tamma/cli build`, or set Agent:Local:CliEntryPoint "
+                        + "to an absolute path if the CLI lives elsewhere.",
                     AgentLogSummary: Tail(runResult.StdOut, 2048),
                     AgentProvider: request.AgentProvider,
                     AgentVersion: null,
@@ -240,10 +251,16 @@ public sealed class LocalExecutorOptions
     public string NodeExecutable { get; set; } = "node";
 
     /// <summary>
-    /// Path to the Tamma CLI entry point. Overridden in
-    /// <c>appsettings</c> when Tamma is packaged with a bundled CLI.
+    /// Path to the Tamma CLI entry point. A relative value is anchored at the
+    /// app's own directory or the working directory (see
+    /// <see cref="ResolveCliEntryPoint(string?, string?, string?, Func{string, bool})"/>);
+    /// set <c>Agent:Local:CliEntryPoint</c> to an absolute path when the CLI is
+    /// packaged somewhere else.
     /// </summary>
-    public string CliEntryPoint { get; set; } = "packages/cli/dist/index.js";
+    public string CliEntryPoint { get; set; } = DefaultCliEntryPoint;
+
+    /// <summary>Repo-relative location of the built CLI bundle.</summary>
+    public const string DefaultCliEntryPoint = "packages/cli/dist/index.js";
 
     /// <summary>
     /// Working directory for the child process. If empty, a per-session
@@ -253,6 +270,60 @@ public sealed class LocalExecutorOptions
 
     /// <summary>Delete the per-session request/result files after the run.</summary>
     public bool CleanupAfterRun { get; set; } = true;
+
+    /// <summary>
+    /// Resolve <see cref="CliEntryPoint"/> against the running app's own location
+    /// and the process working directory.
+    /// </summary>
+    public string ResolveCliEntryPoint() => ResolveCliEntryPoint(
+        CliEntryPoint, AppContext.BaseDirectory, Directory.GetCurrentDirectory(), File.Exists);
+
+    /// <summary>
+    /// Turn a configured entry point into an ABSOLUTE path. The child process runs
+    /// in a per-session temp working directory, so a relative path handed to
+    /// <c>node</c> resolves against that temp dir and fails — the default
+    /// <see cref="DefaultCliEntryPoint"/> is relative to the REPO root, which is
+    /// somewhere above the app's bin directory.
+    ///
+    /// <para>An absolute configured value is honoured verbatim. A relative one is
+    /// probed against <paramref name="baseDirectory"/> and
+    /// <paramref name="currentDirectory"/> and each of their ancestors, first hit
+    /// wins. When nothing exists yet (the CLI bundle is built separately) the path
+    /// is still returned absolute, anchored at the first candidate root, so the
+    /// failure names a real location instead of a temp-relative one.</para>
+    /// </summary>
+    public static string ResolveCliEntryPoint(
+        string? configured, string? baseDirectory, string? currentDirectory, Func<string, bool> fileExists)
+    {
+        ArgumentNullException.ThrowIfNull(fileExists);
+        var entry = string.IsNullOrWhiteSpace(configured) ? DefaultCliEntryPoint : configured.Trim();
+        if (Path.IsPathRooted(entry)) return Path.GetFullPath(entry);
+
+        var anchors = AnchorChain(baseDirectory, currentDirectory).ToList();
+        foreach (var anchor in anchors)
+        {
+            var candidate = Path.GetFullPath(Path.Combine(anchor, entry));
+            if (fileExists(candidate)) return candidate;
+        }
+
+        var fallback = anchors.Count > 0 ? anchors[0] : Directory.GetCurrentDirectory();
+        return Path.GetFullPath(Path.Combine(fallback, entry));
+    }
+
+    private static IEnumerable<string> AnchorChain(string? baseDirectory, string? currentDirectory)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var start in new[] { baseDirectory, currentDirectory })
+        {
+            if (string.IsNullOrWhiteSpace(start)) continue;
+            var dir = new DirectoryInfo(Path.GetFullPath(start));
+            while (dir is not null)
+            {
+                if (seen.Add(dir.FullName)) yield return dir.FullName;
+                dir = dir.Parent;
+            }
+        }
+    }
 
     public static LocalExecutorOptions FromConfiguration(IConfiguration configuration)
     {

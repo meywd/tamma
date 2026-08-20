@@ -52,6 +52,19 @@ public enum BackgroundActor
     /// <c>scheduled_trigger_fires</c> ledger). Ships <c>Enabled=false</c>.</summary>
     [Wire("tenant-scheduled-trigger-service")] TenantScheduledTriggerService,
 
+    /// <summary><c>Tamma.ElsaServer.Workflows.AdlLoopWatchdogService</c> — 2026-08-18,
+    /// new member: the out-of-band observer for the autonomous loop. Detects "no live
+    /// adl-orchestrator instance for N minutes" (which nothing else could report, since
+    /// the loop's own restart-failure signal depends on the process that just failed) and
+    /// re-arms it. Inert until the loop has run at least once on the deployment.</summary>
+    [Wire("adl-loop-watchdog-service")] AdlLoopWatchdogService,
+
+    /// <summary><c>Tamma.ElsaServer.Workflows.OrphanedCycleRecoveryService</c> —
+    /// 2026-08-18, new member: sweeps cycle instances a host crash left mid-execution
+    /// inside ExecuteAgentActivity's non-durable agent wait. They stay Running/Executing
+    /// with no bookmark forever and hold an ADL MaxConcurrent slot.</summary>
+    [Wire("orphaned-cycle-recovery-service")] OrphanedCycleRecoveryService,
+
     // ── Tamma.Api host — Program.cs registrations ──
 
     /// <summary><c>Tamma.Api.Services.PoolWarmupService</c>.</summary>

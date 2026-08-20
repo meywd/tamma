@@ -82,7 +82,32 @@ public sealed class FanOutTenantDimensionalRollupsActivity : TammaAsyncActivity
         Logger ??= context.GetService<ILogger<FanOutTenantDimensionalRollupsActivity>>();
 
         var cpFactory = context.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
-        var tenantFactory = context.GetRequiredService<ITenantDbContextFactory>();
+        // 2026-08-18 — DEGRADE, do not fault. This was GetRequiredService, so on a host
+        // that composes no tenant data plane (the engine: ITenantDbContextFactory ships
+        // from AddTammaData, which only Tamma.Api calls) the activity threw every hour and
+        // ContinueWithIncidentsStrategy buried it. Refusing to start the whole scheduler
+        // was the first attempt at a fix, but that also killed ComputePlatformRollupActivity
+        // — which runs FIRST, needs only the control-plane factory, and was succeeding every
+        // hour. The tenant fan-out is the only part that needs this seam, so it is the only
+        // part that skips.
+        var tenantFactory = context.GetService<ITenantDbContextFactory>();
+        if (tenantFactory is null)
+        {
+            // Uncovered tenants count as FAILED so the degradation reaches the
+            // durable stream, not just this log line — see
+            // FanOutTenantRollupsActivity's skip arm for the full rationale.
+            var uncovered = await FanOutTenantRollupsActivity
+                .CountActiveTenantsAsync(cpFactory, hour, context.CancellationToken)
+                .ConfigureAwait(false);
+            Logger?.LogWarning(
+                "analytics.dimensional_rollup.tenant_fanout_skipped hour={Hour} uncoveredTenants={Uncovered} "
+                + "reason=no_tenant_data_plane — this host composes no ITenantDbContextFactory.",
+                hour, uncovered);
+            TenantsSuccess.Set(context, 0);
+            TenantsFailed.Set(context, uncovered);
+            return;
+        }
+
         var publisher = context.GetRequiredService<IPlatformEventPublisher>();
         var pricing = context.GetService<IAnalyticsPricingConfig>() ?? new NullAnalyticsPricingConfig();
         var metrics = context.GetService<DimensionalProjectionMetrics>();

@@ -17,22 +17,23 @@ namespace Tamma.Activities.ADL;
 /// Dispatches a SingleIssueCycle workflow (fire & forget) with event emission.
 /// Wraps Elsa's DispatchWorkflow to add audit trail.
 ///
-/// <para><b>Deployment-mode threading (IMPORTANT fix, 2026-06-22).</b> The
-/// downstream <c>deployment-pipeline</c> gates its production deploy on a human
-/// approval bookmark when <c>mode == "business"</c> (or an explicit
-/// <c>requireProdApproval</c>). Nothing upstream used to set <c>mode</c>, so prod
-/// auto-deployed with no gate (violating "zero deployments without approval in
-/// Business Mode"). This activity now derives the real operating mode from
-/// configuration — mirroring <c>Tamma.Api.Services.PromptStore.TammaModeProvider</c>'s
-/// detection (the engine layer cannot reference <c>Tamma.Api</c> without a
-/// dependency cycle, so the shared, pure <see cref="DeploymentMode.Resolve"/> in
-/// Tamma.Core re-derives the SAME decision from the SAME config signals) — and
-/// forwards <c>mode</c> + <c>tenantId</c> + <c>requireProdApproval</c> to
-/// <c>single-issue-cycle</c>, which threads them into the pipeline.</para>
+/// <para><b>Deployment-mode threading (2026-06-22, re-scoped 2026-08-18).</b>
+/// This activity derives the real operating mode from configuration — mirroring
+/// <c>Tamma.Api.Services.PromptStore.TammaModeProvider</c>'s detection (the engine
+/// layer cannot reference <c>Tamma.Api</c> without a dependency cycle, so the
+/// shared, pure <see cref="DeploymentMode.Resolve"/> in Tamma.Core re-derives the
+/// SAME decision from the SAME config signals) — and forwards <c>mode</c> +
+/// <c>tenantId</c> + <c>requireProdApproval</c> to <c>single-issue-cycle</c>,
+/// which threads them into the pipeline. NOTE the re-scope: as of the owner
+/// directive of 2026-08-18 the pipeline's production-approval decision routes on
+/// the AUTONOMY GATE's answer for <c>effect:deploy.prod</c>, not on mode — mode
+/// is audit/event context there, and <c>requireProdApproval</c> is the explicit
+/// operator override that still forces the wait. The mode threading remains
+/// load-bearing for audit rows and for every other mode-sensitive consumer.</para>
 ///
-/// <para><b>Fail-safe:</b> an absent/unknown mode resolves to <c>business</c>
-/// (REQUIRE approval), never a silent prod auto-deploy. An operator can force the
-/// gate even in single-user mode via <c>Deployment:RequireProdApproval=true</c>.</para>
+/// <para><b>Fail-safe:</b> an absent/unknown mode still resolves to
+/// <c>business</c>, and the gate's own unreadable-answer arm fails closed to the
+/// human wait — so no configuration state yields a silent prod auto-deploy.</para>
 /// </summary>
 [Activity(
     "Tamma.ADL",
@@ -103,17 +104,30 @@ public class DispatchCycleActivity : TammaAsyncActivity
             return;
         }
 
+        // 2026-08-18 — the ctor-or-GetService fallback belongs on the CONFIGURATION
+        // too, not only the dispatcher, and its absence silently DISABLED the
+        // production-deploy approval gate in exactly the deployments that need it.
+        // A store-rehydrated instance runs through the [JsonConstructor], so
+        // `_configuration` is null in the deployed engine (findings 27/28 family).
+        // Both prod-gate terms then read that null: `Tamma:TenantSharedSecret` /
+        // `ConnectionStrings:ControlPlane` came back absent, which
+        // DeploymentMode.Resolve reads as "no SaaS signal" => "dev" => gate OFF, and
+        // `Deployment:RequireProdApproval` fell to its `?? false`. So a SaaS/Business
+        // deployment threaded mode="dev" and deployed to production with no human —
+        // the inverse of the fail-safe this activity documents.
+        var configuration = _configuration ?? context.GetService<IConfiguration>();
+
         // Resolve the deployment mode end-to-end so the pipeline's production
         // approval gate engages for business/SaaS deployments. An explicit Mode
         // input wins; otherwise derive it from configuration (mirrors
         // TammaModeProvider's single-vs-SaaS detection). Fail-safe: an
         // absent/unknown mode resolves to "business" (REQUIRE approval).
-        var mode = ResolveMode(context);
+        var mode = ResolveMode(Mode.Get(context), configuration);
 
         // requireProdApproval lets an operator force the gate even in single-user
         // mode (Deployment:RequireProdApproval=true). Defaults false.
         var requireProdApproval =
-            _configuration?.GetValue<bool>("Deployment:RequireProdApproval") ?? false;
+            configuration?.GetValue<bool>("Deployment:RequireProdApproval") ?? false;
 
         var input = new Dictionary<string, object>
         {
@@ -178,7 +192,7 @@ public class DispatchCycleActivity : TammaAsyncActivity
     }
 
     private string ResolveMode(ActivityExecutionContext context)
-        => ResolveMode(Mode.Get(context), _configuration);
+        => ResolveMode(Mode.Get(context), _configuration ?? context.GetService<IConfiguration>());
 
     /// <summary>
     /// Resolve the deployment <c>mode</c> threaded to the cycle/pipeline. An
@@ -199,6 +213,14 @@ public class DispatchCycleActivity : TammaAsyncActivity
             // resolver so "saas"/"single-user" aliases map to the wire tokens.
             return DeploymentMode.Resolve(explicitInput, false, false);
         }
+
+        // NO configuration at all is not the same as "configuration says
+        // self-hosted": with nothing to read we cannot see a SaaS signal that IS
+        // there, and reading that blindness as "dev" is what silently switched the
+        // production approval gate off. Unknown => gate ON, matching this method's
+        // documented fail-safe and DeploymentMode.Resolve's own unrecognised-mode
+        // arm.
+        if (configuration is null) return DeploymentMode.Business;
 
         var tammaMode = configuration?["Tamma:Mode"];
         var hasSharedSecret = !string.IsNullOrWhiteSpace(configuration?["Tamma:TenantSharedSecret"]);

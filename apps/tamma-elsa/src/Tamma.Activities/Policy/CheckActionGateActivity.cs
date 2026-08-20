@@ -30,14 +30,19 @@ namespace Tamma.Activities.Policy;
 /// Story 43-5's follow-up F12 ("the degraded outcome is a denial, not an
 /// escalation, until 43-9 lands") closes HERE and nowhere else.</para>
 ///
-/// <para><b>FAIL OPEN on a transport failure, and that is safe ONLY because of
-/// how the one v1 adoption is wired</b> (D10). The deployment pipeline ORs this
-/// activity's outcome into an existing <c>prodApprovalNeeded</c> predicate; a
-/// null response therefore leaves the pre-existing business-mode and
-/// <c>requireProdApproval</c> terms exactly as they are, which is today's
-/// behaviour. Fail-open here is "the new term contributed nothing", never "the
-/// gate was removed". A future adoption that REPLACES a predicate rather than
-/// OR-ing into it would make this posture wrong and must revisit it.</para>
+/// <para><b>On a transport failure this activity writes <c>unavailable</c> and
+/// takes the Automated EDGE — what that MEANS belongs to the adopting
+/// decision, and the current adoption fails CLOSED.</b> History matters here
+/// because the posture flipped with the authority (2026-08-18 owner directive):
+/// under 43-9's additive-OR wiring, fail-open was safe because the pipeline's
+/// business-mode term backstopped a null answer. The predicate has since been
+/// REPLACED — the dial decides — so the deployment pipeline's
+/// <c>ProductionGateAutomates</c> treats <c>unavailable</c> (and the unwritten
+/// <c>""</c>) as a human wait: an unreadable gate is not a grant. A future
+/// adopter must make the same choice consciously: route on the OUTCOME
+/// VARIABLE, and decide what an unreadable answer means for YOUR decision —
+/// the Automated edge on the error arm is a wiring convenience, not a
+/// semantic.</para>
 ///
 /// <para>Outcomes:
 /// <list type="bullet">
@@ -196,8 +201,10 @@ public class CheckActionGateActivity : Activity
         {
             _logger?.LogWarning(
                 "Action-gate evaluation UNAVAILABLE for {ActionKey} (correlation {CorrelationId}); "
-                + "taking the Automated edge so the pre-existing approval predicate is unchanged. "
-                + "This is fail-open on an ERROR, not on a decision.",
+                + "outcome variable set to 'unavailable'. The edge taken is Automated, but what that "
+                + "MEANS is the adopting decision's choice — the prod-approval predicate treats "
+                + "'unavailable' as a human wait (fail closed, 2026-08-18), since an unreadable gate "
+                + "is not a grant.",
                 LogSanitizer.Clean(actionKey), LogSanitizer.Clean(correlationId));
 
             Outcome.Set(context, OutcomeUnavailable);

@@ -1,6 +1,15 @@
 # Story 36-2: DCB-to-Analytics Projection Pipeline (Dimensional Rollup)
 
-Status: drafted
+Status: done
+<!-- Flipped drafted -> done 2026-08-18. The deliverable named in the acceptance criteria
+     was located in apps/tamma-elsa/src (and its suites in apps/tamma-elsa/tests) before this
+     header was changed — not taken from a changelog. The per-story evidence is recorded
+     inline on this story's line in docs/sprint-status.yaml.
+   The PER-TENANT projection cannot run on any host yet: the engine composes no
+   ITenantDbContextFactory, so the tenant fan-out skips loudly every hour and the scheduler
+   warns once at startup. The platform-wide rollup is unaffected and runs normally.
+   36-7's margin seam is still the Null implementation.
+-->
 
 ## MANDATORY: Before You Code
 

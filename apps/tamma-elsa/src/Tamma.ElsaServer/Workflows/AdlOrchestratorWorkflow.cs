@@ -61,6 +61,12 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         var cooldownSeconds = builder.WithVariable<int>("CooldownSeconds", 10).Persisted();
         var maxConcurrent = builder.WithVariable<int>("MaxConcurrent", 1).Persisted();
 
+        // Operational limits from the dispatched config (`limits.*` in AdlConfig). Both
+        // shipped from the start and were read by nothing, so the loop had neither a
+        // per-instance stop nor a spend cap. They now feed CheckLimits.
+        var emergencyStop = builder.WithVariable<bool>("EmergencyStop", false).Persisted();
+        var maxSpendUsd = builder.WithVariable<decimal>("MaxSpendUsd", 0m).Persisted();
+
         // Deployment mode + tenant threaded to each dispatched cycle (and from
         // there into the deployment pipeline's production-approval gate). These
         // are PASS-THROUGH from the orchestrator's own input: at the engine/
@@ -95,6 +101,8 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             ResolvedCooldownSeconds = new Output<int>(cooldownSeconds),
             ResolvedMaxIssuesPerRun = new Output<int>(maxConcurrent),
             ResolvedConfigJson = new Output<string>(configJson),
+            ResolvedEmergencyStop = new Output<bool>(emergencyStop),
+            ResolvedMaxSpendUsd = new Output<decimal>(maxSpendUsd),
         };
         initConfig.SetDisplayText("Load Config");
 
@@ -132,6 +140,14 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Id = "CheckLimits",
             Name = "Check Limits",
             MaxConcurrent = new Input<int>(ctx => maxConcurrent.Get(ctx)),
+            // Config-driven brake + spend cap. The activity ALSO consults the operator
+            // stop switch (config flag / stop file) on its own, so the brake works
+            // without re-dispatching the loop with new config.
+            EmergencyStop = new Input<bool>(ctx => emergencyStop.Get(ctx)),
+            MaxSpendUsd = new Input<decimal>(ctx => maxSpendUsd.Get(ctx)),
+            // Budget bucket: the orchestrator's tenant when it has one, else the
+            // activity falls back to Adl:BudgetOwnerId (the single-user path).
+            BudgetOwnerId = new Input<string?>(ctx => ctx.GetInput<string>("tenantId") ?? tenantId.Get(ctx)),
         };
         checkLimits.SetDisplayText("Check Limits");
 
@@ -147,12 +163,13 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             IssueNumber = new Input<int>(ctx => selectedIssueNumber.Get(ctx)),
             BotAssignee = new Input<string>(ctx => botAssignee.Get(ctx)),
             BaseBranch = new Input<string>(ctx => baseBranch.Get(ctx)),
-            // Thread the operating mode + tenant end-to-end so the deployment
-            // pipeline's production-approval gate engages for business/SaaS.
-            // Pass-through from the orchestrator input (empty in the self-restart
-            // loop); DispatchCycleActivity derives the real mode from config when
-            // empty, fail-safe to "business" (gate ON) — never a silent prod
-            // auto-deploy.
+            // Thread the operating mode + tenant end-to-end for audit rows and
+            // every mode-sensitive consumer. Pass-through from the orchestrator
+            // input (empty in the self-restart loop); DispatchCycleActivity
+            // derives the real mode from config when empty, fail-safe to
+            // "business". (Since 2026-08-18 the pipeline's prod-approval gate
+            // routes on the autonomy dial, not mode; the gate's own unreadable
+            // arm fails closed, so no config state silently auto-deploys prod.)
             Mode = new Input<string>(ctx => ctx.GetInput<string>("mode") ?? mode.Get(ctx)),
             TenantId = new Input<string>(ctx => ctx.GetInput<string>("tenantId") ?? tenantId.Get(ctx)),
         };

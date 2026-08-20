@@ -103,7 +103,7 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void BackgroundActor_has_32_members()
+    public void BackgroundActor_has_35_members()
     {
         // 31 → 32 (Epic 31 P3, 2026-08-08): + CiCompletionPollerService — the
         // DG-5 durable CI completion poller (an IHostedService in Tamma.Api)
@@ -128,7 +128,8 @@ public class ActionVocabularyCountTests
         // → 26. Cross-checked: 26 non-abstract IHostedService classes exist
         // across both host assemblies (BackgroundActorCatalogSweepTests binds
         // them by type name). +1 (Story 41-30): TenantScheduledTriggerService.
-        Enum.GetValues<BackgroundActor>().Should().HaveCount(33);
+        // 33 → 35 (2026-08-18: + AdlLoopWatchdogService and OrphanedCycleRecoveryService, the autonomous-loop watchdog and the orphaned-cycle sweeper. Both are IHostedService classes in Tamma.ElsaServer, and every hosted service is catalogued.)
+        Enum.GetValues<BackgroundActor>().Should().HaveCount(35);
     }
 
     [Test]
@@ -159,8 +160,9 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_223()
+    public void TotalCatalogMembers_is_225()
     {
+        // 96 + 17 + 8 + 61 + 35 + 8 = 225 — was 223 (automation 33): 2026-08-18: + AdlLoopWatchdogService and OrphanedCycleRecoveryService, the autonomous-loop watchdog and the orphaned-cycle sweeper. Both are IHostedService classes in Tamma.ElsaServer, and every hosted service is catalogued.
         // 96 + 17 + 8 + 61 + 33 + 8 = 223 — was 222 (automation 32): Epic 31 P4
         // M3 (2026-08-08) added the single-user startup webhook-registration
         // pass as an automation:* machinery member (git.webhook.register's
@@ -194,7 +196,7 @@ public class ActionVocabularyCountTests
         // (80 + 10 + 22 + 26 + …); the agent-action plane grew by 16 (Story
         // 41-1a), the document-type plane by 6 (Story 41-1b), and
         // effect/automation by 3 + 1 (Story 41-30).
-        ActionCatalog.All.Should().HaveCount(223);
-        ActionCatalog.ByKey.Should().HaveCount(223);
+        ActionCatalog.All.Should().HaveCount(225);
+        ActionCatalog.ByKey.Should().HaveCount(225);
     }
 }

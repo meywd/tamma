@@ -1,6 +1,5 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
+using Tamma.Api.Auth;
 using Tamma.Api.Services.GitHub;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -22,7 +21,6 @@ public sealed class ApiKeyRotationService : IApiKeyRotationService
 {
     private const string Scope = "installation";
     private const string KeyLabel = "installation-key";
-    private const int PrefixLength = 16;
     private static readonly HashSet<string> PrivilegedRoles = new(StringComparer.OrdinalIgnoreCase)
     {
         "owner",
@@ -100,7 +98,12 @@ public sealed class ApiKeyRotationService : IApiKeyRotationService
 
         var plaintext = GenerateKey();
         var keyHash = HashKey(plaintext);
-        var keyPrefix = plaintext.Length >= PrefixLength ? plaintext[..PrefixLength] : plaintext;
+        // 2026-08-18 — same defect as the install-time issuance: the stored
+        // KeyPrefix must be ApiKeyHasher.Prefix (12 chars), because that is
+        // what ApiKeyAuthHandler.ResolveByVerify compares against. A 16-char
+        // slice made the rotated key auth once (SHA-256 KeyHash lookup) and
+        // 401 from the second request on, once the row rehashed to Argon2.
+        var keyPrefix = ApiKeyHasher.Prefix(plaintext);
 
         ApiKey stored;
         var existing = (await _apiKeys.ListByOwnerAsync(installationEntityId.ToString()))
@@ -201,18 +204,10 @@ public sealed class ApiKeyRotationService : IApiKeyRotationService
     private static KeyRotationResult Fail(string reason) =>
         new(Success: false, PlaintextKey: null, KeyPrefix: null, KeyId: null, ErrorReason: reason, Provisioning: null);
 
-    private static string GenerateKey()
-    {
-        var bytes = RandomNumberGenerator.GetBytes(32);
-        // Base64 produces URL-unsafe characters; swap `/` / `+` so the key is
-        // safe for both HTTP headers and visible use in the UI.
-        var body = Convert.ToBase64String(bytes)
-            .Replace('+', '-')
-            .Replace('/', '_')
-            .TrimEnd('=');
-        return $"tamma_sk_{body}";
-    }
+    // 2026-08-18 — one owner for the wire format and its SHA-256 storage form
+    // (ApiKeyHasher); the byte-identical local copies these replaced are how
+    // the KeyPrefix above drifted away from what the auth handler looks up.
+    private static string GenerateKey() => ApiKeyHasher.NewKey();
 
-    private static string HashKey(string plaintext)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(plaintext))).ToLowerInvariant();
+    private static string HashKey(string plaintext) => ApiKeyHasher.Hash(plaintext);
 }

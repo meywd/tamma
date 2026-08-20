@@ -95,6 +95,11 @@ public class BackgroundActorRegistrationSweepTests
             BackgroundActor.WorkflowSeeder,
             BackgroundActor.AgentSeeder,
             BackgroundActor.TenantScheduledTriggerService,
+            // 2026-08-18 — autonomous-loop liveness. Both are AddHostedService lines in
+            // Tamma.ElsaServer/Program.cs alongside HourlyAnalyticsRollupScheduler, so the
+            // same blind spot applies: this harness cannot boot that host.
+            BackgroundActor.AdlLoopWatchdogService,
+            BackgroundActor.OrphanedCycleRecoveryService,
         };
 
     /// <summary>
@@ -358,10 +363,12 @@ public class BackgroundActorRegistrationSweepTests
     {
         // The blind spot is DECLARED and BOUNDED. A seventh ElsaServer hosted
         // service fails here even though this harness cannot boot that host.
-        ActorsRegisteredInTheElsaServerHostOnly.Should().HaveCount(6,
-            "Tamma.ElsaServer/Program.cs has exactly six AddHostedService lines (:155, :222, :232, "
-            + ":250, :412, :415). A change means the un-swept blind spot grew or shrank — say so "
-            + "explicitly rather than letting it drift.");
+        // 6 → 8 (2026-08-18): + AdlLoopWatchdogService and OrphanedCycleRecoveryService,
+        // the autonomous-loop liveness pair, registered next to the analytics scheduler.
+        ActorsRegisteredInTheElsaServerHostOnly.Should().HaveCount(8,
+            "Tamma.ElsaServer/Program.cs has exactly eight AddHostedService lines. A change means "
+            + "the un-swept blind spot grew or shrank — say so explicitly rather than letting it "
+            + "drift.");
     }
 
     [Test]

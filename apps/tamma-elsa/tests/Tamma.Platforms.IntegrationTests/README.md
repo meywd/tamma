@@ -193,9 +193,10 @@ AdlOrchestrator → SingleIssueCycle workflows drive one seeded issue:
   `dotnet build Tamma.sln` then
   `dotnet test tests/Tamma.Platforms.IntegrationTests --filter "TestCategory=GiteaE2E"`.
 - The engine runs as `ASPNETCORE_ENVIRONMENT=Production` (matching the
-  deployed engine) — one pre-existing engine DI composition defect
-  (`HourlyAnalyticsRollupScheduler`, a captive dependency) refuses a
-  Development boot and is outside this suite's scope. Re-entry is
+  deployed engine). The DI defect that used to make that mandatory —
+  `HourlyAnalyticsRollupScheduler` capturing the scoped
+  `IWorkflowDispatcher` — was fixed 2026-08-18; Production stays because
+  this suite exercises the deployed shape. Re-entry is
   ENABLED: the engine host now defaults to the HTTP-backed
   latest-accepted read (`HttpLifecycleReEntryService`) — the plan-review
   shim REQUIRES that read, so the old `Documents:ReEntryDisabled=true`
@@ -237,9 +238,28 @@ so the next run does not rediscover it:
    docker tag  mirror.gcr.io/library/postgres:17-alpine postgres:17-alpine
    docker pull mirror.gcr.io/gitea/gitea:1.21
    docker tag  mirror.gcr.io/gitea/gitea:1.21 gitea/gitea:1.21
+   docker pull mirror.gcr.io/library/redis:7-alpine
+   docker tag  mirror.gcr.io/library/redis:7-alpine redis:7-alpine
    ```
+
+   The redis line is worth doing before you read a `Tamma.Api.Tests` result:
+   without it, `RedisDistributedRateLimitBackendTests` fails its `OneTimeSetUp`
+   with `DockerImageNotFoundException` and reports SIX failures that have
+   nothing to do with your change. That "known baseline" has been quoted in
+   several verification notes; it is an unpulled image, not a real red.
 
 3. **The docker daemon stops on its own.** `docker info || ((sudo -n dockerd
    >/tmp/dockerd.log 2>&1 &); sleep 15)` before any run.
+
+4. **The engine-driven E2E needs `python3` INSIDE the SDK container.** The
+   scripted agent executor is a python3 process; CI's ubuntu runner has it, the
+   SDK image does not, and the proxy 403s deb.debian.org so apt cannot add it.
+   Without it the E2E fails early and misleadingly ("Failed to start process
+   python3", cycle never merges) — nothing like the same test's CI behaviour.
+   Recipe: extract a bookworm-matched python (`docker cp` out of
+   `mirror.gcr.io/library/python:3.11-slim-bookworm`) and mount it plus a
+   two-line wrapper that sets `LD_LIBRARY_PATH` as `/usr/local/bin/python3`.
+   Do NOT mount the host's python: an Ubuntu 24.04 binary wants glibc 2.38 and
+   the bookworm container has 2.36.
 
 None of this applies to CI, which has a real SDK and registry access.

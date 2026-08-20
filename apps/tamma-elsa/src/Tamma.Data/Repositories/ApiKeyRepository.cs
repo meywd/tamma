@@ -29,6 +29,33 @@ public class ApiKeyRepository(ControlPlaneDbContext db) : IApiKeyRepository
     public async Task<List<ApiKey>> ListByScopeAsync(string scope)
         => await db.ApiKeys.Where(k => k.Scope == scope && k.RevokedAt == null).ToListAsync();
 
+    /// <summary>
+    /// Keys in <paramref name="scope"/> that are valid RIGHT NOW — which includes a key
+    /// inside its rotation grace window, where <c>RevokedAt</c> is set but still in the
+    /// future.
+    ///
+    /// <para>This exists because <see cref="ListByScopeAsync"/> filters
+    /// <c>RevokedAt == null</c>, and it feeds the authentication candidate scan. A key's
+    /// first successful auth rehashes its row to per-key-salted Argon2, after which no
+    /// hash-equality lookup can find it and the prefix scan is the only path left — so a
+    /// rotated-out key became invisible the moment <see cref="RotateAsync"/> stamped
+    /// <c>RevokedAt = now + 24h</c>, and 401'd immediately. The documented 24-hour
+    /// rolling cutover was unreachable for any key that had ever been used, which is
+    /// every key that matters. The grace branch in the handler's revocation check now
+    /// has candidates to act on.</para>
+    ///
+    /// <para>Deliberately a sibling rather than a change to
+    /// <see cref="ListByScopeAsync"/>: that method also backs an admin listing, and
+    /// widening it would quietly change what operators see.</para>
+    /// </summary>
+    public async Task<List<ApiKey>> ListValidByScopeAsync(string scope)
+    {
+        var now = DateTime.UtcNow;
+        return await db.ApiKeys
+            .Where(k => k.Scope == scope && (k.RevokedAt == null || k.RevokedAt > now))
+            .ToListAsync();
+    }
+
     public async Task<List<ApiKey>> ListByOwnerAsync(string ownerId)
         => await db.ApiKeys.Where(k => k.OwnerId == ownerId && k.RevokedAt == null).ToListAsync();
 
@@ -45,8 +72,18 @@ public class ApiKeyRepository(ControlPlaneDbContext db) : IApiKeyRepository
     public async Task RevokeAllByOwnerAsync(string ownerId)
     {
         var now = DateTime.UtcNow;
+        // Sweep everything that can still AUTHENTICATE, not just never-revoked
+        // rows — which means grace-window keys too (RevokedAt stamped in the
+        // FUTURE by RotateAsync's 24h rolling cutover). This filtered
+        // `RevokedAt == null` until 2026-08-19, which was harmless while a
+        // future-RevokedAt key was invisible to the auth candidate scans anyway;
+        // the moment ListValidByScopeAsync made the grace window real, this
+        // sweep had to match it, or an admin deleting a user (AdminEndpoints
+        // SoftDelete + this call) left the user's rotating key authenticating
+        // for up to 24 more hours. Owner-wide revocation is the emergency stop:
+        // it grants no grace.
         var keys = await db.ApiKeys
-            .Where(k => k.OwnerId == ownerId && k.RevokedAt == null)
+            .Where(k => k.OwnerId == ownerId && (k.RevokedAt == null || k.RevokedAt > now))
             .ToListAsync();
         foreach (var key in keys)
             key.RevokedAt = now;

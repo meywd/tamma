@@ -39,11 +39,16 @@ namespace Tamma.ElsaServer.Workflows;
 ///     gate, <c>ROLLBACK.*</c> in the rollback branch, and
 ///     <c>PIPELINE.SUCCESS</c>/<c>PIPELINE.FAILED</c> at the terminals.</description></item>
 ///   <item><description><b>P0 item 3 — production approval gate.</b> Before the
-///     production deploy a <c>FlowDecision(mode == business || requireProdApproval)</c>
-///     routes to <see cref="WaitForDeploymentApprovalActivity"/> (bookmark-based
-///     human gate). Business Mode requires approval; dev mode deploys straight
-///     through. Approve → ProdDeploy; Reject / Invalid → prod-failure terminal
-///     (NEVER a silent prod deploy).</description></item>
+///     production deploy the autonomy gate evaluates <c>effect:deploy.prod</c>
+///     against the dial and the DECISION routes on that answer (owner directive
+///     2026-08-18: "check the automation level, then go to orchestrator or
+///     human"): <c>automated</c> → deploy proceeds; below the dial →
+///     <see cref="WaitForDeploymentApprovalActivity"/> (bookmark-based human
+///     gate); <c>denied</c> → refusal terminal. An unreadable gate fails CLOSED
+///     to the human wait, and <c>requireProdApproval</c> remains an explicit
+///     operator override forcing the wait regardless of the dial. Mode no
+///     longer forces approval on its own. Approve → ProdDeploy; Reject /
+///     Invalid → prod-failure terminal (NEVER a silent prod deploy).</description></item>
 ///   <item><description><b>P0 item 4 — rollback on prod failure.</b> A failed
 ///     production deploy routes through <c>RollbackProduction</c> (dispatches
 ///     <c>llm-call</c> with the <c>rollback</c> action to revert prod to the
@@ -240,11 +245,12 @@ public class DeploymentPipelineWorkflow : WorkflowBase
             repository, mergeSha, issueNumber, mode, tenantId, stageResult, stageError, completedStages, rollbackStatus);
 
         // ================================================================
-        // 4. Production approval gate (P0 item 3) — Business Mode (or an explicit
-        //    requireProdApproval flag) requires a human checkpoint before prod.
+        // 4. Production approval gate (P0 item 3) — the AUTONOMY DIAL decides;
+        //    the human wait is the below-dial outcome, not the unconditional one.
         // ================================================================
-        // ── Story 43-9 Seam E (AC11, D10) — the ONE v1 adoption of the autonomy
-        //    gate in a workflow graph, and it is ADDITIVE.
+        // ── Story 43-9 Seam E (AC11, D10), re-based on the owner directive of
+        //    2026-08-18: "it needs to check the automation level and then go to
+        //    orchestrator or human."
         //
         //    ON THE EFFECT, NOT THE AGENT-ACTION. StageDeployDispatch (below) is
         //    SHARED across qa / uat / production, so one `agent-action:deploy`
@@ -254,13 +260,28 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         //    dispatch is deliberately NOT gated (pinned by
         //    Gate_is_on_the_effect_not_the_shared_dispatch).
         //
-        //    BY OR, NEVER BY REPLACEMENT. `prodApprovalNeeded` already fires
-        //    unconditionally for business mode; replacing that predicate with a
-        //    threshold check would be STRICTLY WEAKER for business-mode tenants —
-        //    a governance epic that removed an existing gate. The new term can only
-        //    ADD a wait, never remove one, which is also why the activity may fail
-        //    open on a transport error: a null gate contributes nothing and the
-        //    pipeline behaves exactly as it does today.
+        //    THE DIAL DECIDES (2026-08-18; supersedes 43-9's "BY OR, NEVER BY
+        //    REPLACEMENT"). 43-9 adopted the gate additively — `mode == business`
+        //    kept forcing a human wait no matter what the dial said, because
+        //    removing an existing gate term was outside that story's authority.
+        //    The owner has now directed the replacement: the gate's answer routes
+        //    the decision. `automated` (dial >= the action's level — default dial
+        //    70 vs deploy.prod's 90 — or an admin's observe-only Enforce=false) →
+        //    production proceeds under the orchestrator; anything the gate blocks
+        //    → the existing human wait; `denied` → the refusal terminal. Mode is
+        //    audit/event context now, not a gate term.
+        //
+        //    THE FAIL POSTURE FLIPS WITH THE AUTHORITY. While business mode was
+        //    the unconditional backstop, an UNREADABLE gate could fail open — a
+        //    null answer contributed nothing and the mode term still protected
+        //    production. With the dial as the decider there is no backstop behind
+        //    it, so `unavailable` (and the unwritten "") now routes to the HUMAN
+        //    wait: absence of evidence that automation was granted is not a
+        //    grant. Same rule as ResolveMode's null-config arm (finding 36).
+        //
+        //    `requireProdApproval` SURVIVES as the explicit operator override —
+        //    config that forces the wait even at a dial that automates. It can
+        //    only ADD a wait, never remove one.
         //
         // ── 2026-08-01 review finding F1 — A DENIAL IS NOT AN ESCALATION ──
         //    As shipped, this seam had a MONOTONICITY INVERSION. The activity
@@ -297,6 +318,12 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         //    decision, the worst case is an extra human wait, never a free deploy.
         var gateOutcome = builder.WithVariable<string>("ProdGateOutcome", "").Persisted();
         var gateReason = builder.WithVariable<string>("ProdGateReason", "").Persisted();
+        // Enforced=false is the admin's explicit "report but do not block"
+        // (observe-only), and the DECISION must see it, not just the edge — the
+        // predicate would otherwise block on the raw requires-human wire the
+        // admin asked to only observe. Defaults TRUE so an unwritten value can
+        // never read as observe-only (fail closed).
+        var gateEnforced = builder.WithVariable<bool>("ProdGateEnforced", true).Persisted();
         var checkProdGate = new CheckActionGateActivity
         {
             Id = "CheckProdDeployGate", Name = "Check Prod Deploy Gate",
@@ -314,6 +341,7 @@ public class DeploymentPipelineWorkflow : WorkflowBase
             // ExpressionExecutionContext and cannot reach the workflow context, so
             // spelling it here is not merely redundant, it is not expressible.)
             Outcome = new Output<string?>(gateOutcome),
+            Enforced = new Output<bool>(gateEnforced),
             // Bound so a refusal can NAME what refused it: `denied` with no reason
             // is an operator staring at a stopped pipeline with nothing to act on.
             Reason = new Output<string?>(gateReason),
@@ -321,15 +349,12 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         checkProdGate.SetDisplayText("Check Prod Deploy Gate");
 
         var prodApprovalNeeded = new FlowDecision(ctx =>
-            string.Equals(mode.Get(ctx)?.Trim(), "business", StringComparison.OrdinalIgnoreCase)
-            || requireProdApproval.Get(ctx)
-            // 43-9 AC11, corrected by F1 — additive only. The activity writes the
-            // wire outcome; ANY outcome the gate treats as a block (requires-human
-            // OR denied) routes into the EXISTING WaitForDeploymentApprovalActivity
-            // rather than a new wait. `automated`, `unavailable` and the unwritten
-            // "" stay non-blocking, which is what keeps the shipped-default and
-            // fail-open behaviours byte-identical to before Story 43-9.
-            || IsBlockingGateOutcome(gateOutcome.Get(ctx)))
+            // Operator override first: config can force a human even at a dial
+            // that automates. Then the dial's answer routes, through the pure
+            // helper below — automation must be POSITIVELY granted, and anything
+            // unreadable or unknown lands on the human wait.
+            requireProdApproval.Get(ctx)
+            || !ProductionGateAutomates(gateEnforced.Get(ctx), gateOutcome.Get(ctx)))
         { Id = "ProdApprovalNeeded", Name = "Prod Approval Needed?" };
         prodApprovalNeeded.SetDisplayText("Prod Approval Needed?");
 
@@ -904,33 +929,73 @@ public class DeploymentPipelineWorkflow : WorkflowBase
     }
 
     /// <summary>
-    /// Story 43-9 Seam E, corrected by the 2026-08-01 review finding F1 — the
-    /// gate-outcome half of the production-approval predicate.
+    /// The gate half of the production-approval predicate (owner directive
+    /// 2026-08-18: the automation level decides; replaces the additive
+    /// <c>IsBlockingGateOutcome</c> of Story 43-9/F1). Returns true only when
+    /// automation is POSITIVELY granted — everything else is the human wait.
     ///
-    /// <para>Returns true for every wire the gate treats as a BLOCK
-    /// (<c>requires-human</c> and <c>denied</c>) and false for
-    /// <c>automated</c>, <c>unavailable</c> and the unwritten <c>""</c>. The
-    /// denied arm is what closes F1's monotonicity inversion: disabling
-    /// <c>effect:deploy.prod</c>, or putting any <c>AllowedRoles</c>
-    /// restriction on it, resolves to <c>denied</c>, and a `denied` that fell
-    /// through this predicate as "no opinion" deployed production with no human.
-    /// Blocking on it makes the predicate MONOTONE: every strengthening of the
-    /// admin's setting is at least as blocking as the one below it.</para>
-    ///
-    /// <para>An UNRECOGNISED wire is deliberately NOT blocking here. The edge
-    /// selection in <see cref="CheckActionGateActivity.SelectEdge"/> already fails
-    /// an unknown enforced answer closed onto <c>RequiresHuman</c>, so it never
-    /// reaches this predicate with the raw unknown wire; treating an unknown
-    /// string as a block HERE would instead make any future non-blocking wire
-    /// (say an <c>allowed-with-audit</c>) silently start stalling production
-    /// pipelines on an old engine build. Public + pure so the test drives the same
-    /// function the workflow does.</para>
+    /// <list type="bullet">
+    ///   <item><c>automated</c> → true: the dial (or an admin action row) grants
+    ///   the orchestrator this deploy.</item>
+    ///   <item><c>unavailable</c> and the unwritten <c>""</c> → false. This is
+    ///   the fail-posture flip that comes with the dial being the DECIDER rather
+    ///   than an additive term: there is no business-mode backstop behind it any
+    ///   more, so an unreadable gate cannot be a grant.</item>
+    ///   <item><c>!enforced</c> (with a READABLE wire) → true. Observe-only is
+    ///   the admin's explicit "report but do not block" and is honoured for every
+    ///   real decision INCLUDING an unenforced denial — SelectEdge routes that
+    ///   combination down the Automated edge, so this predicate is its only
+    ///   decider, and parking it at an approvable human wait would be neither
+    ///   observe-only nor F1's hard stop.</item>
+    ///   <item>ENFORCED <c>denied</c> → false. Safety net only — the activity's
+    ///   Denied EDGE routes to the refusal terminal before the predicate runs,
+    ///   but F1 proved what happens when a predicate silently disagrees with its
+    ///   edges: if a future author re-points that edge back here, the worst case
+    ///   is a human wait, never a free deploy.</item>
+    ///   <item>Any other ENFORCED wire this build does not recognise fails
+    ///   closed onto the wait.</item>
+    /// </list>
+    /// Public + pure so the test drives the same function the workflow does.
     /// </summary>
-    public static bool IsBlockingGateOutcome(string? outcomeWire)
+    public static bool ProductionGateAutomates(bool enforced, string? outcomeWire)
     {
         var wire = outcomeWire?.Trim();
-        return string.Equals(wire, GovernanceEvaluateResponse.OutcomeRequiresHuman, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(wire, GovernanceEvaluateResponse.OutcomeDenied, StringComparison.OrdinalIgnoreCase);
+
+        // Unreadable first, unconditionally: the activity's error arm writes
+        // "unavailable" WITH Enforced=false, and an error posture must never be
+        // mistaken for the admin's observe-only. Fail closed.
+        if (string.IsNullOrEmpty(wire)
+            || string.Equals(wire, CheckActionGateActivity.OutcomeUnavailable, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Observe-only next — BEFORE the denied arm (review finding, 2026-08-19:
+        // checking denied first sent an unenforced denial to the approvable human
+        // wait, which is neither observe-only's pass-through nor F1's hard stop,
+        // and let a human approve past a denied action). An unenforced denial is
+        // reachable: an Enabled=false row or any AllowedRoles restriction under an
+        // admin's Enforce=false resolves to denied/unenforced, and SelectEdge
+        // honours observe-only first, so it arrives here on the Automated edge.
+        // "Report but do not block" means exactly that — the denial is in the
+        // audit row, and production proceeds.
+        if (!enforced)
+        {
+            return true;
+        }
+
+        if (string.Equals(wire, GovernanceEvaluateResponse.OutcomeDenied, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(wire, GovernanceEvaluateResponse.OutcomeAutomated, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // An ENFORCED wire this build does not recognise fails closed onto the wait.
+        return false;
     }
 
     private static SetVariable CreateFailureNode(

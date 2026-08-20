@@ -97,6 +97,11 @@ public class ActionWirePinTests
             "tenant-delete-requested-trigger", "workflow-seeder", "agent-seeder",
             // 41-30 — the tenant-aware scheduler seam (tree-truth reconcile).
             "tenant-scheduled-trigger-service",
+            // 2026-08-18 — the autonomous-loop watchdog and the orphaned-cycle
+            // sweeper, declared with the other Tamma.ElsaServer hosted services.
+            // Order is pinned but not persisted: the wire converter serializes by
+            // the [Wire] string, so a mid-enum insert does not renumber stored data.
+            "adl-loop-watchdog-service", "orphaned-cycle-recovery-service",
             "pool-warmup-service", "workflow-sync-service", "channel-outbox-sweeper",
             "secret-auto-rotation-scheduler", "retire-sweep", "engine-registry-heartbeat-service",
             "tenant-status-invalidation-listener", "provider-settings-store-priming-service",

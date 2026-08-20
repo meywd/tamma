@@ -5,8 +5,10 @@ using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.ADL;
 using Tamma.Activities.AgentDispatch.Models;
 using Tamma.Activities.Core;
+using Tamma.Activities.LlmCall;
 
 namespace Tamma.Activities.AgentDispatch;
 
@@ -202,6 +204,18 @@ public class ExecuteAgentActivity : Activity, ITammaActivity
                 "Executing agent via {Mode} for {Repository}/{Branch} (session={SessionId})",
                 executor.Mode, request.Repository, request.BranchName, request.SessionId);
 
+            // CRASH VISIBILITY — the await below is the cycle's longest non-durable
+            // stretch (dispatch → discover → poll to terminal, up to ~35 minutes) with no
+            // bookmark and nothing written to the workflow store until it returns. A
+            // deploy or crash inside it leaves the instance Running/Executing forever;
+            // OrphanedCycleRecoveryService detects and clears that, but without this
+            // marker there is no record of WHICH agent run was in flight, so nobody can
+            // tell whether the platform-side run kept going. Posted straight to the event
+            // store (not through the per-activity drain, which only flushes AFTER the
+            // activity returns — i.e. never, in the case this exists for). Best-effort:
+            // it must never fail the run. A durable, resumable wait is story 40-2.
+            await EmitInFlightMarkerAsync(context, request, executor.Mode).ConfigureAwait(false);
+
             var result = await executor.ExecuteAsync(request, context.CancellationToken);
             SetOutputs(context, result);
             context.SetVariable("LastAgentExecutionResult", result);
@@ -238,6 +252,55 @@ public class ExecuteAgentActivity : Activity, ITammaActivity
             TammaEventEmitter.EmitFailure(
                 context, this, this, _logger, DateTime.UtcNow - startedAt, ex.Message);
             await context.CompleteActivityWithOutcomesAsync("Failed");
+        }
+    }
+
+    /// <summary>
+    /// Persist <c>AGENT.EXECUTION.INFLIGHT</c> immediately, BEFORE the long inline wait,
+    /// so a crash inside that window leaves a durable record of the run that was in
+    /// flight (repository, branch, session, mode, timeout). Swallows every failure — the
+    /// marker is diagnostics, and losing it must not cost the agent run.
+    /// </summary>
+    private async Task EmitInFlightMarkerAsync(
+        ActivityExecutionContext context, AgentExecutionRequest request, string mode)
+    {
+        try
+        {
+            var api = context.GetService<TammaApiClient>();
+            if (api is null) return;
+
+            var evt = new TammaEvent
+            {
+                EventType = AdlLoopEvents.AgentInFlight,
+                Status = "started",
+                ActivityId = Id,
+                ActivityName = Name ?? nameof(ExecuteAgentActivity),
+                WorkflowInstanceId = context.WorkflowExecutionContext.Id,
+                Data = new Dictionary<string, object?>
+                {
+                    ["repository"] = request.Repository,
+                    ["branchName"] = request.BranchName,
+                    ["issueNumber"] = request.IssueNumber,
+                    ["sessionId"] = request.SessionId,
+                    ["agentProvider"] = request.AgentProvider,
+                    ["timeoutMinutes"] = request.TimeoutMinutes,
+                    ["mode"] = mode,
+                },
+                Tags = new Dictionary<string, object?>
+                {
+                    ["issueNumber"] = request.IssueNumber.ToString(),
+                    ["sessionId"] = request.SessionId,
+                },
+            };
+
+            await api.AppendEventsAsync(
+                new[] { EventPersistenceMiddleware.ToWireRecord(evt) },
+                request.TenantId,
+                context.CancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Could not persist the agent in-flight marker (continuing).");
         }
     }
 

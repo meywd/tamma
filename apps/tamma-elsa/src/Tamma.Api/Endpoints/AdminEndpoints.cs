@@ -358,9 +358,25 @@ public static class AdminEndpoints
         return Results.Ok(invites.Select(i => new { i.Id, i.Email, i.Role, i.ExpiresAt, i.CreatedAt }));
     }
 
-    public static async Task<IResult> DeleteInvite(Guid id, IInviteRepository inviteRepo)
+    /// <summary>
+    /// Revoke a pending invite. Tenant-scoped: the delete only lands when the
+    /// invite belongs to the CALLER's tenant. The previous
+    /// <c>IInviteRepository.DeleteAsync(id)</c> call keyed off the invite id
+    /// alone, so any admin who learned another tenant's invite id could revoke
+    /// it. A miss — absent id, or an id owned by another tenant — answers 404
+    /// with the same body either way, so the response cannot be used to probe
+    /// for other tenants' invites. Mirrors <c>OrgEndpoints.DeleteInvite</c>.
+    /// </summary>
+    public static async Task<IResult> DeleteInvite(
+        Guid id, IInviteRepository inviteRepo, ITenantContext tenantContext)
     {
-        await inviteRepo.DeleteAsync(id);
+        if (!tenantContext.TenantId.HasValue)
+            return Results.NotFound(new { error = "Invite not found" });
+
+        var deleted = await inviteRepo.DeleteScopedAsync(tenantContext.TenantId.Value, id);
+        if (!deleted)
+            return Results.NotFound(new { error = "Invite not found" });
+
         return Results.Ok(new { message = "Invite deleted" });
     }
 

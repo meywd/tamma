@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "task": "implement",
+  "issue_number": 42,
+  "branch_name": "tamma/issue-42-login-flow",
+  "tamma_session_id": "adl-42-task-0",
+  "files_changed": [
+    "src/auth/login.ts",
+    "src/auth/login.test.ts"
+  ],
+  "pr_number": 118,
+  "commit_sha": "9f2c1a7d4b6e8c05f31a2b4d6e8f0a1c3d5e7f90",
+  "error_message": null,
+  "agent_log_summary": "Ran 2 test files, 14 assertions, all green.",
+  "tokens_used": 48219,
+  "duration_seconds": 412,
+  "agent_provider": "claude-code",
+  "agent_version": "1.0.0"
+}
