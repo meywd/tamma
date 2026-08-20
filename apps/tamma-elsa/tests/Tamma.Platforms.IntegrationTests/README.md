@@ -251,4 +251,15 @@ so the next run does not rediscover it:
 3. **The docker daemon stops on its own.** `docker info || ((sudo -n dockerd
    >/tmp/dockerd.log 2>&1 &); sleep 15)` before any run.
 
+4. **The engine-driven E2E needs `python3` INSIDE the SDK container.** The
+   scripted agent executor is a python3 process; CI's ubuntu runner has it, the
+   SDK image does not, and the proxy 403s deb.debian.org so apt cannot add it.
+   Without it the E2E fails early and misleadingly ("Failed to start process
+   python3", cycle never merges) — nothing like the same test's CI behaviour.
+   Recipe: extract a bookworm-matched python (`docker cp` out of
+   `mirror.gcr.io/library/python:3.11-slim-bookworm`) and mount it plus a
+   two-line wrapper that sets `LD_LIBRARY_PATH` as `/usr/local/bin/python3`.
+   Do NOT mount the host's python: an Ubuntu 24.04 binary wants glibc 2.38 and
+   the bookworm container has 2.36.
+
 None of this applies to CI, which has a real SDK and registry access.
