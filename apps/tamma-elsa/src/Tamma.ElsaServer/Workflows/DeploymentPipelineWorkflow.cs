@@ -941,16 +941,19 @@ public class DeploymentPipelineWorkflow : WorkflowBase
     ///   the fail-posture flip that comes with the dial being the DECIDER rather
     ///   than an additive term: there is no business-mode backstop behind it any
     ///   more, so an unreadable gate cannot be a grant.</item>
-    ///   <item><c>denied</c> → false. Safety net only — the activity's Denied
-    ///   EDGE routes to the refusal terminal before the predicate runs, but F1
-    ///   proved what happens when a predicate silently disagrees with its edges,
-    ///   so this stays monotone on its own: if a future author re-points the
-    ///   Denied edge back here, the worst case is a human wait, never a free
-    ///   deploy.</item>
-    ///   <item>Any other wire → <c>!enforced</c>. Enforced=false is the admin's
-    ///   explicit observe-only ("report but do not block") and is honoured; an
-    ///   ENFORCED wire this build does not recognise fails closed onto the
-    ///   wait.</item>
+    ///   <item><c>!enforced</c> (with a READABLE wire) → true. Observe-only is
+    ///   the admin's explicit "report but do not block" and is honoured for every
+    ///   real decision INCLUDING an unenforced denial — SelectEdge routes that
+    ///   combination down the Automated edge, so this predicate is its only
+    ///   decider, and parking it at an approvable human wait would be neither
+    ///   observe-only nor F1's hard stop.</item>
+    ///   <item>ENFORCED <c>denied</c> → false. Safety net only — the activity's
+    ///   Denied EDGE routes to the refusal terminal before the predicate runs,
+    ///   but F1 proved what happens when a predicate silently disagrees with its
+    ///   edges: if a future author re-points that edge back here, the worst case
+    ///   is a human wait, never a free deploy.</item>
+    ///   <item>Any other ENFORCED wire this build does not recognise fails
+    ///   closed onto the wait.</item>
     /// </list>
     /// Public + pure so the test drives the same function the workflow does.
     /// </summary>
@@ -958,10 +961,27 @@ public class DeploymentPipelineWorkflow : WorkflowBase
     {
         var wire = outcomeWire?.Trim();
 
+        // Unreadable first, unconditionally: the activity's error arm writes
+        // "unavailable" WITH Enforced=false, and an error posture must never be
+        // mistaken for the admin's observe-only. Fail closed.
         if (string.IsNullOrEmpty(wire)
             || string.Equals(wire, CheckActionGateActivity.OutcomeUnavailable, StringComparison.OrdinalIgnoreCase))
         {
             return false;
+        }
+
+        // Observe-only next — BEFORE the denied arm (review finding, 2026-08-19:
+        // checking denied first sent an unenforced denial to the approvable human
+        // wait, which is neither observe-only's pass-through nor F1's hard stop,
+        // and let a human approve past a denied action). An unenforced denial is
+        // reachable: an Enabled=false row or any AllowedRoles restriction under an
+        // admin's Enforce=false resolves to denied/unenforced, and SelectEdge
+        // honours observe-only first, so it arrives here on the Automated edge.
+        // "Report but do not block" means exactly that — the denial is in the
+        // audit row, and production proceeds.
+        if (!enforced)
+        {
+            return true;
         }
 
         if (string.Equals(wire, GovernanceEvaluateResponse.OutcomeDenied, StringComparison.OrdinalIgnoreCase))
@@ -974,7 +994,8 @@ public class DeploymentPipelineWorkflow : WorkflowBase
             return true;
         }
 
-        return !enforced;
+        // An ENFORCED wire this build does not recognise fails closed onto the wait.
+        return false;
     }
 
     private static SetVariable CreateFailureNode(

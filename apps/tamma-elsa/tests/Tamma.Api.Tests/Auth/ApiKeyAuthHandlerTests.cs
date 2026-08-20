@@ -301,8 +301,15 @@ public class ApiKeyAuthHandlerTests
             ownerId: ownerUser,
             revokedAt: DateTime.UtcNow.AddHours(12)); // future = grace
         SeedKeyLookup(rawKey, apiKey);
+        // A real user row, as production always has one: a null user is now a
+        // REFUSAL (a soft-deleted owner's key must not authenticate), so the old
+        // '(User?)null => role defaults to member' seed pinned the hole itself.
         _userRepo.Setup(r => r.GetByIdAsync(ownerUser))
-            .ReturnsAsync((User?)null); // role defaults to "member"
+            .ReturnsAsync(new User
+            {
+                Id = ownerUser, Email = "u@e", Role = "member",
+                AuthMethod = "email", IsActive = true
+            });
 
         var (result, _) = await RunAsync($"Bearer {rawKey}");
         result.Succeeded.Should().BeTrue("future RevokedAt is the rotation grace window");
@@ -379,7 +386,11 @@ public class ApiKeyAuthHandlerTests
         var apiKey = BuildKey(scope: "user", ownerId: ownerUser);
         SeedLegacyKeyLookup(rawKey, returnedFromSha: apiKey, returnedFromScrypt: null);
         _userRepo.Setup(r => r.GetByIdAsync(ownerUser))
-            .ReturnsAsync((User?)null);
+            .ReturnsAsync(new User
+            {
+                Id = ownerUser, Email = "u@e", Role = "member",
+                AuthMethod = "email", IsActive = true
+            });
 
         var (result, _) = await RunAsync($"Bearer {rawKey}", allowLegacy: true);
 
@@ -394,7 +405,11 @@ public class ApiKeyAuthHandlerTests
         var apiKey = BuildKey(scope: "user", ownerId: ownerUser);
         SeedLegacyKeyLookup(rawKey, returnedFromSha: null, returnedFromScrypt: apiKey);
         _userRepo.Setup(r => r.GetByIdAsync(ownerUser))
-            .ReturnsAsync((User?)null);
+            .ReturnsAsync(new User
+            {
+                Id = ownerUser, Email = "u@e", Role = "member",
+                AuthMethod = "email", IsActive = true
+            });
 
         var (result, _) = await RunAsync($"Bearer {rawKey}", allowLegacy: true);
 
@@ -580,6 +595,27 @@ public class ApiKeyAuthHandlerTests
         var (result, _) = await RunAsync($"Bearer {rawKey}", allowLegacy: true);
 
         result.Succeeded.Should().BeFalse("the grace window has closed");
+    }
+
+    [Test]
+    public async Task UserKey_WhoseOwnerRowIsGone_IsRefused()
+    {
+        // The user-scope twin of the installation-branch rule: a key whose OWNER
+        // row is gone does not authenticate. GetByIdAsync runs under the
+        // soft-delete query filter, so a deleted user's lookup answers null —
+        // and this branch used to fall through with the default role "member"
+        // and build a valid ticket for a deleted account.
+        var ownerUser = Guid.NewGuid();
+        var rawKey = ApiKeyPrefixGenerator.GenerateUserKey();
+        var apiKey = BuildKey(scope: "user", tenantId: null, ownerId: ownerUser);
+        SeedKeyLookup(rawKey, apiKey);
+        _userRepo.Setup(r => r.GetByIdAsync(ownerUser))
+            .ReturnsAsync((User?)null);
+
+        var (result, _) = await RunAsync($"Bearer {rawKey}");
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Message.Should().Be("Invalid API key scope");
     }
 
     [Test]

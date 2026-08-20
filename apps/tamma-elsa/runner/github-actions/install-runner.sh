@@ -93,6 +93,7 @@ file_state() {
 
 STATE="current"
 CUSTOMIZED_FILES=""
+DRIFTED_FILES=""
 rank() {
   case "$1" in
     current) echo 0 ;;
@@ -105,6 +106,7 @@ rank() {
 note_state() {
   # $1 = per-file state, $2 = human-readable path
   [ "$1" = "customized" ] && CUSTOMIZED_FILES="${CUSTOMIZED_FILES} $2"
+  [ "$1" = "drifted" ] && DRIFTED_FILES="${DRIFTED_FILES} $2"
   if [ "$(rank "$1")" -gt "$(rank "$STATE")" ]; then
     STATE="$1"
   fi
@@ -131,8 +133,12 @@ case "$STATE" in
   current) echo "Already up to date."; exit 0 ;;
   drifted)
     if [ "$MODE" != "upgrade" ] && [ "$MODE" != "force" ]; then
-      echo "Installed runner is version '$(version_of "$DST_WORKFLOW")', shipped is '${SHIPPED_VERSION}'." >&2
-      echo "Re-run with --upgrade to replace it." >&2
+      # Name the drifted files rather than quoting the workflow's marker: the
+      # drift may be in a script while the workflow is current (the old message
+      # then showed two identical versions), or the workflow may be absent
+      # entirely (the old message leaked a sed error and printed '').
+      echo "Version drift (shipped ${SHIPPED_VERSION}):${DRIFTED_FILES}" >&2
+      echo "Re-run with --upgrade to replace the set." >&2
       exit 3
     fi
     ;;

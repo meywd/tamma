@@ -289,7 +289,7 @@ public class ActionCatalogLevelTests
         missing.Should().BeEmpty("keys in the table with no catalog dial row");
         extra.Should().BeEmpty("catalog dial rows absent from the table");
         mismatched.Should().BeEmpty("a level moved without updating BOTH the descriptor and this table");
-        actual.Should().HaveCount(176, "176 = 223 catalog rows − 47 machinery (Epic 31 P4 M3 2026-08-08: git.webhook.register moved dial → machinery and +1 automation machinery row, so dial rows shrink by one while the catalog grows by one) (Epic 31 P2: +2 automation machinery rows on both sides of the subtraction; 43-17 follow-up: +2 engine-callback keys, ci.workflow.dispatch 30 and llm.task.execute 20; Story 31-13: +11 PR/issue effect keys, all dial rows at 35/40; Story 42-10: +1 effect:secret.read at 90; Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
+        actual.Should().HaveCount(176, "176 = 225 catalog rows − 49 machinery (2026-08-18: +2 automation machinery — the ADL watchdog and the orphaned-cycle sweeper — grew both sides of the subtraction, so dial rows stay 176) (Epic 31 P4 M3 2026-08-08: git.webhook.register moved dial → machinery and +1 automation machinery row, so dial rows shrink by one while the catalog grows by one) (Epic 31 P2: +2 automation machinery rows on both sides of the subtraction; 43-17 follow-up: +2 engine-callback keys, ci.workflow.dispatch 30 and llm.task.execute 20; Story 31-13: +11 PR/issue effect keys, all dial rows at 35/40; Story 42-10: +1 effect:secret.read at 90; Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
     }
 
     [Test]

@@ -14,23 +14,23 @@ using Tamma.ElsaServer.Workflows;
 namespace Tamma.Activities.Tests.Workflows;
 
 /// <summary>
-/// Story 43-9 <b>AC11</b> — Seam E's ONE v1 adoption: the deployment pipeline's
-/// production-approval decision gains a third <b>OR</b> term fed by
-/// <see cref="CheckActionGateActivity"/>, evaluated on
-/// <c>effect:deploy.prod</c> (Story 43-12: the coarse deploy.promote-prod was retired).
+/// The deployment pipeline's production-approval decision, routed on
+/// <see cref="CheckActionGateActivity"/>'s answer for <c>effect:deploy.prod</c>
+/// (Story 43-9 Seam E, re-based by the owner directive of 2026-08-18: <b>the
+/// dial DECIDES</b> — automated → orchestrator deploys, below the dial → the
+/// human wait, denied → refusal, unreadable → the human wait, with
+/// <c>Deployment:RequireProdApproval</c> as the operator override).
 ///
-/// <para><b>Both halves of AC11 are load-bearing and both are pinned here.</b></para>
-/// <list type="bullet">
-///   <item><b>BY OR, never by replacement.</b> <c>prodApprovalNeeded</c> already
-///   fires unconditionally for business mode; replacing that predicate with a
-///   threshold check would be STRICTLY WEAKER for business-mode tenants — a
-///   governance epic that REMOVED an existing gate. The new term can only ADD a
-///   wait.</item>
-///   <item><b>On the EFFECT, not the agent-action.</b> <c>StageDeployDispatch</c>
-///   is SHARED across qa / uat / production, so one <c>agent-action:deploy</c>
-///   member cannot tell a staging deploy from a production one. Gating
-///   <c>effect:deploy.prod</c> at the prod-approval decision can.</item>
-/// </list>
+/// <para>HISTORY, because two of this fixture's own pins have flipped with the
+/// authority and the old text was load-bearing: 43-9 originally adopted the
+/// gate as a third <b>OR</b> term ("by OR, never by replacement" — the
+/// business-mode wait was untouchable then, and fail-open on an unreadable gate
+/// was safe because that mode term backstopped it). The owner has since directed
+/// the replacement, so mode no longer forces the wait and the unreadable arm
+/// fails CLOSED. What survives from 43-9 unchanged: the gate is <b>on the
+/// EFFECT, not the agent-action</b> — <c>StageDeployDispatch</c> is shared
+/// across qa / uat / production, so only <c>effect:deploy.prod</c> at the
+/// prod-approval decision can tell a production deploy apart.</para>
 ///
 /// <para><b>2026-08-01 review finding F1 — these behaviour tests now drive the
 /// REAL <c>FlowDecision</c> delegate.</b> They used to call a hand-copy of the
@@ -277,6 +277,24 @@ public class DeploymentPipelineGateTests
         ApprovalNeeded("business", requireProdApproval: false,
             gateOutcome: GovernanceEvaluateResponse.OutcomeRequiresHuman, enforced: false)
             .Should().BeFalse("observe-only reports, it does not block");
+
+        // The cell the 2026-08-19 review found wrong: an UNENFORCED denial. It is
+        // reachable (Enabled=false or any AllowedRoles restriction under an admin's
+        // Enforce=false resolves denied/unenforced, and SelectEdge honours
+        // observe-only first, so it arrives at this predicate on the Automated
+        // edge). Checking the denied arm before the observe-only arm parked it at
+        // the APPROVABLE human wait — neither observe-only's pass-through nor F1's
+        // hard stop, and a human could approve past a denied action. Observe-only
+        // now wins: report, don't block.
+        ApprovalNeeded("business", requireProdApproval: false,
+            gateOutcome: GovernanceEvaluateResponse.OutcomeDenied, enforced: false)
+            .Should().BeFalse("an unenforced denial is an observed denial — reported, not blocking");
+
+        // The ENFORCED denial is untouched by that fix: the edge routes it to the
+        // refusal terminal, and the predicate's safety net still blocks it.
+        ApprovalNeeded("business", requireProdApproval: false,
+            gateOutcome: GovernanceEvaluateResponse.OutcomeDenied, enforced: true)
+            .Should().BeTrue("an enforced denial stays at least as blocking as requires-human");
 
         // But observe-only never rescues an UNREADABLE gate: unavailable carries
         // Enforced=false from the activity's error arm, and an error is not an

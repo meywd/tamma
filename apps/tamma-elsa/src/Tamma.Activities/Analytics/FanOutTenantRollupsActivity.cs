@@ -72,13 +72,22 @@ public sealed class FanOutTenantRollupsActivity : TammaAsyncActivity
         var tenantFactory = context.GetService<ITenantDbContextFactory>();
         if (tenantFactory is null)
         {
+            // Count the tenants that SHOULD have been covered as FAILED, so the
+            // degradation is visible in the durable stream (review finding,
+            // 2026-08-19): with 0/0 the HOUR_COMPLETED event read as "no active
+            // tenants exist" and the ops dashboard's coverage query silently got
+            // the wrong answer — the exact log-line-only posture this fix chain
+            // set out to eliminate. The active-tenant directory needs only the
+            // CP factory, which IS present here.
+            var uncovered = await CountActiveTenantsAsync(cpFactory, hour, context.CancellationToken)
+                .ConfigureAwait(false);
             Logger?.LogWarning(
-                "analytics.rollup.tenant_fanout_skipped hour={Hour} reason=no_tenant_data_plane — "
-                + "this host composes no ITenantDbContextFactory, so per-tenant rollups cannot run. "
-                + "The platform-wide rollup is unaffected.",
-                hour);
+                "analytics.rollup.tenant_fanout_skipped hour={Hour} uncoveredTenants={Uncovered} "
+                + "reason=no_tenant_data_plane — this host composes no ITenantDbContextFactory, so "
+                + "per-tenant rollups cannot run. The platform-wide rollup is unaffected.",
+                hour, uncovered);
             TenantsSuccess.Set(context, 0);
-            TenantsFailed.Set(context, 0);
+            TenantsFailed.Set(context, uncovered);
             return;
         }
 
@@ -180,4 +189,23 @@ public sealed class FanOutTenantRollupsActivity : TammaAsyncActivity
             "analytics.rollup.fanout_completed hour={Hour} success={Success} failed={Failed}",
             hour, success, failed);
     }
+    /// <summary>
+    /// The same active-tenant predicate the fan-out targets, used by the degraded
+    /// path to report how many tenants went UNCOVERED. Kept byte-identical to the
+    /// listing below so "uncovered" and "targeted" can never disagree.
+    /// </summary>
+    internal static async Task<int> CountActiveTenantsAsync(
+        IDbContextFactory<ControlPlaneDbContext> cpFactory, DateTime hour, CancellationToken ct)
+    {
+        await using var cp = await cpFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        return await cp.Tenants
+            .IgnoreQueryFilters()
+            .Where(t => t.DeletedAt == null)
+            .Where(t => t.CreatedAt < hour.AddHours(1))
+            .Where(t => EF.Property<string?>(t, "Status") == null
+                        || EF.Property<string?>(t, "Status") == "active")
+            .CountAsync(ct)
+            .ConfigureAwait(false);
+    }
 }
+

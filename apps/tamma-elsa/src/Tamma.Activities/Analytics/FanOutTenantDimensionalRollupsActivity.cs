@@ -93,12 +93,18 @@ public sealed class FanOutTenantDimensionalRollupsActivity : TammaAsyncActivity
         var tenantFactory = context.GetService<ITenantDbContextFactory>();
         if (tenantFactory is null)
         {
+            // Uncovered tenants count as FAILED so the degradation reaches the
+            // durable stream, not just this log line — see
+            // FanOutTenantRollupsActivity's skip arm for the full rationale.
+            var uncovered = await FanOutTenantRollupsActivity
+                .CountActiveTenantsAsync(cpFactory, hour, context.CancellationToken)
+                .ConfigureAwait(false);
             Logger?.LogWarning(
-                "analytics.dimensional_rollup.tenant_fanout_skipped hour={Hour} "
+                "analytics.dimensional_rollup.tenant_fanout_skipped hour={Hour} uncoveredTenants={Uncovered} "
                 + "reason=no_tenant_data_plane — this host composes no ITenantDbContextFactory.",
-                hour);
+                hour, uncovered);
             TenantsSuccess.Set(context, 0);
-            TenantsFailed.Set(context, 0);
+            TenantsFailed.Set(context, uncovered);
             return;
         }
 

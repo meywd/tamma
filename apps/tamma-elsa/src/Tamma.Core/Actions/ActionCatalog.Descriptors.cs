@@ -525,9 +525,11 @@ public static partial class ActionCatalog
         // (DeploymentPipelineWorkflow.cs:113) — no dev or staging stage exists — so
         // effect:deploy.dev and effect:deploy.staging are RESERVED rows (real
         // catalog rows at their zone levels, no performer) until a pipeline stage
-        // exists. deploy.prod ships behaviour-identically to the retired
-        // promote-prod: Seam E gates it at the prod-approval decision (the existing
-        // business-mode human gate is UNTOUCHED; 43-9 joins it by OR). Grading:
+        // exists. deploy.prod is gated at the prod-approval decision, where —
+        // since the 2026-08-18 owner directive — the autonomy gate's answer for
+        // this key DECIDES the routing (automated → orchestrator deploys; below
+        // the dial → human wait; denied → refusal; 43-9's original additive-OR
+        // wiring, with mode as the backstop, is superseded). Grading:
         // deploy.prod → Destructive/irreversible (promote-prod's grading, carried);
         // the non-prod environments → Command/reversible:true (a non-prod
         // environment is redeployable — a judgement call).
@@ -539,9 +541,9 @@ public static partial class ActionCatalog
             "Tamma.ElsaServer.Workflows.DeploymentPipelineWorkflow — UAT stage transition", min: 80),
         Effect(ExternalEffect.DeployStaging, ActionGroup.DeployControl, ActionRisk.Command, "Deploy to staging", "Deploy to the staging environment. RESERVED (Story 43-12): zone level 85, no staging stage exists in DeploymentPipelineWorkflow (QA->UAT->Prod only) — nothing performs it.",
             "RESERVED (Story 43-12) — no performer in the tree: the staging stage does not exist in DeploymentPipelineWorkflow", min: 85),
-        // deploy.prod ships behaviour-identically to the retired promote-prod: Seam E
-        // gates it at the prod-approval decision; the existing business-mode human
-        // gate is UNTOUCHED and 43-9 joins it by OR.
+        // deploy.prod carries promote-prod's grading verbatim. Its level IS the
+        // production gate since 2026-08-18: dial >= 90 deploys under the
+        // orchestrator, below waits for a human (mode no longer forces the wait).
         Effect(ExternalEffect.DeployProd, ActionGroup.DeployControl, ActionRisk.Destructive, "Promote to production", "Production promotion stage transition (the deploy itself runs inside the LLM tool loop — see the deploy-control group description).",
             "Tamma.ElsaServer.Workflows.DeploymentPipelineWorkflow — production stage transition", reversible: false, min: 90),
         Effect(ExternalEffect.DeployRollback, ActionGroup.DeployControl, ActionRisk.Destructive, "Roll back production", "Production rollback branch (same LLM-tool-loop limitation as promote).",

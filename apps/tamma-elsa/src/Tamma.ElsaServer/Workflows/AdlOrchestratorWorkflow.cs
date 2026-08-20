@@ -163,12 +163,13 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             IssueNumber = new Input<int>(ctx => selectedIssueNumber.Get(ctx)),
             BotAssignee = new Input<string>(ctx => botAssignee.Get(ctx)),
             BaseBranch = new Input<string>(ctx => baseBranch.Get(ctx)),
-            // Thread the operating mode + tenant end-to-end so the deployment
-            // pipeline's production-approval gate engages for business/SaaS.
-            // Pass-through from the orchestrator input (empty in the self-restart
-            // loop); DispatchCycleActivity derives the real mode from config when
-            // empty, fail-safe to "business" (gate ON) — never a silent prod
-            // auto-deploy.
+            // Thread the operating mode + tenant end-to-end for audit rows and
+            // every mode-sensitive consumer. Pass-through from the orchestrator
+            // input (empty in the self-restart loop); DispatchCycleActivity
+            // derives the real mode from config when empty, fail-safe to
+            // "business". (Since 2026-08-18 the pipeline's prod-approval gate
+            // routes on the autonomy dial, not mode; the gate's own unreadable
+            // arm fails closed, so no config state silently auto-deploys prod.)
             Mode = new Input<string>(ctx => ctx.GetInput<string>("mode") ?? mode.Get(ctx)),
             TenantId = new Input<string>(ctx => ctx.GetInput<string>("tenantId") ?? tenantId.Get(ctx)),
         };

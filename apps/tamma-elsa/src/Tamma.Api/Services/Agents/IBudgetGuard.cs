@@ -171,12 +171,20 @@ public sealed class RunningSpendBudgetGuard : IBudgetGuard
         {
             var status = await _diagnostics.GetBudgetAsync(owner.Value, ct).ConfigureAwait(false);
 
-            // Remember that this owner HAS a cap, so a later evaluation failure knows to
-            // fail closed. See the catch block for why this has to be remembered rather
-            // than derived from configuration.
+            // Remember whether this owner HAS a cap, so a later evaluation failure knows
+            // which way to fail. Both directions matter (review finding, 2026-08-19: the
+            // add-only version recorded "some read once showed a limit" forever, so a
+            // tenant that later REMOVED its cap — limit back to 0 = unlimited, confirmed
+            // by successful reads — was still denied on every store blip for the process
+            // lifetime). The memory is "the answer from the last read that worked", so a
+            // clean read of an uncapped owner clears it.
             if (status.Limit > 0m)
             {
                 _ownersWithAKnownLimit[owner.Value] = true;
+            }
+            else
+            {
+                _ownersWithAKnownLimit.TryRemove(owner.Value, out _);
             }
 
             var decision = AdlSpendCeiling.Evaluate(status.Spent, status.Limit, ceiling);

@@ -236,11 +236,13 @@ public class DeploymentPipelineWorkflowTests
             "a denied gate resolution is a hard refusal with its own terminal");
         HasEdge("CheckProdDeployGate", "Denied", "ProdApprovalNeeded").Should().BeFalse(
             "and it must NOT be answerable by the standing approval flow");
-        // Business mode (True) → the human gate; dev mode (False) → straight to prod start.
+        // Gate blocks (True) → the human wait; gate automates (False) → prod start.
+        // (Mode is not a gate term since 2026-08-18 — the autonomy dial decides;
+        // ThePredicate_NeverReadsMode in DeploymentPipelineGateTests pins that.)
         HasEdge("ProdApprovalNeeded", "True", "WaitProdApproval").Should().BeTrue(
-            "Business Mode must route to the human approval gate before prod");
+            "a below-dial resolution must route to the human approval gate before prod");
         HasEdge("ProdApprovalNeeded", "False", "EmitProdStarted").Should().BeTrue(
-            "dev mode deploys to prod without a human gate");
+            "a dial that automates deploys to prod under the orchestrator");
     }
 
     [Test]

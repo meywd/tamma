@@ -55,7 +55,7 @@ public class EmitDeploymentEventActivity : Activity
     [Input(Description = "Deploy stage — qa | uat | production (empty for pipeline-level events)")]
     public Input<string?> Stage { get; set; } = new((string?)null);
 
-    [Input(Description = "Deployment mode (dev | business) driving the prod approval gate")]
+    [Input(Description = "Deployment mode (dev | business) — audit/event context; since 2026-08-18 the prod approval gate routes on the autonomy dial, not mode")]
     public Input<string?> Mode { get; set; } = new((string?)null);
 
     [Input(Description = "Tenant id (empty / single-user → platform-scope event)")]

@@ -145,6 +145,32 @@ public class RunningSpendBudgetGuardTests
             + "store must deny rather than hand out an uncapped call");
     }
 
+    [Test]
+    public async Task FailsOpenAgain_AfterASuccessfulReadShowsTheCapWasRemoved()
+    {
+        // The memory is "the last read that worked", not "any read ever". A tenant
+        // that sets a cap, later removes it (limit 0 = unlimited, per the guard's
+        // own contract), and has that confirmed by a successful read must not stay
+        // fail-closed on store blips forever.
+        var diagnostics = new Mock<IDiagnosticsService>();
+        var answers = new Queue<Func<Task<BudgetStatus>>>(new Func<Task<BudgetStatus>>[]
+        {
+            () => Task.FromResult(Status(spent: 10m, limit: 100m)),   // capped
+            () => Task.FromResult(Status(spent: 10m, limit: 0m)),     // cap removed
+            () => Task.FromException<BudgetStatus>(new InvalidOperationException("store down")),
+        });
+        diagnostics.Setup(d => d.GetBudgetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(() => answers.Dequeue()());
+
+        var guard = new RunningSpendBudgetGuard(diagnostics.Object, Config(new Dictionary<string, string?>()));
+
+        (await guard.IsWithinBudgetAsync(Tenant, 0m)).Should().BeTrue("under the cap");
+        (await guard.IsWithinBudgetAsync(Tenant, 0m)).Should().BeTrue("cap removed — unlimited");
+        (await guard.IsWithinBudgetAsync(Tenant, 0m)).Should().BeTrue(
+            "the last successful read proved this owner is uncapped, so a store error has "
+            + "nothing to enforce and must not deny");
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static RunningSpendBudgetGuard Guard(

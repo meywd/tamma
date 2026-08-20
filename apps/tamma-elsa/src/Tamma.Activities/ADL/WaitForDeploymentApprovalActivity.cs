@@ -11,8 +11,12 @@ namespace Tamma.Activities.ADL;
 
 /// <summary>
 /// Bookmark-based human <b>PRODUCTION DEPLOY APPROVAL GATE</b> (PRD FR-32 +
-/// "Smart Friction" strategic checkpoint before production; Business Mode requires
-/// approval — "zero deployments without approval in Business Mode"). Suspends the
+/// "Smart Friction" strategic checkpoint before production). Reached when the
+/// autonomy gate resolves <c>effect:deploy.prod</c> BELOW the dial, or when the
+/// <c>Deployment:RequireProdApproval</c> operator override is set — since the
+/// 2026-08-18 owner directive the dial decides, and mode no longer forces this
+/// wait (a business-mode deployment with the dial at 90+ deploys under the
+/// orchestrator). Suspends the
 /// <c>deployment-pipeline</c> before the production stage until a human decides
 /// whether to <i>approve</i> or <i>reject</i> the prod deploy, then surfaces that
 /// decision (+ approver + feedback) as a typed outcome the parent flowchart

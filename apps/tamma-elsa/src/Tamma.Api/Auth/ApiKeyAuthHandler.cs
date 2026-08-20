@@ -555,12 +555,24 @@ public class ApiKeyAuthHandler(
                     Logger.LogWarning("Auth failure: malformed user-scope OwnerId keyId={KeyId}", apiKey.Id);
                     return AuthenticateResult.Fail("Invalid API key scope");
                 }
-                var role = "member";
                 var userRepo = scope.ServiceProvider.GetRequiredService<IUserRepository>();
                 var user = await userRepo.GetByIdAsync(userId);
-                if (user is not null) role = user.Role;
+                if (user is null)
+                {
+                    // Same rule the installation branch got on 2026-08-19: a key
+                    // whose OWNER row is gone does not authenticate. GetByIdAsync
+                    // runs under the soft-delete query filter, so a deleted user's
+                    // key landed here with user == null — and this branch used to
+                    // tolerate that, falling through with the default role
+                    // "member" and building a VALID ticket for a deleted account
+                    // (reachable for any key that escaped RevokeAllByOwnerAsync,
+                    // e.g. one created concurrently with the deletion).
+                    Logger.LogWarning(
+                        "Auth failure: user not found (or soft-deleted) for key keyId={KeyId}", apiKey.Id);
+                    return AuthenticateResult.Fail("Invalid API key scope");
+                }
                 typedPrincipal = new UserAuthPrincipal(
-                    apiKey.Id, userId, role, effectiveTenantId ?? Guid.Empty);
+                    apiKey.Id, userId, user.Role, effectiveTenantId ?? Guid.Empty);
                 break;
             }
             case "installation":
