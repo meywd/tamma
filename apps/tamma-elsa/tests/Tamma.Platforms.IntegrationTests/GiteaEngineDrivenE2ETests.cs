@@ -463,9 +463,28 @@ public class GiteaEngineDrivenE2ETests
     private async Task<IReadOnlyList<string>> EventTypesAsync()
         => (await AllDurableEventsAsync()).Select(e => e.Type).Distinct().ToList();
 
+    /// <summary>
+    /// Tag matching must survive BOTH renderings the two read paths produce
+    /// (2026-08-20). PlatformEvents rows come back through EF as the compact
+    /// string the writer serialized ({"provider":"scripted"}), but the raw
+    /// tenant-schema reads cast a JSONB column to text, and Postgres's canonical
+    /// jsonb rendering inserts a space after every colon
+    /// ({"provider": "scripted"}) — so a compact-form Contains can NEVER match a
+    /// tenant-schema row. That was invisible while the agent-run events landed in
+    /// platform_events; the moment they landed tenant-bound in the tenant schema,
+    /// this assertion went red against runs that WERE served by the scripted
+    /// provider (verified by reading the live rows). Whitespace is stripped from
+    /// both sides before matching; the fragments used here never carry meaningful
+    /// spaces.
+    /// </summary>
     private async Task<bool> AnyEventWithTagAsync(string type, string tagFragment)
-        => (await AllDurableEventsAsync())
-            .Any(e => e.Type == type && e.Tags.Contains(tagFragment, StringComparison.Ordinal));
+    {
+        var needle = tagFragment.Replace(" ", "", StringComparison.Ordinal);
+        return (await AllDurableEventsAsync())
+            .Any(e => e.Type == type
+                      && e.Tags.Replace(" ", "", StringComparison.Ordinal)
+                          .Contains(needle, StringComparison.Ordinal));
+    }
 
     /// <summary>
     /// ALL durable audit rows the cycle writes, across BOTH planes:
