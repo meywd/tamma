@@ -14,6 +14,12 @@
 #     left alone;
 #   - at most two rescues per run (run_attempt <= 2 checked BEFORE re-running,
 #     so attempt 3 is the last one started by this workflow).
+#
+# BOOTSTRAP LIMITATION, learned the hard way: workflow_run-triggered workflows
+# execute from the DEFAULT branch's copy of this file, so this rescue protects
+# nothing until it has merged to main — including the PR that shipped it, whose
+# own .NET Tests run was externally cancelled 25 minutes in (2026-08-21
+# 09:17 UTC, the eighth documented case) and had to be re-kicked by hand.
 name: CI Rescue
 
 on:
