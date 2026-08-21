@@ -25,6 +25,11 @@ vi.mock('../AuditLogTab.js', () => ({
 vi.mock('../pricing/PricingTab.js', () => ({
   PricingTab: () => <div data-testid="pricing-tab">Pricing Tab Content</div>,
 }));
+// Governance tab — stubbed so this layout test stays isolated from the
+// /api/actions endpoints (the panels' own tests cover the data flow).
+vi.mock('../governance/GovernanceTab.js', () => ({
+  GovernanceTab: () => <div data-testid="governance-tab">Governance Tab Content</div>,
+}));
 
 describe('AdminLayout', () => {
   const user = userEvent.setup();
@@ -94,6 +99,16 @@ describe('AdminLayout', () => {
     expect(pricingBtn).toBeInTheDocument();
     await user.click(pricingBtn);
     expect(screen.getByTestId('pricing-tab')).toBeInTheDocument();
+    expect(screen.queryByTestId('users-tab')).not.toBeInTheDocument();
+  });
+
+  // Governance — the autonomy-dial policy tab is present and switches in.
+  it('shows the Governance tab and switches to it', async () => {
+    render(<AdminLayout />);
+    const governanceBtn = screen.getByText('Governance');
+    expect(governanceBtn).toBeInTheDocument();
+    await user.click(governanceBtn);
+    expect(screen.getByTestId('governance-tab')).toBeInTheDocument();
     expect(screen.queryByTestId('users-tab')).not.toBeInTheDocument();
   });
 

@@ -15,6 +15,8 @@ import { QuickLinksTab } from './QuickLinksTab.js';
 import { AuditLogTab } from './AuditLogTab.js';
 // Story 34-9 — platform-owner pricing & plan-management dashboards.
 import { PricingTab } from './pricing/PricingTab.js';
+// Autonomy-dial governance: action catalog, overrides, pending authorizations.
+import { GovernanceTab } from './governance/GovernanceTab.js';
 
 type AdminTab =
   | 'users'
@@ -24,7 +26,8 @@ type AdminTab =
   | 'audit-log'
   | 'tenants'
   | 'pricing'
-  | 'providers';
+  | 'providers'
+  | 'governance';
 
 interface TabDef {
   id: AdminTab;
@@ -36,6 +39,7 @@ const TABS: TabDef[] = [
   { id: 'tenants', label: 'Tenants' },
   { id: 'pricing', label: 'Pricing' },
   { id: 'providers', label: 'Providers' },
+  { id: 'governance', label: 'Governance' },
   { id: 'api-keys', label: 'API Keys' },
   { id: 'health', label: 'System Health' },
   { id: 'links', label: 'Quick Links' },
@@ -111,6 +115,7 @@ export function AdminLayout(): JSX.Element {
         {activeTab === 'tenants' && <TenantsLinkPanel />}
         {activeTab === 'pricing' && <PricingTab />}
         {activeTab === 'providers' && <ProvidersLinkPanel />}
+        {activeTab === 'governance' && <GovernanceTab />}
         {activeTab === 'api-keys' && <ApiKeysTab />}
         {activeTab === 'health' && <HealthTab />}
         {activeTab === 'links' && <QuickLinksTab />}

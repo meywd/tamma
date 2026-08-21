@@ -113,12 +113,15 @@ describe('AcceptanceRulesAdminPage', () => {
     expect(screen.getByTestId('rules-source-findings').textContent).toContain('Default');
   });
 
-  it('constrains the autonomy dial to 70–100', async () => {
+  // The slider mirrors the server-owned validated range (AutonomyDial [1,100]
+  // since Story 43-11 widened Min 70 -> 1) as an affordance only — the old
+  // 70 floor here silently made the widened range unreachable from the UI.
+  it('mirrors the widened 1–100 dial range on the slider', async () => {
     setup();
     render(<AcceptanceRulesAdminPage />);
     await userEvent.click(screen.getByTestId('rules-row-design'));
     const slider = (await screen.findByLabelText('Autonomy level')) as HTMLInputElement;
-    expect(slider.min).toBe('70');
+    expect(slider.min).toBe('1');
     expect(slider.max).toBe('100');
   });
 
