@@ -52,6 +52,27 @@ describe('RulesEditDialog', () => {
    * Pre-fix, the body memo built eight fields and the API defaulted the ninth to
    * `any`, silently removing the human-acceptance requirement.
    */
+  it('offers the full validated dial range, not the pre-43-11 floor', () => {
+    // The server's validated range is [1,100] (Tamma.Core AutonomyDial; Story
+    // 43-11 widened Min 70 -> 1). This slider hardcoded min=70 long after that,
+    // which silently made every level below 70 unreachable from the UI — the 18
+    // backend dial routes accepted values the dashboard could never send. The
+    // slider bounds are an affordance mirroring the server's range; this pin
+    // keeps them from quietly re-narrowing it.
+    render(
+      <RulesEditDialog
+        resolved={makeResolved({})}
+        onSave={vi.fn()}
+        onReset={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const dial = screen.getByLabelText('Autonomy level');
+    expect(dial).toHaveAttribute('min', '1');
+    expect(dial).toHaveAttribute('max', '100');
+  });
+
   it('preserves acceptorRequirement when an unrelated field is edited', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
 

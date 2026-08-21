@@ -322,7 +322,7 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
     /// activity then surfaces the failure rather than silently rendering the
     /// wrong prompt. Extracted as a static so it is unit-testable without an
     /// Elsa <c>ActivityExecutionContext</c> (per the convention in
-    /// <c>CheckBudgetActivityEmissionTests</c>).
+    /// the deleted <c>CheckBudgetActivityEmissionTests</c> established).
     /// </summary>
     /// <exception cref="ArgumentException">Unknown role or action.</exception>
     public static void ValidateTaxonomy(string role, string action)

@@ -1,0 +1,70 @@
+# tamma-runner-version n/a — repository CI infrastructure.
+#
+# Auto-rescue for EXTERNALLY CANCELLED runs. Something repository-wide has been
+# cancelling in-flight runs since at least PR #511 (six documented cases in
+# .dev/findings/external-ci-run-cancellations-pr-511.md; branch-scoping was
+# refuted by a same-commit probe, and identifying the actor needs the org audit
+# log). Until the actor is found, a cancelled run whose commit is still the
+# branch tip is re-run automatically instead of silently staying dead.
+#
+# Guards, so this can never loop or fight real cancellations:
+#   - only conclusion == 'cancelled' (real failures are left for humans);
+#   - only when the run's head_sha is STILL the tip of its branch — a run
+#     superseded by a newer push (our own concurrency cancel-in-progress) is
+#     left alone;
+#   - at most two rescues per run (run_attempt <= 2 checked BEFORE re-running,
+#     so attempt 3 is the last one started by this workflow).
+name: CI Rescue
+
+on:
+  workflow_run:
+    workflows: ["CI", "Git Platform Integration Tests", "CodeQL", "forbidden-symbols"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  rescue:
+    name: Re-run externally cancelled run
+    if: github.event.workflow_run.conclusion == 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Re-run if the commit is still the branch tip
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+
+            if (run.run_attempt > 2) {
+              core.notice(`Run ${run.id} already rescued ${run.run_attempt - 1} times — leaving it. ` +
+                'If cancellations persist, read .dev/findings/external-ci-run-cancellations-pr-511.md ' +
+                'and check the org audit log (action:workflow_run) for the canceller.');
+              return;
+            }
+
+            // A run superseded by a newer push was cancelled by OUR concurrency
+            // group, which is correct behavior — never resurrect those.
+            const branch = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: run.head_branch,
+            }).catch(() => null);
+
+            if (!branch || branch.data.commit.sha !== run.head_sha) {
+              core.notice(`Run ${run.id} head ${run.head_sha.slice(0, 8)} is no longer the tip of ` +
+                `${run.head_branch} — superseded, not rescuing.`);
+              return;
+            }
+
+            core.notice(`Run ${run.id} (${run.name}, attempt ${run.run_attempt}) on ` +
+              `${run.head_branch}@${run.head_sha.slice(0, 8)} was cancelled while still the branch ` +
+              'tip — re-running. See .dev/findings/external-ci-run-cancellations-pr-511.md.');
+
+            await github.rest.actions.reRunWorkflow({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+            });
