@@ -727,3 +727,21 @@ and the tenant fan-out are separate steps with separate dependencies; gating bot
 union of their seams turned a partial outage into a total one, and the "fix" would have
 read as working — one loud line at startup, then silence — for as long as nobody checked
 whether the hourly row was still appearing.
+
+## 38 (closed 2026-08-20). `CheckBudgetActivity` is DELETED; the BUDGET.EXHAUSTED emission moved to the live denial point
+
+The owner's answer to item 38's open question ("wire it or delete it") was to
+handle it. Deleting was right, for the reason item 38 already gave: every model
+call passes through the server-side `RunningSpendBudgetGuard`, which owns the
+cumulative ceiling; a second engine-side cumulative check adds a per-attempt
+HTTP round-trip and a second number that can disagree.
+
+Deleting it surfaced one real loss worth keeping: the activity was the ONLY
+caller of `IAlertEventEmitter.EmitBudgetExhaustedAsync`, which means the
+built-in `BUDGET.EXHAUSTED` alert rule (Wave C.4) could never fire in
+production — the alert plane's budget rule was wired to an unreachable emitter
+this whole time. The emission now lives where exhaustion is actually decided:
+`RunningSpendBudgetGuard`'s deny path, best-effort, scope-per-denial. The
+`Adl:BudgetOwnerId` single-user fallback the activity carried is not lost
+either — `CheckLimitsActivity` (which IS on the loop's graph) already reads
+the same key for the dispatch ceiling, and the guard reads it server-side.

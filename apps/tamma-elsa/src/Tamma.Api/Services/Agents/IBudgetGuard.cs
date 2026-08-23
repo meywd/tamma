@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.ADL;
 using Tamma.Api.Services.Diagnostics;
@@ -118,6 +119,7 @@ public sealed class RunningSpendBudgetGuard : IBudgetGuard
     private readonly IDiagnosticsService _diagnostics;
     private readonly IConfiguration? _configuration;
     private readonly ILogger<RunningSpendBudgetGuard>? _logger;
+    private readonly IServiceScopeFactory? _scopeFactory;
     private int _unmeteredWarned;
 
     /// <summary>
@@ -140,11 +142,13 @@ public sealed class RunningSpendBudgetGuard : IBudgetGuard
     public RunningSpendBudgetGuard(
         IDiagnosticsService diagnostics,
         IConfiguration? configuration = null,
-        ILogger<RunningSpendBudgetGuard>? logger = null)
+        ILogger<RunningSpendBudgetGuard>? logger = null,
+        IServiceScopeFactory? scopeFactory = null)
     {
         _diagnostics = diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
         _configuration = configuration;
         _logger = logger;
+        _scopeFactory = scopeFactory;
     }
 
     /// <inheritdoc />
@@ -191,6 +195,15 @@ public sealed class RunningSpendBudgetGuard : IBudgetGuard
             if (decision.Stop)
             {
                 _logger?.LogWarning("Model call denied — {Reason}", decision.Reason);
+
+                // BUDGET.EXHAUSTED into the DCB stream, HERE, because this is where
+                // exhaustion is actually decided (2026-08-20). The event's only
+                // previous emitter was CheckBudgetActivity, which is wired to no
+                // workflow graph — so the built-in budget alert rule could never
+                // fire in production. Best-effort: an alert emission must never
+                // turn a clean denial into an error.
+                await EmitBudgetExhaustedAsync(owner.Value, status.Spent, status.Limit, ct)
+                    .ConfigureAwait(false);
                 return false;
             }
 
@@ -218,4 +231,30 @@ public sealed class RunningSpendBudgetGuard : IBudgetGuard
 
     private static Guid? ParseOwner(string? raw)
         => Guid.TryParse(raw, out var g) && g != Guid.Empty ? g : null;
+
+    private async Task EmitBudgetExhaustedAsync(Guid owner, decimal spent, decimal limit, CancellationToken ct)
+    {
+        if (_scopeFactory is null) return;
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var emitter = scope.ServiceProvider
+                .GetService<Tamma.Data.Abstractions.IAlertEventEmitter>();
+            if (emitter is null) return;
+
+            await emitter.EmitBudgetExhaustedAsync(new Tamma.Data.Abstractions.BudgetExhaustedEvent(
+                TenantId: owner,
+                CorrelationId: string.Empty,
+                Source: "api",
+                Spent: spent,
+                Limit: limit,
+                ProviderName: "(pre-call)",
+                WorkflowInstanceId: string.Empty), ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "BUDGET.EXHAUSTED emission failed; the denial stands");
+        }
+    }
 }

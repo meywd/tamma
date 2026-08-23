@@ -196,7 +196,7 @@ internal static class MediatedLlmText
     /// <summary>
     /// Resolve the tenant scope (X-Tenant-Id) from the workflow's ambient tenant
     /// variable. Mirrors the established convention used by
-    /// <c>EventPersistenceMiddleware</c> / <c>CheckBudgetActivity</c>: read
+    /// <c>EventPersistenceMiddleware</c> (and the deleted CheckBudgetActivity did): read
     /// <c>TenantId</c> (legacy fallback <c>AccountId</c>) as an <c>object</c> —
     /// it may be stamped as a <see cref="Guid"/> or a string — and coerce to a
     /// canonical Guid string. An empty / unset / non-Guid value ⇒ platform scope

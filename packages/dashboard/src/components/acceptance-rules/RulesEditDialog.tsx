@@ -32,7 +32,14 @@ import type {
   ReviewerMode,
 } from '../../services/admin/acceptance-rules-api-client.js';
 
-const MIN_AUTONOMY = 70;
+// Slider AFFORDANCE only — the validated range is owned by the server
+// (Tamma.Core AutonomyDial, [1,100] since Story 43-11 widened Min 70 -> 1;
+// its doc forbids restating a bound as validation anywhere else, and the old
+// `70` here was exactly that: it silently made the widened range unreachable
+// from the UI, so nobody could dial below 70 despite 18 backend routes
+// accepting it). The server rejects an out-of-range value regardless of what
+// this slider allows.
+const MIN_AUTONOMY = 1;
 const MAX_AUTONOMY = 100;
 
 export interface RulesEditDialogProps {

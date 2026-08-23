@@ -681,7 +681,10 @@ builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IBudgetGuard>(sp =>
     new Tamma.Api.Services.Agents.RunningSpendBudgetGuard(
         sp.GetRequiredService<Tamma.Api.Services.Diagnostics.IDiagnosticsService>(),
         sp.GetService<IConfiguration>(),
-        sp.GetService<ILogger<Tamma.Api.Services.Agents.RunningSpendBudgetGuard>>()));
+        sp.GetService<ILogger<Tamma.Api.Services.Agents.RunningSpendBudgetGuard>>(),
+        // For the BUDGET.EXHAUSTED alert emission — the emitter is scoped, the
+        // guard is a singleton, so it opens a scope per denial (denials are rare).
+        sp.GetService<IServiceScopeFactory>()));
 builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.ILlmCallResponseMapper,
     Tamma.Api.Services.Agents.LlmCallResponseMapper>();
 

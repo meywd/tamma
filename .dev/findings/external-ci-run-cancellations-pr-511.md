@@ -68,3 +68,18 @@ product), cancelling runs it believes are stale or superseded.
 3. If the canceller is the deployed Tamma instance, file the bug against its
    run-supersession logic (it must never cancel runs on a repo/branch it does
    not own the head of) before re-enabling that automation against this repo.
+
+
+## 2026-08-21 — cases 7 and 8, and the mitigation's bootstrap gap
+
+Two more mid-run cancellations with the same fingerprint (no superseding push,
+run's commit still the branch tip): PR #514's run 32320039806 (.NET Tests
+killed 25 minutes into an otherwise-green board, 2026-08-20 01:35 UTC) and PR
+#515's run 32465179879 (same job, 25 minutes in, 2026-08-21 09:17 UTC).
+
+Mitigation shipped in PR #515: `.github/workflows/ci-rescue.yml` re-runs an
+externally-cancelled run automatically (guards: conclusion=cancelled only,
+commit still the branch tip, max two rescues). NOTE its bootstrap gap:
+workflow_run triggers execute from the DEFAULT branch's file, so the rescue is
+inert until merged — it could not protect its own PR. Identification of the
+canceller still needs the org audit log (`action:workflow_run`), owner-only.
